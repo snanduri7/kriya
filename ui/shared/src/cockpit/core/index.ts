@@ -37,5 +37,5 @@ export * from './describe';
 export { ExecutionProvider, useExecution, foldRecords, deriveOutcome, notificationFor, progressCounts, activeReview, activeRuntimeCommandReview, createDecider, createRuntimeCommandDecider, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type PendingReview, type PendingRuntimeCommandReview, type DecisionState, type RuntimeDecisionState, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';
 export { RunMemoryLine, memoryRunIdOf } from './RunMemoryLine';
 export { ReplayNotice } from './ReplayNotice';
-export { BeforeAfter, recoveryText, summaryRows } from './BeforeAfter';
+export { BeforeAfter, deliveredLabel, recoveryText, securityText, summaryRows, writeScopeOf } from './BeforeAfter';
 export { RunCapabilityStrip, runCapabilityCells, type RunCapabilityInput, type RunCell } from './RunCapabilityStrip';

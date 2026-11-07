@@ -1,4 +1,4 @@
-import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, RunCapabilityStrip, RunMemoryLine, ReplayNotice, memoryRunIdOf, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, writeScopeOf, RunCapabilityStrip, RunMemoryLine, ReplayNotice, memoryRunIdOf, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
 const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
@@ -44,7 +44,8 @@ function Overview() {
                 health,
               })} /> : null}
               <BeforeAfter request={goalTitle(ctx.displayGoal)} files={files} groups={groups ? groups.groups : null}
-                concluded={records ? ofKind(records, 'attempt.concluded').map((r) => payloadOf(r).succeeded === true) : []} opened={records ? ofKind(records, 'attempt.opened').length : 0} />
+                concluded={records ? ofKind(records, 'attempt.concluded').map((r) => payloadOf(r).succeeded === true) : []} opened={records ? ofKind(records, 'attempt.opened').length : 0}
+                securityScope={records ? writeScopeOf(ofKind(records, 'authority.snapshot').map((r) => payloadOf(r))) : null} />
 
               <h3>What changed</h3>
               {files === null ? <p className="muted">The changed files come from this run&apos;s evidence, which is not readable here (see Technical status).</p>
