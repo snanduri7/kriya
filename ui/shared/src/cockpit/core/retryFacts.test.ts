@@ -1,7 +1,7 @@
 /** Retry facts: the closed table, the open-finding rule and the exhausted-run numbers all come from recorded gate types; nothing is guessed. */
 import { describe, expect, it } from 'vitest';
 import { exhaustedSummary } from './presentation';
-import { attemptRejections, rejectionOf, retrySummary } from './retryFacts';
+import { attemptRejections, failedDuring, rejectionOf, retrySummary } from './retryFacts';
 import type { EvidenceRecord } from './records';
 
 const rec = (seq: number, kind: string, attempt: number, payload: Record<string, unknown> = {}): EvidenceRecord => ({ seq, kind, attempt_number: attempt, t_wall: `2026-10-15T10:00:${String(seq).padStart(2, '0')}Z`, payload } as unknown as EvidenceRecord);
@@ -37,5 +37,20 @@ describe('attempt rejections and the exhausted-run summary', () => {
     expect(exhaustedSummary('quality_gate_failed', 'COMMITTED', { attempts: 5, dominant: 'x' })).toBeNull();
     expect(exhaustedSummary('quality_gate_failed', 'NOT_COMMITTED', null)).toBeNull();
     expect(exhaustedSummary('quality_gate_failed', null, { attempts: 5, dominant: 'x' })).toBeNull();
+  });
+});
+
+describe('failedDuring: where the run stopped, from the LAST recorded failed gate (closed table)', () => {
+  it('the two walkthrough failures: infrastructure -> Verification, an unresolved requirement -> Requirement check', () => {
+    expect(failedDuring([opened(1, 1), failed(2, 1, 'compile'), opened(3, 2), failed(4, 2, 'verification_infrastructure_failure')])).toBe('Verification');
+    expect(failedDuring([opened(1, 1), failed(2, 1, 'targeted_test'), opened(3, 2), failed(4, 2, 'requirements_unresolved')])).toBe('Requirement check');
+  });
+  it('is the last failed gate, not the first; a delivery failure says Generating the change', () => {
+    expect(failedDuring([failed(1, 1, 'compile'), failed(2, 2, 'operation_contract')])).toBe('Generating the change');
+  });
+  it('a gate type the table does not know, or no failed gate at all, gives no sentence (never a guess)', () => {
+    expect(failedDuring([failed(1, 1, 'something_new')])).toBeNull();
+    expect(failedDuring([opened(1, 1)])).toBeNull();
+    expect(failedDuring([rec(1, 'mirror.gate_outcome', 1, { index: 1, type: 'compile', success: true, attempt: 1 })])).toBeNull();
   });
 });

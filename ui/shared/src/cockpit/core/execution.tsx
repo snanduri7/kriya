@@ -109,6 +109,12 @@ export interface ExecutionApi {
   locked: boolean;
   /** Clear a finished run's banner. */
   dismiss(): void;
+  /** A finished run's "New Goal": the goal box is cleared and ready (the earlier run stays in history). */
+  newGoal(): void;
+  /** A finished run's "Run again" / "Edit goal and retry": the SAME goal stays in the box, ready to run or edit. */
+  runAgain(): void;
+  /** "Run again": start a new run with the SAME goal now (a new run, never a resume). */
+  rerun(): void;
   /** The state of the decision being taken on the pending review (never more than one in flight). */
   decision: DecisionState;
   /** Approve or reject the review that is pending NOW, with the identities Kriya gave it; Kriya validates them and the waiting run - not this window - continues. */
@@ -527,12 +533,29 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const canDecideRuntimeCommand = typeof port?.decideRuntimeCommand === 'function';
 
   const dismiss = useCallback(() => setRun((prev) => (prev && prev.stage === 'finished' ? null : prev)), []);
+  // NEW GOAL = a blank composer; RUN AGAIN = the same goal (B3). Both only act on a FINISHED run: a run in progress is never discarded by either.
+  const newGoal = useCallback(() => {
+    if (runRef.current && runRef.current.stage !== 'finished') return;
+    setGoal('');
+    setRefusal(null);
+    setRun(null);
+  }, []);
+  const rerun = useCallback(() => {
+    if (runRef.current && runRef.current.stage !== 'finished') return;
+    setRun(null);          // the composer is what shows a refusal, so the finished card is replaced first; start() runs with the goal still in the box
+    void start();
+  }, [start]);
+  const runAgain = useCallback(() => {
+    if (runRef.current && runRef.current.stage !== 'finished') return;
+    setRefusal(null);
+    setRun(null);
+  }, []);
   const locked = starting || (run !== null && run.stage !== 'finished');
   // A decision belongs to the review it was taken on: a new review (a retry produced a new candidate) starts with no decision.
   // A runtime decision belongs to the review it was taken on: a new review starts with none.
   const shownRuntimeDecision = useMemo<RuntimeDecisionState>(() => (runtimeDecision.state === 'idle' || (run?.runtimeReview && runtimeDecision.reviewId !== run.runtimeReview.review_id) ? { state: 'idle' } : runtimeDecision), [runtimeDecision, run]);
   const shownDecision = useMemo<DecisionState>(() => (decision.state === 'idle' || (run?.review && decision.reviewId !== run.review.review_id) ? { state: 'idle' } : decision), [decision, run]);
-  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, decision: shownDecision, decide, canDecideRuntimeCommand, runtimeDecision: shownRuntimeDecision, decideRuntimeCommand }),
-    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, shownDecision, decide, canDecideRuntimeCommand, shownRuntimeDecision, decideRuntimeCommand]);
+  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, newGoal, runAgain, rerun, decision: shownDecision, decide, canDecideRuntimeCommand, runtimeDecision: shownRuntimeDecision, decideRuntimeCommand }),
+    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, newGoal, runAgain, rerun, shownDecision, decide, canDecideRuntimeCommand, shownRuntimeDecision, decideRuntimeCommand]);
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 }

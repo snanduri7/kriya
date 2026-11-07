@@ -45,10 +45,11 @@ export function GoalComposer({ summary, onDetails, onRecheck }: { summary: Readi
   const approvalOnly = approvalBlocker !== undefined && others.length === 0;
   return (
     <section className="ck-composer" aria-label="Start a run">
-      <h2>What do you want Kriya to do?</h2>
+      <h2 className="ck-composer-title">Enter a goal</h2>
+      <p className="muted ck-composer-sub">What do you want Kriya to do?</p>
       <label htmlFor="ck-goal" className="sr-only">Engineering goal</label>
-      <textarea id="ck-goal" className="ck-goal" rows={4} value={ex.goal} maxLength={GOAL_MAX} disabled={ex.locked} aria-describedby="ck-goal-help"
-        placeholder="Describe the engineering task, e.g. “Add a clamp(value, low, high) function with tests.”"
+      <textarea id="ck-goal" className="ck-goal" rows={6} value={ex.goal} maxLength={GOAL_MAX} disabled={ex.locked} aria-describedby="ck-goal-help" autoFocus
+        placeholder="Describe what you want Kriya to build, change, fix, or verify…"
         onChange={(e) => ex.setGoal(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); } }} />
       {approvalBlocker ? <ConfigApprovalCard onDetails={onDetails} onApproved={() => setApprovedNote(true)} /> : null}
@@ -75,7 +76,7 @@ export function GoalComposer({ summary, onDetails, onRecheck }: { summary: Readi
         <kbd className="ck-kbd" aria-hidden="true">{START_SHORTCUT}</kbd>
         <button type="button" className="ck-primary ck-cta ck-start" disabled={!canStart || ex.starting} aria-describedby="ck-start-why" onClick={submit}>{ex.starting ? 'Starting…' : 'Start Run'}</button>
       </div>
-      <div id="ck-start-why" className="muted small" role="status">{approvalOnly && !(approvedNote && ex.preflightStale) ? 'Approve the configuration above to start.' : reason && !blocked ? reason : ''}</div>
+      <div id="ck-start-why" className={empty && !blocked && !approvalOnly ? 'ck-hint' : 'muted small'} role="status">{approvalOnly && !(approvedNote && ex.preflightStale) ? 'Approve the configuration above to start.' : reason && !blocked ? reason : ''}</div>
     </section>
   );
 }

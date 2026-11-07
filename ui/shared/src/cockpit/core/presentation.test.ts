@@ -1,7 +1,7 @@
 /** The presentation layer: authoritative facts -> user meaning. Every mapping is pinned, and so is every refusal to map. */
 import { describe, expect, it } from 'vitest';
 import type { RunSummary } from '../../model/kup';
-import { NEUTRAL_TITLE, OVERALL_GOAL_PENDING, activityText, changeSummary, currentChangeVerification, formatDuration, goalTitle, runCard, verificationGroups } from './presentation';
+import { NEUTRAL_TITLE, OVERALL_GOAL_PENDING, activityText, changeSummary, currentChangeVerification, formatDuration, goalTitle, runCard, verificationGroups, failureWordsFor } from './presentation';
 import type { GateFact } from './runFacts';
 
 const gate = (type: string, passed: boolean | null, tests: GateFact['tests'] = null, requirementsVerified: boolean | null = null): GateFact => ({ type, passed, tests, requirementsVerified });
@@ -123,7 +123,7 @@ describe('activityText and changeSummary', () => {
   });
 });
 
-import { eventClock, failureSummary, formalRequirementStatus, humanTimeline, primaryVerification, userEvidence } from './presentation';
+import { eventClock, exhaustedSummary, failureSummary, formalRequirementStatus, humanTimeline, primaryVerification, userEvidence } from './presentation';
 import type { RunEvent } from '../../model/kup';
 
 const ev = (kind: string, created_at: number, extra: Partial<RunEvent> = {}): RunEvent => ({ kind, created_at, ...extra }) as RunEvent;
@@ -192,6 +192,20 @@ describe('failureSummary: words for a failure, the raw record stays technical', 
     expect(failureSummary('something_new', 'NO_COMMIT')).toBe('Kriya could not complete the requested change. Nothing was applied to your folder.');
     expect(failureSummary(null, undefined)).toBe('Kriya could not complete the requested change.');
     expect(failureSummary('quality_gate_failed', 'COMMITTED')).not.toMatch(/Nothing was applied/);
+  });
+  it('B6/B9: the two walkthrough failures are explained from Kriya\'s own typed category, in plain words, without a cause the renderer made up', () => {
+    // run 304c8d2e (environment_failure) and run 299efed7 (requirements_unresolved): both used to read "Kriya could not complete the requested change."
+    expect(failureSummary('environment_failure', 'NOT_COMMITTED')).toBe('Kriya could not finish verifying the change because one of its verification steps could not run in its own environment. This is not a finding about your code. Nothing was applied to your folder.');
+    expect(failureSummary('requirements_unresolved', 'NOT_COMMITTED')).toBe('Kriya rejected the change because a requirement from your goal was not verified. Nothing was applied to your folder.');
+    expect(failureSummary('quality_gates_exhausted', 'NOT_COMMITTED')).toBe(failureSummary('quality_gate_failed', 'NOT_COMMITTED'));   // the backend's REAL spelling reads like the older one
+    expect(failureWordsFor('something_new')).toBeNull();
+    expect(exhaustedSummary('quality_gates_exhausted', 'NOT_COMMITTED', { attempts: 5, dominant: 'A test failed.' })).toContain('after 5 attempts');
+  });
+  it('every category the backend can report is either worded or deliberately generic (a mechanism word is never shown)', () => {
+    for (const c of ['quality_gates_exhausted', 'requirements_unresolved', 'environment_failure', 'no_progress', 'generation_budget_exhausted', 'containment_setup_failed', 'workspace_commit_failed', 'verification_tree_mutated']) {
+      expect(failureWordsFor(c)).toBeTruthy();
+      expect(failureSummary(c, 'NOT_COMMITTED')).not.toMatch(/category|exit code|NOT_COMMITTED|digest|seq|_/i);
+    }
   });
   it('never carries a mechanism word', () => {
     for (const c of ['quality_gate_failed', 'x', null]) expect(failureSummary(c as string, 'NOT_COMMITTED')).not.toMatch(/category|exit code|NOT_COMMITTED|digest|seq/i);

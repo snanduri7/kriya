@@ -309,8 +309,35 @@ export const runtimeStopWords = (code: string | null | undefined): RuntimeStopWo
  */
 /** The final message for a run that used its attempts and was never applied: how many attempts, the finding about the candidate that was still open (recorded gate type -> fixed words), and that
  * nothing was applied. null unless the run really had several recorded attempts and nothing was committed - the caller then keeps the generic sentence. Raw codes stay under Technical reason. */
+/**
+ * The terminal failure category Kriya itself reports (kriya/workflow/outcome.py ``terminal_failure_category``, a stable short string for WHY a run failed) in plain words. A CLOSED table: a category
+ * not listed here gets the generic sentence, never a guess. The renderer reads Kriya's own typed answer; it does not work out a cause. (`quality_gate_failed` is the older spelling of
+ * `quality_gates_exhausted`; both read the same.)
+ */
+const FAILURE_WORDS: Record<string, string> = {
+  quality_gates_exhausted: "The change did not pass Kriya's checks (build, tests or verification).",
+  quality_gate_failed: "The change did not pass Kriya's checks (build, tests or verification).",
+  requirements_unresolved: 'Kriya rejected the change because a requirement from your goal was not verified.',
+  environment_failure: "Kriya could not finish verifying the change because one of its verification steps could not run in its own environment. This is not a finding about your code.",
+  no_progress: 'Kriya stopped because repeated attempts were not getting closer to a passing change.',
+  generation_budget_exhausted: 'Kriya ran out of the time allowed for this run.',
+  containment_setup_failed: 'Kriya could not set up the isolated environment it runs checks in, so it ran nothing.',
+  workspace_commit_failed: 'The verified change could not be written to your folder.',
+  candidate_independent_deterministic_failure: 'A check failed for a reason unrelated to the change (a configuration problem), so retrying would not help.',
+  regression_unattributed: 'Existing tests failed and Kriya could not tie the failure to the change.',
+  final_review_refused: 'The final review refused the change.',
+  verification_tree_mutated: 'The files changed while Kriya was verifying them, so the result could not be trusted.',
+  file_integrity_unsupported: 'Kriya cannot edit one of the target files byte-exactly, so it did not touch it.',
+  static_analysis_blocked: 'A static analysis check blocked the change.',
+  static_analysis_unavailable: 'A required static analysis check could not run.',
+  static_analysis_unknown: 'A static analysis check gave no usable answer.',
+  plan_scope_revision_required: 'The change needed something the approved plan did not allow.',
+  unauthorized_generation_target: 'The change tried to touch a file it was not allowed to touch.',
+};
+export const failureWordsFor = (category: string | null | undefined): string | null => (category ? FAILURE_WORDS[category] ?? null : null);
+
 export function exhaustedSummary(category: string | null | undefined, commitResult: string | null | undefined, retry: { attempts: number; dominant: string | null } | null): string | null {
-  if (category !== 'quality_gate_failed' || retry === null || retry.attempts < 2) return null;
+  if ((category !== 'quality_gate_failed' && category !== 'quality_gates_exhausted') || retry === null || retry.attempts < 2) return null;
   if (commitResult === 'COMMITTED' || commitResult === null || commitResult === undefined) return null;
   const head = retry.dominant !== null ? `Kriya could not produce a valid change after ${retry.attempts} attempts. ${retry.dominant}` : `Kriya could not produce a change that passed validation after ${retry.attempts} attempts.`;
   return `${head} Nothing was applied to your project.`;
@@ -318,6 +345,5 @@ export function exhaustedSummary(category: string | null | undefined, commitResu
 
 export function failureSummary(category: string | null | undefined, commitResult: string | null | undefined): string {
   const nothingApplied = commitResult !== null && commitResult !== undefined && commitResult !== 'COMMITTED' ? ' Nothing was applied to your folder.' : '';
-  if (category === 'quality_gate_failed') return `The change did not pass Kriya's checks (build, tests or verification).${nothingApplied}`;
-  return `Kriya could not complete the requested change.${nothingApplied}`;
+  return `${failureWordsFor(category) ?? 'Kriya could not complete the requested change.'}${nothingApplied}`;
 }

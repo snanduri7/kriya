@@ -21,6 +21,20 @@ const FINDING_WORDS: Record<string, string> = {
   goal_spec_compliance: 'The change does not match the planned change.',
 };
 
+/** Where in the run the LAST failed gate sits, in plain words, from the recorded gate type (closed table; null when the type is not listed). */
+const STAGE_WORDS: Record<string, string> = {
+  compile: 'Build', pom_semantic_validation: 'Build', test: 'Tests', tests: 'Tests', targeted_test: 'Tests', regression_test: 'Tests',
+  run_verification: 'Running the application', run_verification_hung: 'Running the application',
+  verification_infrastructure_failure: 'Verification', requirements_unresolved: 'Requirement check', goal_spec_compliance: 'Goal check',
+  static_rule_violation: 'Safety check', semantic_safety: 'Safety check', static_analysis: 'Safety check', stack_contract: 'Stack check',
+  anchored_edit: 'Generating the change', attribution_rejected: 'Generating the change', diagnosis_mismatch: 'Generating the change', misdirected_edit: 'Generating the change',
+  no_op_edit: 'Generating the change', operation_contract: 'Generating the change', structural_corruption: 'Generating the change', unaddressed_error_location: 'Generating the change',
+};
+export function failedDuring(records: readonly EvidenceRecord[]): string | null {
+  const failed = gateRows([...records].sort((a, b) => a.seq - b.seq)).filter((g) => g.success === false && g.purpose !== 'named_test_closure_base_run');
+  return failed.length ? STAGE_WORDS[failed[failed.length - 1]!.type] ?? null : null;
+}
+
 export interface Rejection { words: string | null; delivery: boolean }
 /** The words for a recorded failed gate type, or null when the closed table does not know it. */
 export function rejectionOf(type: string): Rejection | null {

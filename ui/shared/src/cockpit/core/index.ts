@@ -16,7 +16,7 @@ export { ApprovalReview, useChangeReview, CHANGED_MESSAGE } from './ApprovalRevi
 export { ActivityDrawer, useRunRecords } from './ActivityDrawer';
 export { conciseWhy, renderMarkdown, reviewBody } from './markdown';
 export { activityEntries, activityFromLaunch, activityFromRecords, resultsFromRecords, type ActivityEntry } from './activity';
-export { attemptRejections, rejectionOf, retrySummary, DELIVERY_WORDS, type AttemptRejection, type RetrySummary } from './retryFacts';
+export { attemptRejections, failedDuring, rejectionOf, retrySummary, DELIVERY_WORDS, type AttemptRejection, type RetrySummary } from './retryFacts';
 export { RuntimeCommandReviewCard, useRuntimeCommandReview, displayCommand, displayArg } from './RuntimeCommandReview';
 export { FileDiff } from './ChangeDiff';
 export * from './presentation';

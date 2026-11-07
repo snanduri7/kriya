@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failureSummary, retrySummary, runtimeStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { RevealButton } from './WorkspaceFacts';
+import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -106,6 +107,7 @@ function Stopped({ phase }: { phase: RunPhase }) {
           <p className="muted small">{outcome.approval.kind === 'change_approval' ? 'Kriya could not hold this review open for you, so it stopped instead of deciding: nothing was approved on your behalf. Start a new run to review the change again.' : 'Nothing was approved on your behalf. A desktop run stops at a decision it cannot take for you.'}</p>
         </div>
       ) : null}
+      {recorded && failedDuring(recorded) ? <p data-testid="failed-during"><span className="muted">Failed during</span><br />{failedDuring(recorded)}</p> : null}
       <p data-testid="last-stage"><span className="muted">How far it got</span><br />{phase.lastStage ? <span>{phase.lastStage}</span> : <span>It stopped before any work was recorded.</span>}</p>
       {outcome.declined.length ? <p className="muted small">Decisions declined, nothing approved (the run proceeded without them): {outcome.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</p> : null}
       <details className="ck-tech">
@@ -124,7 +126,6 @@ export function CurrentRun() {
   const go = useNavigate();
   const run = ex.run;
   const [activityOpen, setActivityOpen] = useState(false);
-  const desktop = useProvider().desktop;
   const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished', run?.status?.launch.ended?.at ?? null);
   if (!run) return null;
   const phase = runPhase(run);
@@ -139,7 +140,6 @@ export function CurrentRun() {
     if (tab) dispatch({ type: 'centralTab', tab });
     go(RUN_DOCUMENTS_PAGE);
   };
-  const openProject = desktop?.revealWorkspace ? () => { void desktop.revealWorkspace!(); } : null;
   const heading = finished ? (phase.state === 'COMPLETED' ? 'Run completed' : phase.state === 'STOPPED' ? 'Run stopped' : 'Run failed') : finishing ? 'Finishing your change' : phase.label;
   return (
     <section className="ck-current" aria-label="Current run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-state={phase.state} data-timing={JSON.stringify(run.timing)}>
@@ -180,16 +180,19 @@ export function CurrentRun() {
       {run.progress.error ? <div className="muted small" role="note">Live records could not be read: {run.progress.error}</div> : null}
       {run.statusError ? <div className="muted small" role="alert">Launch status unreadable: {run.statusError.code}: {run.statusError.message}</div> : null}
       {activityOpen ? <ActivityDrawer launchId={run.launchId} onClose={() => setActivityOpen(false)} /> : null}
+      {finished && phase.state !== 'COMPLETED' ? <h4 className="ck-action-sub" data-testid="what-you-can-do">What you can do</h4> : null}
       <div className="ck-current-actions">
         {!activityOpen ? <button type="button" className="ck-quiet" onClick={() => setActivityOpen(true)}>Show Activity</button> : null}
         {finished ? (
           <>
-            {phase.state === 'COMPLETED' && openProject ? <button type="button" onClick={openProject}>Open Project</button> : null}
+            <RevealButton />
             {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
             {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.validation)}>View Verification</button> : <button type="button" onClick={() => viewDetails()}>View Failure Details</button>}
             {phase.state !== 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
             <span className="grow" />
-            <button type="button" className="ck-primary" onClick={ex.dismiss}>New Goal</button>
+            {phase.state !== 'COMPLETED' ? <button type="button" className="ck-primary" onClick={ex.rerun}>Run again</button> : null}
+            {phase.state !== 'COMPLETED' ? <button type="button" onClick={ex.runAgain}>Edit goal and retry</button> : null}
+            <button type="button" className={phase.state === 'COMPLETED' ? 'ck-primary' : undefined} onClick={ex.newGoal}>New Goal</button>
           </>
         ) : <button type="button" onClick={() => viewDetails()}>View Details</button>}
       </div>

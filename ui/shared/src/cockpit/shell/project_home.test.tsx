@@ -231,6 +231,70 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     expect(await screen.findByRole('textbox', { name: 'Engineering goal' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Current run' })).toBeNull();
   });
+
+  it('A1: a finished run offers "Reveal in Finder" under its own name - there is no ambiguous "Open Project" that secretly reveals - and says why when the host cannot', async () => {
+    const { host, run } = await startRun({ outcome: 'success' });
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
+    expect(within(run).queryByRole('button', { name: 'Open Project' })).toBeNull();
+    fireEvent.click(within(run).getByRole('button', { name: 'Reveal in Finder' }));
+    await waitFor(() => expect(host.workspaceCalls).toContain('reveal'));
+    host.workspace.revealWorkspace = async () => ({ revealed: false, reason: 'the folder is no longer there' });
+    fireEvent.click(within(run).getByRole('button', { name: 'Reveal in Finder' }));
+    expect(await within(run).findByText('Could not reveal: the folder is no longer there')).toBeInTheDocument();
+  });
+});
+
+describe('B2. the terminal result appears in the same card, on the same page, with no refresh or navigation', () => {
+  it.each(['success', 'failure'] as const)('a %s replaces the live view in place: the page is still Project, the live activity line is gone and the result is on screen', async (outcome) => {
+    const { host, run } = await startRun({ outcome });
+    expect(within(run).getByTestId('current-activity')).toBeInTheDocument();
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(run).toHaveAttribute('data-outcome', outcome));
+    expect(page()).toBe('project');                                           // no navigation was needed
+    expect(within(run).queryByTestId('current-activity')).toBeNull();
+    expect(within(run).getByRole('heading', { level: 2 })).toHaveTextContent(outcome === 'success' ? 'Run completed' : 'Run failed');
+  });
+});
+
+describe('B10. a failed run says what happened and what the person can do', () => {
+  it('shows "What you can do" with Run again (a NEW run, same goal), Edit goal and retry, Reveal in Finder and View Failure Details - and Run again really starts another run', async () => {
+    const { host, run } = await startRun({ outcome: 'failure' });
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'failure'));
+    expect(within(run).getByTestId('what-you-can-do')).toHaveTextContent('What you can do');
+    for (const name of ['Run again', 'Edit goal and retry', 'Reveal in Finder', 'View Failure Details', 'New Goal']) expect(within(run).getByRole('button', { name })).toBeInTheDocument();
+    expect(within(run).getByTestId('failure-summary').textContent).toMatch(/Kriya could not complete|did not pass/);   // words, not a reason code
+    fireEvent.click(within(run).getByRole('button', { name: 'Run again' }));
+    const next = await current();
+    await waitFor(() => expect(next).toHaveAttribute('data-stage', expect.not.stringMatching(/^finished$/)));   // a second run is in progress with the goal that was already entered
+  });
+  it('a successful run has no "What you can do" block (nothing went wrong) and no Run again', async () => {
+    const { host, run } = await startRun({ outcome: 'success' });
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
+    expect(within(run).queryByTestId('what-you-can-do')).toBeNull();
+    expect(within(run).queryByRole('button', { name: 'Run again' })).toBeNull();
+  });
+});
+
+describe('A6. "View readiness details" is never a dead control', () => {
+  it('opens the Project details panel and brings it into view (it sits below the run, recent runs, memory and security)', async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoViewStub(this: Element) { scrolled.push(this); };
+    try {
+      await openProject();
+      await screen.findAllByText(/^✓ Ready/);
+      const panel = screen.getByText('Project details').closest('details')!;
+      expect(panel.open).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: 'View readiness details' }));
+      await waitFor(() => expect(panel.open).toBe(true));
+      expect(scrolled).toContain(panel);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
 });
 
 describe('L/O. Runs is history; the existing diagnostics are one level deeper, not removed', () => {

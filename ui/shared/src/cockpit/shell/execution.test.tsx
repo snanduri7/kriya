@@ -363,6 +363,8 @@ describe('Start Run', () => {
     };
     expect(await endOnce()).toBeGreaterThanOrEqual(2); // silence is confirmed by two consecutive polls
     fireEvent.click(within(await banner()).getByRole('button', { name: 'New Goal' }));
+    await typeGoal(); // New Goal starts with a BLANK composer (B3): a second goal is entered, not inherited
+    await screen.findAllByText(/^✓ Ready/);
     expect(await endOnce()).toBeGreaterThanOrEqual(2); // the second launch is not "pre-confirmed" by the first one's leftover signature
   });
 
@@ -387,7 +389,33 @@ describe('Start Run', () => {
     await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'finished'));
     fireEvent.click(within(bar).getByRole('button', { name: 'New Goal' }));
     expect(screen.queryByRole('region', { name: 'Current run' })).toBeNull();
-    expect(startButton()).toBeEnabled();
+    expect(await goalBox()).toHaveValue('');    // B3: the previous goal is not left in the box
+    expect(startButton()).toBeDisabled();
+    await typeGoal('Add a second function with a test.');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+  });
+
+  it('B3: New Goal blanks the composer and focuses it; Edit goal and retry keeps the previous goal in the box; a run in progress is never discarded by either', async () => {
+    const { host } = await openRunPanel({ execution: { outcome: 'failure' } });
+    await typeGoal('Add a farewell method with a JUnit test.');
+    await screen.findAllByText(/^✓ Ready/);
+    fireEvent.click(startButton());
+    const bar = await banner();
+    expect(within(bar).queryByRole('button', { name: 'New Goal' })).toBeNull();     // still running: no way to discard it
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'finished'));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Edit goal and retry' }));
+    expect(await goalBox()).toHaveValue('Add a farewell method with a JUnit test.');
+    expect(await goalBox()).toHaveFocus();
+  });
+
+  it('B3: the composer is the dominant, focused first action: heading "Enter a goal", focus in the goal box, and the reason Start is off is not muted', async () => {
+    await openRunPanel();
+    expect(await screen.findByRole('heading', { name: 'Enter a goal' })).toBeInTheDocument();
+    expect(await goalBox()).toHaveFocus();
+    expect(await goalBox()).toHaveAttribute('placeholder', 'Describe what you want Kriya to build, change, fix, or verify…');
+    await screen.findAllByText(/^✓ Ready/);
+    expect(screen.getByText('Enter a goal to start.')).toHaveClass('ck-hint');
   });
 });
 
