@@ -95,7 +95,7 @@ def test_the_engine_injects_every_design_stage_collaborator(tmp_path):
     engine = _engine(tmp_path)
     deps = engine._work_unit_deps()
     assert not_injected(deps) == []
-    assert len(design_stage_fields()) == 61
+    assert len(design_stage_fields()) == 65
     assert (deps.planner, deps.architect, deps.skill_gap_agent, deps.llm, deps.engineering_triage) == (
         engine.planner, engine.architect, engine.skill_gap_agent, engine.llm, engine.engineering_triage)
     assert deps.registry is engine.kernel.registry and deps.config is engine.kernel.config
