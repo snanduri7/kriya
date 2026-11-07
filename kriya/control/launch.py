@@ -277,6 +277,7 @@ class LaunchSession:
             "failure_category": _text(result.get("failure_category")), "trace_run_id": trace_id,
             "error": redact_text(message)[:400] if message else None,  # S20r: redacted, then cut
             "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
+            **_membership_stop_field(result),
         })
         if self.review_channel is not None:
             self.review_channel.close()
@@ -285,6 +286,23 @@ class LaunchSession:
 
 def _text(value: Any) -> Optional[str]:
     return value if isinstance(value, str) else None
+
+
+MEMBERSHIP_STOP_MAX_NAMES = 5
+MEMBERSHIP_STOP_MAX_NAME_LENGTH = 120
+
+
+def _membership_stop_field(result: Dict[str, Any]) -> Dict[str, Any]:
+    """The TYPED reason a run was refused because the repository layer could not tell which files belong to the project (``membership_authority_unavailable_result``): its own reason code and the
+    bounded NAMES of the workspace entries in the way (top-level names, never paths, redacted, never the message text). A run that stopped before it had a trace row (the folder was already not empty
+    when it started) leaves no other typed record of this, and the desktop must not read the cause out of the ``error`` sentence. ``{}`` when the result carries no such stop. The launch record's
+    ``ended`` allows additional properties, so this is additive (older readers ignore it)."""
+    stop = result.get("membership_authority")
+    if not isinstance(stop, dict) or not isinstance(stop.get("reason_code"), str):
+        return {}
+    raw = stop.get("paths")
+    names = [redact_text(name)[:MEMBERSHIP_STOP_MAX_NAME_LENGTH] for name in (raw if isinstance(raw, list) else []) if isinstance(name, str)][:MEMBERSHIP_STOP_MAX_NAMES]
+    return {"membership_authority": {"reason_code": stop["reason_code"], "paths": names}}
 
 
 # -- the one active launch of this process ----------------------------------------------------------------------------------------------

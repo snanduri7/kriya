@@ -307,6 +307,15 @@ export const runtimeStopWords = (code: string | null | undefined): RuntimeStopWo
  * A run Kriya refused to START because the repository layer could not tell which files belong to the project (`membership_authority.unavailable`; kriya/repository/bound_tree.py). Only the repository
  * layer's own reason code, recorded on the run event, selects the words, and the blocking entry NAMES are the ones the backend recorded (bounded there; shown bounded here). Nothing is parsed from text.
  */
+/** The typed membership stop on a launch record's `ended` section (additive field written by the backend: the repository layer's reason code and the bounded entry NAMES). null when absent or malformed. */
+export interface MembershipStop { code: string; paths: string[] }
+export function membershipStopOf(ended: unknown): MembershipStop | null {
+  const stop = typeof ended === 'object' && ended !== null ? (ended as { membership_authority?: unknown }).membership_authority : undefined;
+  if (typeof stop !== 'object' || stop === null) return null;
+  const { reason_code: code, paths } = stop as { reason_code?: unknown; paths?: unknown };
+  if (typeof code !== 'string') return null;
+  return { code, paths: Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : [] };
+}
 export interface MembershipStopWords { title: string; body: string; names: string | null; action: string; note: string }
 const MAX_NAMES_SHOWN = 5;
 const MAX_NAME_LENGTH = 60;

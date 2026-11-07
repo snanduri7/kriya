@@ -1,11 +1,11 @@
 /**
  * GREENFIELD-OS-METADATA-BLOCKS-FIRST-RUN-001 (UI half): a run Kriya refused to START because a new project folder holds files it does not own gets its OWN customer-facing card. The words are
  * selected by the repository layer's reason code recorded on the run's `membership_authority.unavailable` event, and the blocking names are the ones the backend recorded; the renderer never
- * parses text and never guesses a cause (a run with a different stop, or no such event, keeps its generic sentence).
+ * parses text and never guesses a cause (a run with a different stop, or no such field, keeps its generic sentence).
  */
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { membershipStopWords } from '../core';
+import { membershipStopOf, membershipStopWords } from '../core';
 import { renderWorkspaceShell } from '../testing/harness';
 
 const banner = () => screen.findByRole('region', { name: 'Current run' });
@@ -42,7 +42,7 @@ describe('the refused-to-start card', () => {
     expect(within(card).queryByTestId('membership-stop-names')).toBeNull();
   });
 
-  it('a run with no such recorded event keeps the generic failure sentence (the renderer does not infer the reason)', async () => {
+  it('a run with no such typed field keeps the generic failure sentence (the renderer does not infer the reason)', async () => {
     const bar = await refused();
     expect(await within(bar).findByTestId('failure-summary')).toBeInTheDocument();
     expect(within(bar).queryByTestId('membership-stop')).toBeNull();
@@ -62,5 +62,16 @@ describe('membershipStopWords', () => {
     const long = membershipStopWords('BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY', ['x'.repeat(200)])!.names!;
     expect(long.length).toBeLessThan(90);
     expect(long.endsWith('…')).toBe(true);
+  });
+});
+
+describe('membershipStopOf', () => {
+  it('reads only a well-formed typed field from the launch record', () => {
+    expect(membershipStopOf({ membership_authority: { reason_code: 'BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY', paths: ['a', 3, 'b'] } })).toEqual({ code: 'BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY', paths: ['a', 'b'] });
+    expect(membershipStopOf({ membership_authority: { reason_code: 'X', paths: 'README.md' } })).toEqual({ code: 'X', paths: [] });
+    for (const bad of [null, undefined, 'x', {}, { membership_authority: null }, { membership_authority: 'x' }, { membership_authority: { paths: ['a'] } }, { membership_authority: { reason_code: 7 } }]) expect(membershipStopOf(bad), JSON.stringify(bad)).toBeNull();
+  });
+  it('never reads the cause out of the error sentence', () => {
+    expect(membershipStopOf({ error: 'BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY: /x is not a Git repository and already holds README.md' })).toBeNull();
   });
 });

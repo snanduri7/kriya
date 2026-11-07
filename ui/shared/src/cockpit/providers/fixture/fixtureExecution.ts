@@ -367,6 +367,7 @@ export class FixtureExecution {
       at: '2026-10-10T10:12:00+00:00', exit_code: refused ? 2 : ok ? 0 : 1, workflow_status: approval || rejected ? null : refused ? 'refused' : ok ? 'success' : 'failure',
       quality_gates_passed: refused || rejected ? false : ok, failure_category: outcome === 'failure' ? 'quality_gate_failed' : null, trace_run_id: refused || approval ? null : LAUNCHED_TRACE_ID,
       error: refused ? 'another Kriya run already owns this folder' : approval ? 'Aborted!' : outcome === 'failure' ? 'Failed to create an isolated generation sandbox (fixture)' : null, note: 'copied from the workflow\'s own result; the RunRecord, evidence store and trace row are the outcome authority',
+      ...(outcome === 'failure' && this.options.membershipStop ? { membership_authority: { reason_code: 'BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY', paths: this.options.membershipStop.paths } } : {}),
     } : null;
     const pending = this.pendingReview();
     return {
@@ -433,12 +434,6 @@ export class FixtureExecution {
     if (this.reviewStatus !== 'PENDING') return no('ALREADY_DECIDED', `this review is already ${this.reviewStatus.toLowerCase()}`);
     this.reviewStatus = request.decision === 'approve' ? 'APPROVED' : 'REJECTED';
     return { accepted: true, code: 'ACCEPTED', message: `${request.decision} recorded for review ${request.review_id}; the waiting run records it and continues`, launch_id: LAUNCH_ID, review_id: this.reviewId(), decision: request.decision, decided_at: '2026-10-10T10:11:30+00:00' };
-  }
-
-  /** The `run_events` section of the launched run's detail: only the membership stop is ever scripted. */
-  runEvents(): Json | null {
-    if (this.outcome !== 'failure' || !this.options.membershipStop || this.frame < 4) return null;
-    return { availability: 'recorded', provenance: 'derived:runs.run_events', reason: null, data: [{ kind: 'membership_authority.unavailable', attempt: 0, source: 'workflow.run_generation_workflow', authority: 'authoritative', message: 'AUTHORITY_EXECUTION_UNAVAILABLE: the repository membership authority could not decide which files belong to this workspace', details: { reason_code: 'AUTHORITY_EXECUTION_UNAVAILABLE', membership_reason_code: 'BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY', stage: 'development', paths: this.options.membershipStop.paths } }] };
   }
 
   /** The `application_outcome` section of the launched run's detail: EXECUTED (from the approved commands' recorded steps) only after the runtime commands were approved, otherwise nothing is claimed. */

@@ -249,3 +249,50 @@ def test_a_refused_real_run_records_the_blocking_names_on_its_run_event(tmp_path
     events = [e for e in recorded if e.kind == "membership_authority.unavailable"]
     assert len(events) == 1 and events[0].details["membership_reason_code"] == NEW_CODE
     assert events[0].details["paths"] == ["README.md"]                                                 # the exempt .DS_Store is not named as blocking
+
+
+# ---- the typed reason the launch record carries (a pre-start refusal has no trace row, and the desktop must not read the cause out of a sentence) ------------------------
+def _finish(tmp_path, result):
+    from kriya.context.workspace_identity import canonical_workspace, workspace_identity
+    from kriya.control.launch import LaunchSession
+
+    workspace = tmp_path / "proj"
+    workspace.mkdir(parents=True)
+    canonical = canonical_workspace(str(workspace))
+    session = LaunchSession(canonical, workspace_identity(canonical), "20261107T080000-abcdef01", "goal", {"ready": True}, {})
+    session.open()
+    session.finish(1, result, None)
+    return session._record["ended"]
+
+
+def _stop_result(paths):
+    from kriya.workflow.authority_bundle import membership_authority_unavailable_result
+
+    return membership_authority_unavailable_result(BoundTreeError(NEW_CODE, "detail naming /a/b/c", tuple(paths)))
+
+
+def test_the_launch_record_carries_the_typed_membership_stop_with_bounded_names(tmp_path):
+    ended = _finish(tmp_path, _stop_result(["README.md", "notes.txt"]))
+    assert ended["membership_authority"] == {"reason_code": NEW_CODE, "paths": ["README.md", "notes.txt"]}
+    assert ended["failure_category"] == "verification_authority_unavailable"                  # the existing category is unchanged
+
+
+def test_the_launch_record_bounds_and_never_leaks_the_message_text_or_a_path(tmp_path):
+    many = [f"f{n}.txt" for n in range(9)] + ["z" * 500]
+    ended = _finish(tmp_path / "a", _stop_result(many))
+    assert ended["membership_authority"]["paths"] == ["f0.txt", "f1.txt", "f2.txt", "f3.txt", "f4.txt"]
+    assert "detail naming" not in str(ended["membership_authority"])
+    long_one = _finish(tmp_path / "b", _stop_result(["z" * 500]))["membership_authority"]["paths"][0]
+    assert len(long_one) == 120
+
+
+@pytest.mark.parametrize("result", [{"status": "failure"}, {"status": "failure", "membership_authority": "BOUND_TREE"}, {"status": "failure", "membership_authority": {"paths": ["x"]}},
+                                    {"status": "failure", "membership_authority": {"reason_code": 7, "paths": ["x"]}}])
+def test_a_result_without_a_well_formed_membership_stop_adds_no_field(tmp_path, result):
+    assert "membership_authority" not in _finish(tmp_path, result)
+
+
+def test_a_malformed_name_list_yields_an_empty_one_not_an_error(tmp_path):
+    ended = _finish(tmp_path, {"status": "failure", "membership_authority": {"reason_code": NEW_CODE, "paths": ["ok", 3, None, {"a": 1}]}})
+    assert ended["membership_authority"] == {"reason_code": NEW_CODE, "paths": ["ok"]}
+    assert _finish(tmp_path / "c", {"status": "failure", "membership_authority": {"reason_code": NEW_CODE, "paths": "README.md"}})["membership_authority"]["paths"] == []

@@ -1,6 +1,6 @@
 import { OpenInEditorButton, RevealButton } from './WorkspaceFacts';
 import { folderFact } from './Readiness';
-import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopWords, useMembershipStop, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -88,9 +88,8 @@ function Stopped({ phase }: { phase: RunPhase }) {
   const appData = application && (application.state === 'ready' || application.state === 'degraded') ? application.data : null;
   const blockedCode = appData?.status === 'NOT_APPLICABLE' && typeof appData.blocked_reason_code === 'string' ? appData.blocked_reason_code : null;
   const blocked = outcome.kind === 'failure' ? runtimeStopWords(blockedCode) : null;
-  // Why Kriya refused to START (an unowned file in a new project folder): the repository layer's recorded reason code and entry names, read from the run's recorded events.
-  const membership = useMembershipStop(outcome.traceRunId, outcome.kind === 'failure' && run.timing.refreshedAt !== null);
-  const membershipData = membership && (membership.state === 'ready' || membership.state === 'degraded') ? membership.data : null;
+  // Why Kriya refused to START (an unowned file in a new project folder): the repository layer's typed reason code and entry names on the launch record; nothing is read out of the error sentence.
+  const membershipData = outcome.kind === 'failure' ? membershipStopOf(run.status?.launch.ended) : null;
   const refusedToStart = membershipData ? membershipStopWords(membershipData.code, membershipData.paths) : null;
   // How many attempts the run used and what the last unresolved finding was (recorded gate types only): the exhausted-run sentence. Nothing here reads model prose.
   const records = useRunRecords(run.launchId, outcome.traceRunId, true, run.timing.refreshedAt !== null, run.progress.lastSeq);
