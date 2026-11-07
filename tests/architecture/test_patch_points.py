@@ -775,7 +775,7 @@ E9_ATTEMPT_CALLABLES = {
     "async _resolve_runtime_verification_grade": "(ctx, state, contract_verdict, grade_kwargs, *, run_result=None)",
     "_deterministic_result_provenance_field": "(verification_authority, passed)",  # WAVE8 OI-56: the projection takes the authoritative verdict
     "_prepare_finite_command_runtime_artifacts": "(resolved_run_commands, validator, ctx, state)",
-    "_raise_runtime_verification_infrastructure_failure": "(state, run_result, commands)",
+    "_raise_runtime_verification_infrastructure_failure": "(state, run_result, commands, *, required=True)",  # B6: additive keyword, fail-closed default
     "_raise_candidate_runtime_entrypoint_failure": "(state, run_result, commands, entrypoint)",
     "_apply_runtime_verification_contract": "(commands, input_channel)",
     "_run_verification_basis_hash": "(ctx, state)",

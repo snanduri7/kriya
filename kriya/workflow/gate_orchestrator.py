@@ -1125,6 +1125,15 @@ async def _run_executing_candidate_gates(
                 judgment = dict(judgment)
                 judgment["should_run"] = False
                 judgment["run_commands"] = None
+            if _judged_test_command_is_owned_by_the_test_gate(ctx, judgment):
+                # B6 (walkthrough run 304c8d2e): the judge's inferred command is a TEST command and the goal has no runtime obligation - the test gate above already ran and owns it.
+                deps.logger.info(
+                    "Run-verification judge inferred a test command (%s) for a goal with no runtime obligation - the test gate owns that verification, not executing it as a runtime check.",
+                    judgment.get("run_commands"),
+                )
+                judgment = dict(judgment)
+                judgment["should_run"] = False
+                judgment["run_commands"] = None
             if ctx.runtime_verification_required and not judgment.get("should_run"):
                 message = deps._required_runtime_verification_missing_message(judgment)
                 failure = Failure(
@@ -1737,6 +1746,18 @@ async def _as_developer(deps: GateDeps, awaitable: Any) -> Any:
 
     with model_role("developer"):
         return await awaitable
+
+
+def _judged_test_command_is_owned_by_the_test_gate(ctx: Any, judgment: Dict[str, Any]) -> bool:
+    """B6 (walkthrough run 304c8d2e): True when the Run Verification Judge inferred a sequence that is purely a TEST command (``python -m pytest ...``, ``mvn test``) for a goal that carries NO
+    runtime obligation. A test command is not an application's runtime behaviour: the candidate-gate test run owns that verification and already ran in this attempt, so executing it again as a
+    model-chosen "runtime check" only adds a second environment that can fail independently of the candidate (the measured run: pytest missing from the contained runtime venv stopped a run
+    whose build and tests had passed). Consulted by the ORDINARY candidate-gate path only: a verification-only (direct) unit exists to run exactly such a command as its declared verification
+    (pinned by the ``d_deterministic_test_*`` cases), and a REQUIRED runtime check is never suppressed by it."""
+    return bool(
+        judgment.get("should_run") and not ctx.runtime_verification_required
+        and deterministic_sequence_kind(judgment.get("run_commands") or []) == "test"
+    )
 
 
 def _stop_on_environment_gate_result(state: RunState, result: Any, gate: str) -> None:

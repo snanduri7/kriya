@@ -181,6 +181,9 @@ async def test_f1_residual_control_a_deterministic_rerun_that_executed_keeps_its
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_x.py").write_text(TEST_FAILS)
     ctx, _developer, run_verifier = _mutating_ctx(tmp_path, RUN_PYTEST, grades=[])
+    # B6 (2026-11-07): a test command the judge INFERS for a goal with no runtime obligation is owned by the test gate and not executed as a runtime check
+    # (tests/test_b6_optional_runtime_verification.py). This control is about the process-exit authority of a REQUIRED runtime sequence, so the check is declared required.
+    ctx.runtime_verification_required = True
 
     def _fix_the_test(worktree):
         with open(f"{worktree}/tests/test_x.py", "w", encoding="utf-8") as handle:

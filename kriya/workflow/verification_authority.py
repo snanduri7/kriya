@@ -5,6 +5,7 @@ status.  Their quiet-success output must not be reinterpreted as a behavioral
 failure by an LLM grader.  Application execution remains semantic and is not
 classified here.
 """
+import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -22,6 +23,11 @@ _GRADLE_BUILD_TASKS = {
     "compilekotlin", "test", "testclasses",
 }
 _CARGO_BUILD_TASKS = {"build", "check", "test"}
+
+
+# One Python interpreter by name: ``python``, ``python3``, a version-suffixed ``python3.14`` / ``python3.9.7`` (what ``sys.executable`` is spelled as when the host has no bare ``python``
+# on PATH, kriya.workflow.file_resolution._resolve_run_command), optionally ``.exe``. Nothing else: ``pythonx``, ``python3.`` and ``python3.14-config`` are not interpreters.
+_PYTHON_INTERPRETER_NAME = re.compile(r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?")
 
 
 def _non_option_tokens(command: List[str], start: int = 1) -> List[str]:
@@ -72,7 +78,7 @@ def deterministic_verification_kind(command: List[str]) -> Optional[str]:
 
     if executable in {"pytest", "py.test"}:
         return "test"
-    if executable in {"python", "python3"} and len(command) >= 3 and command[1] == "-m":
+    if _PYTHON_INTERPRETER_NAME.fullmatch(executable) and len(command) >= 3 and command[1] == "-m":
         module = command[2].lower()
         if module in {"pytest", "unittest"}:
             return "test"

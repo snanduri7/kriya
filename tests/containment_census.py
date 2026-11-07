@@ -37,6 +37,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_b2c_jvm_acceptance.py': ('N', 'M'),
  'tests/test_b2cov_claim_strength.py': ('S', 'M'),
  'tests/test_b3_human_acceptance.py': ('S', 'M'),
+ 'tests/test_b6_optional_runtime_verification.py': ('S', 'M'),
  'tests/test_backend_final_closure_005_git_metadata.py': ('S', 'M'),
  'tests/test_backend_final_closure_005_partial_no_change.py': ('S', 'M'),
  'tests/test_backend_final_closure_005_verification_owner_reopen.py': ('S', 'M'),

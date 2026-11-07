@@ -1950,9 +1950,10 @@ def _raise_runtime_verification_infrastructure_failure(
     state: GenerationState,
     run_result: Dict[str, Any],
     commands: List[List[str]],
-) -> None:
+    *, required: bool = True,
+) -> Optional[bool]:
     """The body is kriya/workflow/runtime_verification.py (E9); its collaborators are resolved here, at call time (_runtime_deps)."""
-    return runtime_verification._raise_runtime_verification_infrastructure_failure(_runtime_deps(), state, run_result, commands)
+    return runtime_verification._raise_runtime_verification_infrastructure_failure(_runtime_deps(), state, run_result, commands, required=required)
 
 
 def _raise_candidate_runtime_entrypoint_failure(

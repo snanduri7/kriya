@@ -445,11 +445,26 @@ def _prepare_finite_command_runtime_artifacts(
         raise QualityGateFailure(failure)
 
 
+def _note_optional_runtime_check_unobserved(deps: RuntimeDeps, state: RunState, reason: str, run_result: Dict[str, Any], commands: List[List[str]]) -> None:
+    """B6 (walkthrough run 304c8d2e): an OPTIONAL runtime check (``runtime_verification_required`` False: the goal's own contract asks for no observable execution, the judge merely inferred
+    one) that could not run because the verifier's own environment failed observed NOTHING about the candidate, and nothing required it. It is recorded as an unobserved optional check -
+    ``run_verification_declined``, exactly the OI-55 precedent for an optional check that does not run - plus a run event naming the reason, and the attempt continues to its other gates. It
+    is never graded and never a failure of the candidate; the build and test gates that did run remain the authority. A REQUIRED check does not come here: it stops the run, unchanged."""
+    deps.logger.warning("Optional runtime verification could not run (%s); recorded as unobserved, the attempt continues.", reason)
+    state.run_verification_declined = True
+    state.record_event(RunEvent(
+        kind="runtime_verification.unobserved", attempt=state.attempt_number, source="runtime_verification", authority=EventAuthority.AUXILIARY,
+        message=f"optional runtime verification could not run: {reason}",
+        details={"required": False, "reason": reason, "commands": [list(c) for c in commands], "exit_codes": [step.get("exit_code") for step in run_result.get("steps") or []]},
+    ))
+
+
 def _raise_runtime_verification_infrastructure_failure(
     deps: RuntimeDeps, state: RunState,
     run_result: Dict[str, Any],
     commands: List[List[str]],
-) -> None:
+    *, required: bool = True,
+) -> Optional[bool]:
     """Stop application-launch failures before grading/source repair.
 
     Build/test runners are process-based too, but their process status is
@@ -467,9 +482,12 @@ def _raise_runtime_verification_infrastructure_failure(
     take (STOP_ENVIRONMENT: no grading, no Developer retry, no owner
     recovery).
     """
+    if not required and run_result.get("environment_reason_code"):
+        _note_optional_runtime_check_unobserved(deps, state, str(run_result["environment_reason_code"]), run_result, commands)
+        return True
     deps._stop_on_environment_gate_result(state, run_result, "runtime")
     if deterministic_sequence_kind(commands) is not None:
-        return
+        return None
     # D4: a missing entrypoint is owned by whoever chose it (the validator's
     # deterministic diagnosis of the fresh build), not infrastructure by default.
     entrypoint = run_result.get("entrypoint_diagnosis")
@@ -478,7 +496,10 @@ def _raise_runtime_verification_infrastructure_failure(
         deps._raise_candidate_runtime_entrypoint_failure(state, run_result, commands, entrypoint)
     reason = runtime_verification_infrastructure_reason(run_result)
     if reason is None:
-        return
+        return None
+    if not required and ownership is None:
+        _note_optional_runtime_check_unobserved(deps, state, reason, run_result, commands)
+        return True
     if ownership is not None:
         reason = (f"{ownership}: the runtime entrypoint {entrypoint['effective_entrypoint']} "
                   f"(chosen by {entrypoint['effective_entrypoint_provenance']}; declared in source: "
@@ -1717,6 +1738,7 @@ async def _execute_runtime_verification_directly(
         "success": not bool(run_res.get("timed_out")),
     })
     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
+    # The verification-only (direct) path keeps the fail-closed default: its unit exists BECAUSE the approved plan declares verification (REPAIR-003 F1, owner decision 2026-10-10).
     deps._raise_runtime_verification_infrastructure_failure(
         state, run_res, resolved_run_commands,
     )
@@ -1916,9 +1938,10 @@ async def _approve_and_execute_runtime_verification(
                 stdin_payload=rv_stdin_payload,
             )
         clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
-        deps._raise_runtime_verification_infrastructure_failure(
-            state, run_res, resolved_run_commands,
-        )
+        if deps._raise_runtime_verification_infrastructure_failure(
+            state, run_res, resolved_run_commands, required=ctx.runtime_verification_required,
+        ):
+            return    # an OPTIONAL check that could not run: recorded as unobserved, nothing to grade (B6)
         gate_type = (
             "test" if command_verification_kind == "test"
             else "run_verification"
