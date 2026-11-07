@@ -10897,7 +10897,7 @@ async def test_workflow_missing_runtime_entrypoint_stops_without_source_repair(t
         AsyncMock(return_value=mock_self_correction_result),
     ) as mock_self_correction:
         res = await we.run_generation_workflow(
-            goal="Start an embedded Ignite node and verify", workspace_path=str(tmp_path),
+            goal="Start an embedded Ignite node and verify that it prints a verification verdict line when it is run", workspace_path=str(tmp_path),
         )
 
     assert res["quality_gates_passed"] is False
