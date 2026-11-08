@@ -1,62 +1,86 @@
-# Demo flows (prepared 2026-11-07, product/demo-72h) - FUNCTIONALLY WIRED / OWNER VISUAL REVIEW PENDING
+# Demo flows - FUNCTIONALLY WIRED / OWNER VISUAL REVIEW PENDING (rewritten 2026-11-09 for `product/demo-72h` at `15b543b`)
 
-Every duration, file list and count below was MEASURED in a real run on this tree unless it says UNPROVEN. The model is local and non-deterministic: **never rerun an identical failed goal hoping it passes** (use the fallback in each flow).
-Start the app with `handover/PRODUCT-72H/walkthrough/launch.sh` (add `--reset` ONLY before a full pass: it wipes `~/kriya-walkthrough`, including the stored runs the Replay fallback uses).
+Every duration, file list and count below was MEASURED in a real run unless it says UNPROVEN or TESTED. The model is local and non-deterministic: **never rerun an identical failed goal hoping it passes** (use the fallback in each demo). Start the app with `handover/PRODUCT-72H/walkthrough/launch.sh` (add `--reset` ONLY before a full pass: it wipes the walkthrough home including the stored runs the Replay fallback uses; copy `~/kriya-walkthrough/state` first, see Demo 7). Do not run pytest or any Docker work while a live run is active. The flagship acceptance run has its own sheet: `OWNER_LIVE_PROOF.md`.
 
-## 0. Honest-evidence states the audience should see
-- **Requirement truth (new 2026-11-08).** The result's headline is the backend's typed requirement truth. *Completed — verified* + "3 of 3 requirements verified" = every requirement was closed by deterministic evidence (an operator-accepted requirement would read *Completed — requirements resolved* instead, never *verified*) (the hello-world goal below, LIVE). *Changes applied - verification incomplete* + "N of M requirements verified - K unverified" + the unresolved requirements = the change was applied and some requirement has no independent evidence (every goal with a GENERAL behaviour statement, e.g. the greet and percent goals). Say which one you are showing; it is the product telling the truth, not a failure.
-- **Observed output.** Under Verification, *Runtime verification* shows the command Kriya ran, the output it printed and the exit status, from the recorded run (redacted, capped; lost output is said).
-- **How to run** appears on a successful result. It shows a command only when Kriya itself ran the application and saw it succeed; otherwise it says *"Kriya did not run this application, so it has no verified run command."* Both are correct, say which one you are showing.
-- **Requirement verification**: most successful runs still end with their requirement *unverified* (a model's "satisfied" is a claim, not evidence). The Result says "Formal requirement verification" under Verification (collapsed). That is the product telling the truth about evidence; the closer for "a test was added to an existing test file" is fixed, the behaviour closer does not exist yet (registry REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001).
-- The **Kriya Log** tab is Kriya's real application log, not a summary. Activity is the summary.
+## 0. The words on every result (one table, every surface)
+| Backend truth | Words everywhere (card, Runs list, run header, Overview/Replay, Activity, notification) |
+|---|---|
+| every requirement closed by deterministic evidence | **Completed — verified** (+ "N of N requirements verified") |
+| no open requirement, at least one the operator ACCEPTED | **Completed — requirements resolved** (+ "N verified · M accepted by you"); acceptance is never "verified" |
+| some requirement has no independent evidence | **Changes applied — verification incomplete** (+ "N of M verified - K unverified", the unresolved listed) |
+| a requirement contradicted by evidence | a non-success presentation (a quoted runtime mismatch blocks the apply) |
+| a run recorded before the truth event existed | **Completed** (neutral; never "verified") |
 
-## DEMO 1 - GREENFIELD (new project -> watch -> approve -> result)
-- **Start:** `launch.sh` -> Home -> New Project... -> parent `~/kriya-walkthrough/projects` (empty), name `greeter-demo` (a NEW name every pass; never reuse a folder).
+Say which one you are showing: it is the product telling the truth, not a failure. Other honest states: *Observed output* (the command, what it printed, exit status, from the recorded run); *How to run* (a command only when Kriya itself ran the application and saw it succeed, otherwise "Kriya did not run this application, so it has no verified run command."); the **Kriya Log** tab is Kriya's real application log, Activity is the summary.
+
+## DEMO 1 - Greenfield creation
+- **Starting state:** `launch.sh` -> Home -> New Project... -> parent `~/kriya-walkthrough/projects` (empty), name `greeter-demo` (a NEW name every pass, never reuse a folder).
 - **Goal (exact):** `Create greet.py with a function greet(name) that returns "Hello, <name>!" and test_greet.py with two pytest tests for it.`
-- **Expected (MEASURED, 3 live runs):** 100-122 s. Stepper: Planning -> Implementing (the approval card appears here, ~45-70 s in) -> Verifying -> Complete. **Approve & Continue** on the diff. Result: *Changes applied - verification incomplete* (the goal's return value is a placeholder, so the behaviour statement has no deterministic authority: 0 of 1 requirements verified - say so), 2 files created (`greet.py +2 −0`, `test_greet.py +8 −0`), Verification: Build passed, 2 / 2 tests passed. How to run: *no verified run command* (this goal states no runtime obligation). **For a result that reads *Completed — verified* with 3 of 3 verified, use the hello-world variant below.**
-- **Show during the run:** the stepper moving; the dock's **Kriya Log** tab (real lines: model request, "Developer: generating content for 'greet.py'", the REVIEW banner, "Escalating changes to human approval gate").
-- **Open in Finder** shows the two files. Nothing is committed to Git (Kriya never commits your work).
-- **Variant with a verified run command (needs the presenter's click):** goal `Create hello.py. It prints hello world when executed. Include a pytest test for it.` -> after the diff approval the app asks **Continue to Run Approval...**, then a NATIVE confirmation that automation cannot press -> the Runtime row passes -> **How to run** shows `python3 hello.py` with Copy and Open Terminal Here, the headline reads *Completed — verified* with *3 of 3 requirements verified*, and *Runtime verification* shows the observed output `hello world`, exit status 0 (LIVE CLI proof of the closure: `~/kriya-evidence/product-72h-env/closer-live-1`). Backend proof of the recipe: `~/kriya-evidence/product-72h-env/recipe-live-1/` (see SPRINT_LOG section 10). The card shows the effective command (`.kriya/venv/bin/python hello.py`): that is exactly what runs after you approve.
-- **Fallback if the model diverges / fails:** do not rerun. Runs -> open **Replay of Run 1ee786b0** (the same goal, succeeded in the walkthrough state) and say it is a stored real run.
+- **Expected approval:** the change (diff) approval appears ~45-70 s in: **Approve & Continue**. No runtime approval (the goal states no runtime obligation).
+- **Expected files (MEASURED):** `greet.py +2 −0`, `test_greet.py +8 −0`; Build passed, 2 / 2 tests passed. Nothing is committed to Git.
+- **Expected requirement truth:** *Changes applied — verification incomplete*, 0 of 1 requirements verified (the return value is a placeholder: GENERAL behaviour, no deterministic authority). LIVE on the backend (CLI) 2026-11-08; the desktop wording is TESTED (fixtures) and pending the owner's eyes.
+- **Expected runtime evidence:** none; How to run says there is no verified run command.
+- **Expected duration (MEASURED, 3 live runs):** 100-122 s. Stepper: Planning -> Implementing (approval) -> Verifying -> Complete.
+- **Variant with a verified run command (needs your click; the flagship, see `OWNER_LIVE_PROOF.md`):** goal `Create hello.py. It prints hello world when executed. Include a pytest test for it.` -> after the diff approval: **Continue to Run Approval...**, then a NATIVE confirmation showing `.kriya/venv/bin/python hello.py` -> *Completed — verified*, 3 of 3 verified, Observed output `hello world` exit 0, How to run `python3 hello.py` with Copy and Open Terminal Here. Duration 103 s (stored run 4fa0397c); backend proof `~/kriya-evidence/product-72h-env/closer-live-1`, recipe proof `.../recipe-live-1`.
+- **Reset:** a new project name each pass; `launch.sh --reset` for a full reset.
+- **Fallback if the model diverges / fails:** do not rerun. Runs -> **Replay of Run 1ee786b0** (same goal, succeeded) and say it is a stored real run (Demo 7).
 
-## DEMO 2 - SECOND GOAL / CONTINUITY (Kriya sees and edits what it built)
-- **Start:** directly after Demo 1, same project. Click **New Goal** (the box is blank).
+## DEMO 2 - Second-goal continuity (Kriya sees and edits what it built)
+- **Starting state:** directly after Demo 1, same project; click **New Goal** (the box is blank).
 - **Goal (exact):** `Change the greet function in greet.py to return "Hi, <name>!" instead, and update its tests to match.`
-- **Expected (MEASURED live, ~/kriya-evidence/product-72h-env/two-goal-1):** ~90 s. Result: *2 files changed*, `greet.py +1 −1`, `test_greet.py +2 −2`, **no new file**, 2 / 2 tests passed; the folder holds exactly `greet.py` and `test_greet.py`, and `greet.py` now returns `"Hi, {name}!"`. Before the fix a goal like this created a substitute `app.py` (the Planner never saw the first run's file).
+- **Expected approval:** the diff approval.
+- **Expected files (MEASURED, `~/kriya-evidence/product-72h-env/two-goal-1`):** `greet.py +1 −1`, `test_greet.py +2 −2`, NO new file; the folder holds exactly the two files; `greet.py` returns `"Hi, {name}!"`; 2 / 2 tests passed. Before the fix this goal created a substitute `app.py`.
+- **Expected requirement truth:** *Changes applied — verification incomplete* (a general behaviour statement) - UNPROVEN live on this tip (the two-goal runs predate the truth event); expected by the same grammar as Demo 1.
+- **Expected runtime evidence:** none.
+- **Expected duration (MEASURED):** goal 1 2:02, goal 2 1:33 (`two-goal-1`).
 - **What to say:** "Kriya shows the planner and the reviewer the project as it is now - including files it created that Git does not track yet - so the second goal edits the same file."
-- **Fallback:** Replay of the two-goal evidence runs: launch with `KRIYA_STATE_DIR=~/kriya-evidence/product-72h-env/two-goal-1/state` and open the two stored runs in Runs.
+- **Reset:** a new project name. **Fallback:** Replay of the two stored runs: launch with `KRIYA_STATE_DIR=~/kriya-evidence/product-72h-env/two-goal-1/state` and open them in Runs.
 
-## DEMO 3 - BROWNFIELD (existing repo, code intelligence, project memory)
-- **Start:** Open Folder -> `~/kriya-walkthrough/brownfield-python` (a calculator repo, one commit).
-- **Goal 1 (exact):** `Add a function percent(part, whole) to calc.py that returns part as a percentage of whole rounded to one decimal place, and add a pytest test for it.`
-- **Expected (MEASURED 117 s):** diff first, then the result; Project page -> Verified Project Memory: *Learned last run 3* (language Python, build system pip, evidence requirements.txt). The goal names its file, so Code Intelligence finds it.
-- **Goal 2 (reuse):** `Add a function multiply(a, b) to calc.py that returns the product of a and b, and add a pytest test for it.` -> *Reused last run 3*. (The first multiply run in the walkthrough ended in the now-fixed optional-runtime stop, run 304c8d2e; a rerun with this tree is expected to pass but is UNPROVEN live.)
-- **Fallback:** Replay of Run 76123f00 (percent, succeeded).
+## DEMO 3 - Brownfield modification (existing repo, code intelligence)
+- **Starting state:** Open Folder -> `~/kriya-walkthrough/brownfield-python` (a calculator repo, one commit). Open the REAL folder, never a copy.
+- **Goal (exact):** `Add a function percent(part, whole) to calc.py that returns part as a percentage of whole rounded to one decimal place, and add a pytest test for it.`
+- **Expected approval:** the diff approval, then the result.
+- **Expected files:** `calc.py` (the function) and a pytest test; the goal names its file, so Code Intelligence finds it.
+- **Expected requirement truth:** *Changes applied — verification incomplete*: the test-addition requirement closes on before/after evidence, the formula over parameters stays open (deterministic characterization, `tests/test_requirement_truth_characterization.py`; SPRINT_LOG 11). A goal that carries an exact example line (`percent(1, 8) -> 12.5`) would be legitimately verifiable; that is a different goal and is not run here.
+- **Expected runtime evidence:** none (no runtime obligation stated).
+- **Expected duration (MEASURED):** 117 s. Project page -> Verified Project Memory: *Learned last run 3* (language Python, build system pip, evidence requirements.txt).
+- **Reset:** `launch.sh --reset` restores the repo. **Fallback:** Replay of Run 76123f00 (percent, succeeded).
 
-## DEMO 4 - VERIFIED PROJECT MEMORY (learn -> reuse -> stale)
-- Python: runbook section 4. After run 2, in a terminal `echo "# demo" >> ~/kriya-walkthrough/brownfield-python/requirements.txt`, then Project -> the three facts read STALE / EVIDENCE_CHANGED.
-- Java: runbook section 5 (`java-maven`; goals name package and file on purpose). Fallback: Replay of Run bce4bee6 (farewell, succeeded).
-- **Reset:** `launch.sh --reset` (Project Memory starts empty). Say plainly: memory facts are language, build system, release, modules and which gates passed - never commands.
+## DEMO 4 - Verified Project Memory (learn -> reuse -> stale)
+- **Starting state:** right after Demo 3 on the same repo (memory starts empty after `--reset`; say plainly that memory facts are language, build system, release, modules and which gates passed - never commands).
+- **Goal 2 (exact):** `Add a function multiply(a, b) to calc.py that returns the product of a and b, and add a pytest test for it.` -> *Reused last run 3*. (The first multiply run ended in the now-fixed optional-runtime stop, run 304c8d2e; a rerun on this tree is expected to pass but is UNPROVEN live.)
+- **Stale:** in a terminal `echo "# demo" >> ~/kriya-walkthrough/brownfield-python/requirements.txt`, then Project -> the three facts read STALE / EVIDENCE_CHANGED.
+- **Expected approval / files / truth:** as Demo 3 (diff approval; `calc.py` + a test; *verification incomplete*). **Duration:** not measured for multiply.
+- **Java variant:** `java-maven` (runbook section 5; goals name package and file on purpose). Fallback Replay of Run bce4bee6 (farewell, succeeded, 161 s).
+- **Reset:** `launch.sh --reset`. **Fallback:** the stored runs above.
 
-## DEMO 5 - SECURITY (a real refusal, with the reason, no secrets)
-- **Project page -> Security card:** "What Kriya refuses" - live checks of Kriya's real file protections against situations built in a disposable folder (never your project): typed reason code and rule per check, no secret values.
-- **A real refusal in the product:** make a folder that is not empty and not a Git repo: `mkdir /tmp/not-empty && echo hi > /tmp/not-empty/README.md`; Open Folder -> that folder; goal `Create greet.py with a function greet(name)`. Expected (MEASURED): refused before any model call with the card *"Kriya can't start this new project because the folder already contains files that it does not own."*, `In the way: README.md`, nothing created, the README untouched.
-- **Fallback:** the card is deterministic (no model); if it does not appear, open Runs -> the stored refusal.
+## DEMO 5 - Security refusal (a real refusal, with the reason, no secrets)
+- **Starting state:** the Project page -> **Security** card, "What Kriya refuses": live checks of Kriya's real file protections against situations built in a disposable folder (never your project): a typed reason code and rule per check, no secret values.
+- **A real refusal in the product:** `mkdir /tmp/not-empty && echo hi > /tmp/not-empty/README.md`; Open Folder -> that folder; goal `Create greet.py with a function greet(name)`.
+- **Expected (MEASURED):** refused before any model call with *"Kriya can't start this new project because the folder already contains files that it does not own."*, `In the way: README.md`, nothing created, the README untouched. No approval is asked. Deterministic, no model (so no duration to quote).
+- **Reset:** `rm -rf /tmp/not-empty`. **Fallback:** Runs -> the stored refusal.
 
-## DEMO 6 - RECOVERY / CANCEL (real, not fabricated)
-- **Cancel Run:** start any goal, click **Cancel Run** during Planning. Expected (MEASURED, 3 live cancels): exit in under a second, the card says *Cancelled*, the folder is CLEAN (`kriya runs status`), no records, nothing but `.kriya/` untracked. "Cancelled - recovery required" appears only if Kriya itself reports the folder not clean (unit-tested, never produced by a live cancel).
-- **A real failure to explain:** Runs -> open Run 299efed7 (Java `shout`: five attempts, ended `requirements_unresolved` - Kriya refused to call a wrong "upper case" result a success). The plain-language failure card comes first; **View Kriya Log** is the developer-depth action. Replay is labelled *Replay of Run 299efed7 - read from stored evidence, nothing is re-executed*.
+## DEMO 6 - The real Kriya Log, Build and Tests
+- **Starting state:** any live run (Demo 1 is the natural one); the dock tabs are Activity (default), **Kriya Log**, **Build**, **Tests**.
+- **Expected (MEASURED live on the two-goal run):** the Kriya Log is the real per-run application log through a read-only, bounded, twice-redacted KUP read: 16 lines during planning, 51 at the approval, 53 while verifying, 80 at completion; real records (model requests, "Developer: generating content for 'greet.py'", the REVIEW banner, "Escalating changes to human approval gate", "Applied terminally verified sandbox change to workspace", "Work unit 'direct': VERIFIED"). Follows only while at the bottom, Jump to latest, level filter, Copy visible lines; **View Kriya Log** on a failed run. Paths are project-relative or `~` (display only). Build: *Build passed*; Tests: *2 / 2 tests passed* (Demo 1).
+- **Expected approval / files / truth:** those of the run it is shown on. **Duration:** that run's.
+- **Fallback:** open any stored run: its Kriya Log reads the same file from `~/.kriya/logs/runs/<id>/`.
 
-## Replay fallback: honest stored runs
+## DEMO 7 - Replay (stored real runs; nothing is re-executed)
 | Run | What it shows | State directory |
 |---|---|---|
 | 1ee786b0 | Greenfield greet.py + tests, success, 100 s | `~/kriya-walkthrough/state` |
 | 4fa0397c | Greenfield hello world with the runtime-verification approval, success, 103 s | `~/kriya-walkthrough/state` |
 | 76123f00 | Brownfield percent, success, 117 s | `~/kriya-walkthrough/state` |
 | bce4bee6 | Java farewell, success, 161 s | `~/kriya-walkthrough/state` |
-| 299efed7 | Java shout, honest failure (`requirements_unresolved`), 622 s | `~/kriya-walkthrough/state` |
+| 299efed7 | Java shout, honest failure (`requirements_unresolved`: Kriya refused to call a wrong "upper case" result a success), 622 s | `~/kriya-walkthrough/state` |
 | two-goal-1 (2 runs) | Two-goal continuity, both success | `~/kriya-evidence/product-72h-env/two-goal-1/state` |
-Open Runs -> the run: the result is labelled *Replay of Run <id>*; opening it re-executes nothing. `launch.sh --reset` deletes `~/kriya-walkthrough/state`: copy it first (`cp -R ~/kriya-walkthrough/state ~/kriya-evidence/demo-replay-state`) if you want these to survive a reset.
 
-## STRETCH - Confidence pack (PREPARED ONLY, nothing executed)
-Not started: Apache Ignite + Spring XML, Qpid/JMS + custom protocol, Graphify repair. What is KNOWN: the skills `ignite-java17`, `qpid`, `binary-wire-protocol`, `activemq-artemis` ship in `skills/`; the historical goals live in `docs/assurance/` and `handover/` (grep `ignite_qpid_protocol`). What is UNKNOWN and must be decided with the owner before a campaign: the exact repository identities and commits, the goals' final wording, the expected files and preservation contracts, the build/test/runtime commands, the reset procedure and the acceptance rubric. Preparing those from memory would be invention; this section is deliberately a list of open inputs, not a plan.
+- **Expected wording:** these runs were recorded BEFORE the requirement-truth event existed, so the Runs list and Overview say the neutral **Completed**, never "verified" (the fixtures and the closer-live-1 backend run show the truth words).
+- **Expected approval:** none (read-only). **Starting state:** Runs -> the run; the result is labelled *Replay of Run <id> - read from stored evidence, nothing is re-executed*.
+- **Reset hazard:** `launch.sh --reset` deletes `~/kriya-walkthrough/state`: copy it first (`cp -R ~/kriya-walkthrough/state ~/kriya-evidence/demo-replay-state`).
+
+## APPENDIX - Recovery / cancel (real, not fabricated)
+**Cancel Run:** start any goal, click **Cancel Run** during Planning. MEASURED (3 live cancels): exit in under a second, the card says *Cancelled*, the folder is CLEAN (`kriya runs status`), no records, nothing but `.kriya/` untracked. "Cancelled - recovery required" appears only if Kriya itself reports the folder not clean (unit-tested, never produced live). **A real failure to explain:** Runs -> Run 299efed7; the plain-language failure card comes first; **View Kriya Log** is the developer-depth action.
+
+## STRETCH - Confidence pack: see `CONFIDENCE_PACK_PREP.md` (prepared only, nothing executed)
