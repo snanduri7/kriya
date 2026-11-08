@@ -25,12 +25,15 @@ compound statement closes only when every claim it makes is closed.
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from kriya.workflow.contract_compilation import (
     CLOSER_DOCUMENTATION_LIST_ENTRIES,
     CLOSER_DOCUMENTATION_NOT_APPLICABLE,
+    CLOSER_FILE_CREATION,
+    CLOSER_RUNTIME_STDOUT,
     CLOSER_TEST_ADDITION,
     VerificationContract,
     _documentation_list_present,
@@ -39,15 +42,20 @@ from kriya.workflow.contract_compilation import (
 )
 from kriya.workflow.obligations import ObligationLedger, ObligationStatus
 from kriya.workflow.requirements import (
+    BEHAVIOR,
     DOCUMENTATION_CLAIM,
     DOCUMENTATION_ENTRIES_METHOD,
     DOCUMENTATION_METHOD,
+    FILE_CREATION_CLAIM,
+    FILE_CREATION_METHOD,
+    RUNTIME_STDOUT_METHOD,
     TEST_ADDITION_CLAIM,
     TEST_ADDITION_METHOD,
     RequirementSet,
     record_requirement_claim,
     requirement_obligation_id,
 )
+from kriya.workflow.runtime_observation import application_run_observation, normalise_stdout, stdout_equals
 from kriya.workflow.test_delta import added_test_callables
 
 TEST_ADDED = "TEST_ADDED"
@@ -58,6 +66,15 @@ DOCUMENTATION_REFERENT_PRESENT = "DOCUMENTATION_REFERENT_PRESENT"
 DOCUMENTATION_ENTRIES_PRESENT = "DOCUMENTATION_ENTRIES_PRESENT"
 DOCUMENTATION_ENTRIES_MISSING = "DOCUMENTATION_ENTRIES_MISSING"
 DOCUMENTATION_LIST_REMOVED = "DOCUMENTATION_LIST_REMOVED"
+# REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001: the file-creation and runtime-stdout closers' reason codes.
+FILE_CREATED = "FILE_CREATED"
+FILE_NOT_CREATED_BY_CANDIDATE = "FILE_NOT_CREATED_BY_CANDIDATE"
+FILE_CREATION_EVIDENCE_UNAVAILABLE = "FILE_CREATION_EVIDENCE_UNAVAILABLE"
+STDOUT_MATCHED = "STDOUT_MATCHED"
+STDOUT_DIFFERS_QUOTED = "STDOUT_DIFFERS_QUOTED"
+STDOUT_DIFFERS_UNQUOTED = "STDOUT_DIFFERS_UNQUOTED"
+RUNTIME_STDOUT_NO_EVIDENCE_ID = "NO_EVIDENCE_ID"
+MAX_RECORDED_STDOUT = 500
 
 
 _JVM_TEST_ANNOTATION = re.compile(r"@(?:org\.junit\.(?:jupiter\.api\.)?)?(?:Test|ParameterizedTest|RepeatedTest)\b")
@@ -163,6 +180,131 @@ def close_test_addition_requirements(
                                "the pre-run test files and the base test identities are unknown")
         attempts.append(entry)
     return attempts
+
+
+def _required_claims(contract: VerificationContract, requirement_id: str, binding: Any) -> List[str]:
+    return list(binding.detail.get("required_claims") or contract.required_claims_by_requirement()[requirement_id])
+
+
+def _text_sha256(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def close_file_creation_requirements(
+    ledger: ObligationLedger, requirements: RequirementSet, contract: VerificationContract, *,
+    created_paths: Optional[Iterable[str]], present: Callable[[str], bool], source: str, revision: Any,
+) -> List[Dict[str, Any]]:
+    """Record the FILE_CREATION claim of every requirement the contract binds to ``file_creation`` ("Create hello.py."):
+    SATISFIED only when the bound literal path is one the run's RAW CAPTURE proves did not exist before the candidate wrote
+    it (``created_paths``: written paths whose captured original is None) AND ``present`` says the candidate holds it now as
+    a regular file. Never closed by a path that merely exists, a modified path, Git tracking, an untracked file of
+    unknown origin, a similarly named file or another candidate's history. ``created_paths`` None (no capture: the enforce
+    terminal gate) leaves the claim open. A claim that is not closed records nothing (the requirement stays open)."""
+    attempts: List[Dict[str, Any]] = []
+    created = None if created_paths is None else set(created_paths)
+    for requirement_id, binding in contract.binding_closers(CLOSER_FILE_CREATION):
+        requirement = requirements.get(requirement_id)
+        if requirement is None:
+            continue
+        path = binding.detail.get("path")
+        evidence_id = _evidence_id(ledger, requirement_id)
+        entry: Dict[str, Any] = {"requirement": requirement_id, "kind": FILE_CREATION_METHOD, "closed": False, "path": path}
+        if not evidence_id:
+            entry["reason_code"], entry["reason"] = FILE_CREATION_EVIDENCE_UNAVAILABLE, "the verdict has no evidence id to bind to"
+        elif created is None or not isinstance(path, str):
+            entry["reason_code"], entry["reason"] = FILE_CREATION_EVIDENCE_UNAVAILABLE, "no raw capture of the candidate's writes"
+        elif path in created and present(path):
+            record_requirement_claim(
+                ledger, requirements, requirement_id, FILE_CREATION_CLAIM, evidence_id=evidence_id,
+                method=FILE_CREATION_METHOD,
+                detail={"reason_code": FILE_CREATED, "path": path, "requirement_text_sha256": _text_sha256(requirement.text),
+                        "required_claims": _required_claims(contract, requirement_id, binding)},
+                source=source, revision=revision, status=ObligationStatus.SATISFIED)
+            entry.update({"closed": True, "reason_code": FILE_CREATED})
+        else:
+            entry["reason_code"] = FILE_NOT_CREATED_BY_CANDIDATE
+            entry["reason"] = f"{path!r} was not created by this candidate (absent, or it existed before the run)"
+        attempts.append(entry)
+    return attempts
+
+
+def close_runtime_stdout_requirements(
+    ledger: ObligationLedger, requirements: RequirementSet, contract: VerificationContract, *,
+    gate_outcomes: Optional[Sequence[Mapping[str, Any]]], attempt: Any, candidate_root: str,
+    written_files: Iterable[str], source: str, revision: Any,
+) -> List[Dict[str, Any]]:
+    """Record the BEHAVIOR claim of every requirement the contract binds to ``runtime_stdout`` ("It prints hello world when
+    executed."), from the application run Kriya executed on THIS candidate (kriya/workflow/runtime_observation.py: complete
+    stdout, exit 0, the project interpreter running a file the candidate wrote, the candidate's digest unchanged).
+
+    - whole stdout equals the stated literal (one trailing newline normalised, case-sensitive): SATISFIED;
+    - a QUOTED literal, observation available, different stdout: VIOLATED (deterministic counter-evidence);
+    - an UNQUOTED literal, different stdout: INDETERMINATE (open; never a deterministic contradiction);
+    - no usable observation: INDETERMINATE with the closed reason code (it also withdraws an earlier judgment of this
+      producer on the same candidate). Nothing is read from a gate that is not the application run, so an unrelated passed
+      gate (a test run, a managed-service probe, another attempt) can never close the requirement."""
+    attempts: List[Dict[str, Any]] = []
+    observation = None
+    for requirement_id, binding in contract.binding_closers(CLOSER_RUNTIME_STDOUT):
+        requirement = requirements.get(requirement_id)
+        if requirement is None:
+            continue
+        expected, quoted = binding.detail.get("expected"), bool(binding.detail.get("quoted"))
+        subject = binding.detail.get("subject_path")
+        entry: Dict[str, Any] = {"requirement": requirement_id, "kind": RUNTIME_STDOUT_METHOD, "closed": False,
+                                 "expected": expected, "quoted": quoted}
+        evidence_id = _evidence_id(ledger, requirement_id)
+        if not evidence_id:
+            entry["reason_code"] = RUNTIME_STDOUT_NO_EVIDENCE_ID
+            attempts.append(entry)
+            continue
+        if observation is None:
+            observation = application_run_observation(gate_outcomes, attempt, candidate_root=candidate_root,
+                                                      written_files=written_files)
+        base_detail: Dict[str, Any] = {
+            "claim": BEHAVIOR, "expected": expected, "quoted": quoted,
+            "requirement_text_sha256": _text_sha256(requirement.text),
+            "required_claims": _required_claims(contract, requirement_id, binding)}
+        if not isinstance(expected, str) or not observation.available:
+            reason = observation.reason_code if isinstance(expected, str) else "NO_EXPECTED_LITERAL"
+            _record_runtime_judgment(ledger, requirements, requirement_id, evidence_id, ObligationStatus.INDETERMINATE,
+                                     {**base_detail, "reason_code": reason}, source, revision)
+            entry["reason_code"] = reason
+        elif isinstance(subject, str) and observation.script != subject:
+            _record_runtime_judgment(ledger, requirements, requirement_id, evidence_id, ObligationStatus.INDETERMINATE,
+                                     {**base_detail, "reason_code": "SUBJECT_NOT_EXECUTED", "executed": observation.script},
+                                     source, revision)
+            entry["reason_code"] = "SUBJECT_NOT_EXECUTED"
+        else:
+            seen = {"command": list(observation.command), "exit_code": observation.exit_code,
+                    "candidate_digest": observation.candidate_digest,
+                    "observed": normalise_stdout(observation.stdout)[:MAX_RECORDED_STDOUT]}
+            if stdout_equals(observation.stdout, expected):
+                _record_runtime_judgment(ledger, requirements, requirement_id, evidence_id, ObligationStatus.SATISFIED,
+                                         {**base_detail, **seen, "reason_code": STDOUT_MATCHED}, source, revision)
+                entry.update({"closed": True, "reason_code": STDOUT_MATCHED})
+            elif quoted:
+                _record_runtime_judgment(ledger, requirements, requirement_id, evidence_id, ObligationStatus.VIOLATED,
+                                         {**base_detail, **seen, "reason_code": STDOUT_DIFFERS_QUOTED}, source, revision)
+                entry["reason_code"] = STDOUT_DIFFERS_QUOTED
+            else:
+                _record_runtime_judgment(ledger, requirements, requirement_id, evidence_id, ObligationStatus.INDETERMINATE,
+                                         {**base_detail, **seen, "reason_code": STDOUT_DIFFERS_UNQUOTED}, source, revision)
+                entry["reason_code"] = STDOUT_DIFFERS_UNQUOTED
+        attempts.append(entry)
+    return attempts
+
+
+def _record_runtime_judgment(
+    ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, evidence_id: str,
+    status: ObligationStatus, detail: Dict[str, Any], source: str, revision: Any,
+) -> None:
+    from kriya.foundation.redaction import redact_text
+
+    if isinstance(detail.get("observed"), str):
+        detail = {**detail, "observed": redact_text(detail["observed"])}
+    record_requirement_claim(ledger, requirements, requirement_id, BEHAVIOR, evidence_id=evidence_id,
+                             method=RUNTIME_STDOUT_METHOD, detail=detail, source=source, revision=revision, status=status)
 
 
 def close_documentation_requirements(

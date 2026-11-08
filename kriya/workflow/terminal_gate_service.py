@@ -562,6 +562,8 @@ class TerminalGateService:
             from kriya.workflow.file_integrity import VerificationTreeBinding
             from kriya.workflow.requirement_closers import (
                 CONTRACT_CLOSERS,
+                close_requirements_by_file_creation,
+                close_requirements_by_runtime_stdout,
                 closer_call,
                 no_closures,
                 run_requirement_closers,
@@ -641,6 +643,18 @@ class TerminalGateService:
                 "test_addition": contract_group(lambda: closer_call(
                     close_requirements_by_test_addition, ledger, requirement_set, contract,
                     request.candidate_root, request.workspace_path, revision="terminal",
+                )),
+                # REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001: the terminal gate has neither a per-attempt raw
+                # capture of writes nor the units' runtime gate outcomes: both closers get None and close nothing here
+                # (fail closed; the units' own pre-apply boundary is where these two are decided).
+                "file_creation": contract_group(lambda: closer_call(
+                    close_requirements_by_file_creation, ledger, requirement_set, contract,
+                    request.candidate_root, created_paths=None, revision="terminal",
+                )),
+                "runtime_stdout": contract_group(lambda: closer_call(
+                    close_requirements_by_runtime_stdout, ledger, requirement_set, contract,
+                    request.candidate_root, gate_outcomes=None, attempt="terminal", written_files=(),
+                    revision="terminal",
                 )),
                 "documentation": contract_group(lambda: closer_call(
                     close_requirements_by_documentation, ledger, requirement_set, contract,

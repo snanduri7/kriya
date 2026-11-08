@@ -3,6 +3,7 @@
  "gate_outcomes": [
   {
    "attempt": 1,
+   "candidate_digest": "0f1aa1410268f430f3fd871b696d4c4c949489371487ccfacaa3a3ca2e4e61b3",
    "commands": [
     [
      "mvn",
@@ -118,6 +119,7 @@
    "evidence": "mirror.gate_outcome",
    "outcome": {
     "attempt": 1,
+    "candidate_digest": "0f1aa1410268f430f3fd871b696d4c4c949489371487ccfacaa3a3ca2e4e61b3",
     "commands": [
      [
       "mvn",

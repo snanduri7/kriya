@@ -1,5 +1,6 @@
 """REQUIREMENT TRUTH, MEASURED (owner ruling 2026-11-07, "D. RE-MEASURE AFTER CLOSER FIX").
 
+(Updated 2026-11-08, REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001: the file-creation and runtime-stdout closers exist; cases 1/4/5 below are the re-measure with every closer given its evidence.)
 Maps each mandatory requirement's FINAL outcome to ALL_VERIFIED / OPEN_REQUIREMENTS / CONTRADICTED for the representative goals of the walkthrough, with the deterministic closers that exist today:
 the goal's own contract (``compile_verification_contract``: which claims a statement makes and which closers can close each), the model's verdict (MODEL_CLAIMED, so UNVERIFIED by design), and the closers run on real candidate
 content. It PINS what is true now; it changes no policy. The finding it pins: closing the test-addition claim of an existing test file is correct and needed, but a statement that ALSO claims BEHAVIOR
@@ -17,6 +18,7 @@ from kriya.workflow.requirements import (
     record_requirement_verdicts,
     requirement_evidence,
     requirement_outcomes,
+    requirement_truth,
     seed_requirement_obligations,
     statement_origins,
 )
@@ -90,33 +92,73 @@ def test_case_3_java_existing_test_class_gains_a_test_the_claim_closes_but_regre
     assert truth_class(requirement_outcomes(ledger, reqs)) == OPEN_REQUIREMENTS
 
 
-# (1) Greenfield: created files + tests ------------------------------------------------------------------------------------------------------------------------
-def test_case_1_greenfield_a_behaviour_only_statement_has_no_deterministic_closer_and_a_separate_test_statement_closes():
+# (1)/(4)/(5) Greenfield, runtime-observable and substitute-file, with EVERY closer given its evidence (REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001) ----------------
+def _full(goal, tmp_path, *, files, written, created, stdout="hello world\n", run_file="hello.py"):
+    """All closers that exist, each with the evidence a real run of this shape records: the model's UNVERIFIED verdict, the raw capture of the writes, the application run's gate outcome (stamped with the candidate digest),
+    the test-addition record. Returns (contract, ledger, reqs)."""
+    from kriya.config.environment import PROJECT_PYTHON_INTERPRETER
+    from kriya.workflow import requirement_closers as rc
+    from kriya.workflow.runtime_observation import candidate_files_digest
+
+    root = tmp_path / "cand"
+    root.mkdir(exist_ok=True)
+    for name, text in files.items():
+        (root / name).write_text(text)
+    contract, ledger, reqs, _ = _case(goal, test_files=[], created=[w for w in written if w.startswith("test_")])
+    rc.close_requirements_by_file_creation(ledger, reqs, contract, str(root), created_paths=created, revision=1)
+    outcome = {"attempt": 1, "type": "run_verification", "success": True, "graded_by": "deterministic",
+               "candidate_digest": candidate_files_digest(str(root), written),
+               "steps": [{"command": [PROJECT_PYTHON_INTERPRETER, run_file], "exit_code": 0, "stdout": stdout, "stderr": "", "timed_out": False}]}
+    rc.close_requirements_by_runtime_stdout(ledger, reqs, contract, str(root), gate_outcomes=[outcome], attempt=1, written_files=written, revision=1)
+    return contract, ledger, reqs
+
+
+HELLO_FILES = {"hello.py": "print('hello world')\n", "test_hello.py": "def test_x():\n    assert True\n"}
+
+
+def test_case_1_greenfield_create_with_a_formatted_return_value_stays_open():
+    """The usual greenfield wording is ONE compound sentence with a placeholder return value: GENERAL behaviour, and no deterministic authority exists for it."""
     contract, ledger, reqs, _ = _case(GREET, test_files=[])
     assert list(contract.required_claims_by_requirement()["REQ-1"]) == ["BEHAVIOR"] and contract.entry("REQ-1").closers == []
     assert truth_class(requirement_outcomes(ledger, reqs)) == OPEN_REQUIREMENTS
-    contract, ledger, reqs, entries = _case(HELLO, test_files=[], created=["test_hello.py"])
-    outcomes = {rid: outcome.value for rid, outcome in requirement_outcomes(ledger, reqs).items()}
-    assert outcomes == {"REQ-1": "unverified", "REQ-2": "unverified", "REQ-3": "closed_by_evidence"}      # the test statement is VERIFIED; the two behaviour statements are OPEN
+
+
+def test_case_4_the_runtime_observable_goal_is_all_verified_when_the_run_printed_what_the_goal_states(tmp_path):
+    contract, ledger, reqs = _full(HELLO, tmp_path, files=HELLO_FILES, written=["hello.py", "test_hello.py"], created=["hello.py", "test_hello.py"])
+    assert {rid: o.value for rid, o in requirement_outcomes(ledger, reqs).items()} == {"REQ-1": "closed_by_evidence", "REQ-2": "closed_by_evidence", "REQ-3": "closed_by_evidence"}
+    assert truth_class(requirement_outcomes(ledger, reqs)) == ALL_VERIFIED
+    assert requirement_truth(requirement_outcomes(ledger, reqs), reqs)["status"] == ALL_VERIFIED          # the production derivation agrees with this test's own
+
+
+def test_case_4_the_same_goal_with_a_quoted_literal_and_the_wrong_output_is_contradicted(tmp_path):
+    goal = 'Create hello.py. It prints "hello world" when executed. Include a pytest test for it.\n'
+    contract, ledger, reqs = _full(goal, tmp_path, files={**HELLO_FILES, "hello.py": "print('goodbye')\n"}, written=["hello.py", "test_hello.py"],
+                                   created=["hello.py", "test_hello.py"], stdout="goodbye\n")
+    assert {rid: o.value for rid, o in requirement_outcomes(ledger, reqs).items()} == {"REQ-1": "closed_by_evidence", "REQ-2": "violated", "REQ-3": "closed_by_evidence"}
+    assert truth_class(requirement_outcomes(ledger, reqs)) == CONTRADICTED
+    assert requirement_truth(requirement_outcomes(ledger, reqs), reqs)["status"] == CONTRADICTED
+
+
+def test_case_4_the_same_goal_unquoted_with_different_case_is_open_not_contradicted(tmp_path):
+    contract, ledger, reqs = _full(HELLO, tmp_path, files=HELLO_FILES, written=["hello.py", "test_hello.py"], created=["hello.py", "test_hello.py"], stdout="Hello World\n")
+    assert {rid: o.value for rid, o in requirement_outcomes(ledger, reqs).items()} == {"REQ-1": "closed_by_evidence", "REQ-2": "unverified", "REQ-3": "closed_by_evidence"}
     assert truth_class(requirement_outcomes(ledger, reqs)) == OPEN_REQUIREMENTS
 
 
-# (4) runtime-verified goal -------------------------------------------------------------------------------------------------------------------------------------------
-def test_case_4_a_runtime_verified_goal_makes_behaviour_claims_that_no_closer_reads_runtime_evidence_for():
-    contract, ledger, reqs, _ = _case(HELLO, test_files=[], created=["test_hello.py"])
-    for requirement_id in ("REQ-1", "REQ-2"):            # "prints hello world when executed": observable behaviour, the claim a passing runtime check speaks to
-        assert list(contract.required_claims_by_requirement()[requirement_id]) == ["BEHAVIOR"] and contract.entry(requirement_id).closers == []
-    from kriya.workflow import contract_closers, requirement_closers
-
-    for module in (contract_closers, requirement_closers):                                              # TRACED: no requirement closer consumes a run_verification gate outcome
-        assert "run_verification" not in open(module.__file__, encoding="utf-8").read()
+def test_case_5_a_substitute_file_for_a_created_file_leaves_the_creation_requirement_open(tmp_path):
+    """"Create hello.py." - the candidate created hello2.py instead. The creation requirement is OPEN (never verified). "It prints hello world" states what the run executed does, so it closes on the observation;
+    the goal as a whole is OPEN_REQUIREMENTS, which is the truth: the requested file does not exist."""
+    contract, ledger, reqs = _full(HELLO, tmp_path, files={"hello2.py": "print('hello world')\n", "test_hello.py": HELLO_FILES["test_hello.py"]},
+                                   written=["hello2.py", "test_hello.py"], created=["hello2.py", "test_hello.py"], run_file="hello2.py")
+    outcomes = {rid: o.value for rid, o in requirement_outcomes(ledger, reqs).items()}
+    assert outcomes["REQ-1"] == "unverified" and truth_class(requirement_outcomes(ledger, reqs)) == OPEN_REQUIREMENTS
 
 
-# (5) the substitute-file negative control ------------------------------------------------------------------------------------------------------------------------------
-def test_case_5_a_substitute_file_goal_is_open_not_contradicted_and_not_verified():
+def test_case_5_a_substitute_goal_has_no_deterministic_closer_and_is_open():
     contract, ledger, reqs, _ = _case(SUBSTITUTE, test_files=[])
     assert list(contract.required_claims_by_requirement()["REQ-1"]) == ["BEHAVIOR"] and contract.entry("REQ-1").closers == []
     assert truth_class(requirement_outcomes(ledger, reqs)) == OPEN_REQUIREMENTS
+
 
 
 # the classification itself -------------------------------------------------------------------------------------------------------------------------------------------------------

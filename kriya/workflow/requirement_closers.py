@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.acceptance_oracle import bound_acceptance
@@ -472,6 +472,54 @@ def close_requirements_by_test_addition(
     )
 
 
+def created_paths_from_capture(written: Iterable[str], original_raw: Mapping[str, Optional[bytes]]) -> List[str]:
+    """The written paths the run's RAW capture proves did not exist before the candidate wrote them (captured original
+    None). A path with no raw capture is not provable and is left out: never inferred from Git, a plan's "create" action or
+    the file's presence."""
+    return sorted(path for path in set(written) if path in original_raw and original_raw[path] is None)
+
+
+def close_requirements_by_file_creation(
+    ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, *,
+    created_paths: Optional[Iterable[str]], revision: Any,
+) -> List[Dict[str, Any]]:
+    """REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001: "Create hello.py." from the run's raw capture of the
+    candidate's writes and the candidate's own file (kriya/workflow/contract_closers.py). ``created_paths`` None (no capture)
+    closes nothing."""
+    from kriya.workflow.contract_closers import close_file_creation_requirements
+    from kriya.workflow.contract_compilation import CLOSER_FILE_CREATION
+
+    if contract is None or not contract.binding_closers(CLOSER_FILE_CREATION):
+        return []
+    real_root = os.path.realpath(candidate_root)
+
+    def present(path: str) -> bool:
+        full = os.path.join(candidate_root, path)
+        return (not os.path.islink(full) and os.path.isfile(full)
+                and os.path.realpath(full).startswith(real_root + os.sep))
+
+    return close_file_creation_requirements(
+        ledger, requirement_set, contract, created_paths=created_paths, present=present,
+        source="requirement_closure.file_creation", revision=revision)
+
+
+def close_requirements_by_runtime_stdout(
+    ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, *,
+    gate_outcomes: Optional[Sequence[Mapping[str, Any]]], attempt: Any, written_files: Iterable[str], revision: Any,
+) -> List[Dict[str, Any]]:
+    """REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001: "It prints hello world when executed." from the application
+    run Kriya executed on this exact candidate (kriya/workflow/contract_closers.py, kriya/workflow/runtime_observation.py).
+    ``gate_outcomes`` None (the enforce terminal gate has none) closes nothing."""
+    from kriya.workflow.contract_closers import close_runtime_stdout_requirements
+    from kriya.workflow.contract_compilation import CLOSER_RUNTIME_STDOUT
+
+    if contract is None or not contract.binding_closers(CLOSER_RUNTIME_STDOUT):
+        return []
+    return close_runtime_stdout_requirements(
+        ledger, requirement_set, contract, gate_outcomes=gate_outcomes, attempt=attempt, candidate_root=candidate_root,
+        written_files=written_files, source="requirement_closure.runtime_stdout", revision=revision)
+
+
 def close_requirements_by_documentation(
     ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, *, revision: Any,
 ) -> List[Dict[str, Any]]:
@@ -819,7 +867,8 @@ def close_requirements_by_mutation_scope(
     )
 
 
-__all__ = ["CloserDeps", "SCOPE_SUITE_PRESERVATION", "SUITE_BASELINE_FROM_RUN", "SUITE_BASELINE_LAZY_CAPTURE",
+__all__ = ["CloserDeps", "close_requirements_by_file_creation", "close_requirements_by_runtime_stdout",
+           "created_paths_from_capture", "SCOPE_SUITE_PRESERVATION", "SUITE_BASELINE_FROM_RUN", "SUITE_BASELINE_LAZY_CAPTURE",
            "close_requirements_by_api_preservation", "close_requirements_by_documentation",
            "close_requirements_by_file_immutability", "close_requirements_by_mutation_scope",
            "close_requirements_by_suite_preservation", "close_requirements_by_test_addition",
@@ -837,10 +886,11 @@ __all__ = ["CloserDeps", "SCOPE_SUITE_PRESERVATION", "SUITE_BASELINE_FROM_RUN", 
 
 CLOSER_SEQUENCE: Tuple[str, ...] = (
     "mutation_scope", "acceptance", "authority_bundle", "derived_examples", "api_preservation", "test_addition",
-    "documentation", "named_tests", "test_immutability", "file_immutability", "suite_preservation",
+    "file_creation", "runtime_stdout", "documentation", "named_tests", "test_immutability", "file_immutability", "suite_preservation",
 )
 CONTRACT_CLOSERS: Tuple[str, ...] = (
-    "authority_bundle", "derived_examples", "api_preservation", "test_addition", "documentation",
+    "authority_bundle", "derived_examples", "api_preservation", "test_addition", "file_creation", "runtime_stdout",
+    "documentation",
 )
 
 

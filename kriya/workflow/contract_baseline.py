@@ -34,7 +34,9 @@ from kriya.workflow.contract_compilation import (
     CLOSER_DOCUMENTATION_LIST_ENTRIES,
     CLOSER_DOCUMENTATION_NOT_APPLICABLE,
     CLOSER_EXTERNAL_ACCEPTANCE,
+    CLOSER_FILE_CREATION,
     CLOSER_MIGRATION_GATE,
+    CLOSER_RUNTIME_STDOUT,
     CLOSER_TEST_ADDITION,
     STATUS_DISPOSITIONED,
     STATUS_NOT_A_CLAIM,
@@ -45,6 +47,7 @@ from kriya.workflow.requirements import (
     API_PRESERVATION,
     BEHAVIOR,
     DOCUMENTATION_CLAIM,
+    FILE_CREATION_CLAIM,
     FILE_IMMUTABILITY_CLAIM,
     REGRESSION_PRESERVATION,
     TEST_ADDITION_CLAIM,
@@ -259,7 +262,8 @@ def run_baseline_authorities(
             binding = claim_bindings[0] if claim_bindings else None
             judged = [(b, verdicts[b.authority_digest].get(rid, BASELINE_INDETERMINATE)) for b in claim_bindings
                       if b.closer in _AUTHORITY_CLOSERS and b.authority_digest in verdicts]
-            if claim in (TEST_ADDITION_CLAIM, MIGRATION) or (binding is not None and binding.closer in (CLOSER_TEST_ADDITION, CLOSER_MIGRATION_GATE)):
+            if claim in (TEST_ADDITION_CLAIM, FILE_CREATION_CLAIM, MIGRATION) or (binding is not None and binding.closer in (
+                    CLOSER_TEST_ADDITION, CLOSER_MIGRATION_GATE, CLOSER_FILE_CREATION, CLOSER_RUNTIME_STDOUT)):
                 claims[claim] = {"state": BASELINE_MUTATION_REQUIRED, "authority": None,
                                  "why": "the claim asks for a change the baseline cannot carry"}
                 report.mutation_required.setdefault(rid, []).append(claim)

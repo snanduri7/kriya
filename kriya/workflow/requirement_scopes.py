@@ -41,6 +41,7 @@ the recognized preservation/scope vocabulary is a BEHAVIOR claim.
 """
 from __future__ import annotations
 
+import posixpath
 import re
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
@@ -57,6 +58,7 @@ from kriya.workflow.requirements import (
     BEHAVIOR_EXACT,
     BEHAVIOR_GENERAL,
     DOCUMENTATION_CLAIM,
+    FILE_CREATION_CLAIM,
     FILE_IMMUTABILITY_CLAIM,
     MUTATION_SCOPE,
     ORIGIN_CODE_BLOCK,
@@ -75,13 +77,14 @@ from kriya.workflow.requirements import (
     suite_statement_requires_immutability,
 )
 
-SCOPE_RECOGNIZER_VERSION = 1
+SCOPE_RECOGNIZER_VERSION = 2  # 2: the whole-statement FILE_CREATION and runtime-stdout BEHAVIOR recognizers
 
 NON_CLAIM = "NON_CLAIM"
 SUITE_PRESERVATION_SCOPE = "SUITE_PRESERVATION"
 DOCUMENTATION = DOCUMENTATION_CLAIM
 PROCEDURE = "PROCEDURE"
 TEST_ADDITION = TEST_ADDITION_CLAIM
+FILE_CREATION = FILE_CREATION_CLAIM
 MIGRATION = "MIGRATION"
 # Filler a pure documentation statement may carry beside its clause.
 _DOCUMENTATION_FILLER = frozenset({"please", "also", "and", "then", "the", "a", "an", "it", "them", "this", "that",
@@ -413,6 +416,81 @@ def has_test_addition_clause(text: str) -> bool:
     return bool(_TEST_ADDITION.search(prose)) and not _TEST_ADDITION_NEGATED.search(prose)
 
 
+# ------------------------------------------------------------ whole-statement observation grammars
+#
+# Two ANCHORED recognizers (the whole statement must match; anything else - a conjunction, a placeholder, a formula, a
+# second clause - is NOT recognized and the statement keeps the claims it had). Both are closed grammars over the user's
+# own words; neither consults a model, the repository or a run. If uncertain: do not bind.
+
+_PATH_TOKEN = r"[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+"
+_CREATE_STATEMENT = re.compile(
+    r"^\s*(?:please\s+)?create\s+(?:`(?P<tick>[^`\s]+)`|(?P<bare>" + _PATH_TOKEN + r"))\s*[.!]?\s*$", re.IGNORECASE)
+_OBSERVATION_SUBJECT = r"(?:it|the\s+(?:program|script|app|application)|`[^`\s]+`|" + _PATH_TOKEN + r")"
+_OBSERVATION_STATEMENT = re.compile(
+    r"^\s*(?:(?P<subject>" + _OBSERVATION_SUBJECT + r")\s+)?(?P<verb>prints|outputs|displays)\s+"
+    r"(?:\"(?P<dq>[^\"\n]*)\"|'(?P<sq>[^'\n]*)'|`(?P<tick>[^`\n]*)`|(?P<raw>[^\n]+?))"
+    r"\s+when\s+(?P<suffix>executed|run)\s*[.!]?\s*$", re.IGNORECASE)
+_SIMPLE_UNQUOTED_LITERAL = re.compile(r"^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$")
+# An unquoted span that opens with a determiner, or carries a connective, DESCRIBES an output ("prints a greeting",
+# "prints the sum and exits") rather than stating one: never bound.
+_UNQUOTED_REFUSED_WORDS = frozenset({
+    "a", "an", "the", "its", "their", "some", "any", "no", "each", "every", "all", "nothing", "something", "whatever",
+    "and", "or", "then", "also", "but", "plus", "after", "before", "while", "followed", "with", "without", "if",
+    "unless", "when", "where", "once", "until", "to", "of", "for"})
+_QUOTED_PLACEHOLDER = re.compile(r"<[^<>\s]+>|\{[^{}]*\}|%[sdfr]|\\")
+MAX_EXPECTED_STDOUT = 200
+
+
+def _literal_relative_path(token: str) -> Optional[str]:
+    """``token`` when it is a plain relative file path (no ``..``, no absolute or home form, already normal)."""
+    if not token or token.startswith(("/", "~", "-")) or token != posixpath.normpath(token):
+        return None
+    if any(part in ("", ".", "..") for part in token.split("/")):
+        return None
+    return token
+
+
+def file_creation_statement(text: str) -> Optional[str]:
+    """The literal relative path of a whole-statement file-creation request ("Create hello.py."), else None. A
+    statement that continues past the path ("Create greet.py with a function ...") is not one."""
+    match = _CREATE_STATEMENT.match(text or "")
+    if match is None:
+        return None
+    return _literal_relative_path(match.group("tick") or match.group("bare"))
+
+
+def runtime_stdout_statement(text: str) -> Optional[Dict[str, object]]:
+    """The expectation of a whole-statement runtime observation ("It prints hello world when executed."), else None.
+
+    ``expected`` is the exact literal; ``quoted`` says it was a quoted or code-span literal (the stronger form: a
+    complete mismatch is counter-evidence) as opposed to an unquoted simple word sequence (a mismatch only leaves the
+    requirement open). ``subject_path`` is a path the statement names as the thing that prints, else None. A
+    placeholder (``<name>``), a format field, an escape, a formula, a conjunction or ambiguous punctuation in an
+    unquoted span is not recognized."""
+    match = _OBSERVATION_STATEMENT.match(text or "")
+    if match is None:
+        return None
+    quoted = True
+    expected = next((match.group(name) for name in ("dq", "sq", "tick") if match.group(name) is not None), None)
+    if expected is None:
+        quoted = False
+        expected = match.group("raw")
+        if not _SIMPLE_UNQUOTED_LITERAL.match(expected):
+            return None
+        if {word.lower() for word in expected.split(" ")} & _UNQUOTED_REFUSED_WORDS:
+            return None
+    elif not expected or len(expected) > MAX_EXPECTED_STDOUT or _QUOTED_PLACEHOLDER.search(expected):
+        return None
+    subject = match.group("subject")
+    subject_path = None
+    if subject is not None and subject.lower() not in ("it",) and not subject.lower().startswith("the "):
+        subject_path = _literal_relative_path(subject.strip("`"))
+        if subject_path is None:
+            return None
+    return {"expected": expected, "quoted": quoted, "verb": match.group("verb").lower(),
+            "suffix": match.group("suffix").lower(), "subject_path": subject_path}
+
+
 # ------------------------------------------------------------ the statement's scope
 
 def statement_scope(
@@ -457,6 +535,17 @@ def statement_scope(
     if migrations and names_migration(text, migrations):
         return StatementScope(requirement_id, text, origin, claims=(), scopes=(MIGRATION,),
                               detail={"compound": bool(_CLAUSE_SPLIT.search(_prose(text)))})
+    # REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001: the two anchored whole-statement observation grammars.
+    created = file_creation_statement(text)
+    if created is not None:
+        return StatementScope(requirement_id, text, origin, claims=(FILE_CREATION_CLAIM,), scopes=(FILE_CREATION,),
+                              detail={"path": created})
+    observation = runtime_stdout_statement(text)
+    if observation is not None:
+        strength, why = behavior_strength(text, regression_covered=False)
+        return StatementScope(requirement_id, text, origin, claims=(BEHAVIOR,), scopes=(BEHAVIOR,),
+                              strength=strength, strength_reasons=tuple(why["reasons"]),
+                              detail={"examples": list(why["examples"]), "runtime_stdout": observation})
     scopes = []
     claims = []
     detail: Dict[str, object] = {}

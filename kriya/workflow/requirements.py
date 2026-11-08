@@ -554,8 +554,11 @@ DOCUMENTATION_CLAIM = "DOCUMENTATION"  # "document it in the README (if there is
 # named tracked files the goal freezes while the rest of the run mutates; closed only by the run's mutation record
 # (the file is byte-identical to the base and still present), exactly like TEST_IMMUTABILITY for existing tests.
 FILE_IMMUTABILITY_CLAIM = "FILE_IMMUTABILITY"
+# REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001: "Create hello.py." - a whole statement naming one literal
+# relative path; closed only by the run's own raw capture (the path did not exist before the candidate wrote it).
+FILE_CREATION_CLAIM = "FILE_CREATION"
 CLAIM_KINDS = (BEHAVIOR, REGRESSION_PRESERVATION, API_PRESERVATION, TEST_IMMUTABILITY_CLAIM, TEST_ADDITION_CLAIM,
-               DOCUMENTATION_CLAIM, FILE_IMMUTABILITY_CLAIM)
+               DOCUMENTATION_CLAIM, FILE_IMMUTABILITY_CLAIM, FILE_CREATION_CLAIM)
 # Producers that may close each kind. Named-test closure (PRD-020 / FS-1C0) only
 # ever proves regression preservation. BEHAVIOR needs independent acceptance
 # evidence: the operator's executable acceptance file (FS-1C2 B2-a,
@@ -571,7 +574,16 @@ NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle", F
 # (kriya/workflow/authority_bundle.py) is operator sufficiency - HUMAN_ACCEPTED
 # class, never "verified" - and may close the claims its coverage declares.
 EXTERNAL_ACCEPTANCE_METHOD = "external_acceptance_command"
-BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_acceptance", EXTERNAL_ACCEPTANCE_METHOD})
+# "It prints hello world when executed." (anchored grammar, kriya/workflow/requirement_scopes.py): the whole stdout of the
+# application run Kriya executed on this exact candidate equals the stated literal (kriya/workflow/contract_closers.py).
+# NOT operator sufficiency and NOT finite-example evidence: it is one observation the statement itself states.
+RUNTIME_STDOUT_METHOD = "runtime_stdout_observation"
+FILE_CREATION_METHOD = "file_creation_record"
+BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_acceptance", EXTERNAL_ACCEPTANCE_METHOD,
+                                      RUNTIME_STDOUT_METHOD})
+# Producers whose record binds the exact words it judged (the record carries ``requirement_text_sha256``); re-checked at
+# read time, so a resumed or altered record can never close other words.
+TEXT_BOUND_METHODS = frozenset({RUNTIME_STDOUT_METHOD, FILE_CREATION_METHOD})
 # BACKEND-READINESS-004 (AUTHORITY-REGRESSION-CLAIM-COVERAGE-001): the sealed
 # operator oracle may also judge regression preservation - it runs the named
 # tests in its own fresh environment, which the repository oracle (FS-1C0)
@@ -754,7 +766,8 @@ def record_requirement_claim(
                BEHAVIOR_EXAMPLES: BEHAVIOR_CLOSURE_METHODS, API_PRESERVATION: API_PRESERVATION_CLOSURE_METHODS,
                TEST_IMMUTABILITY_CLAIM: frozenset({TEST_IMMUTABILITY_METHOD}),
                FILE_IMMUTABILITY_CLAIM: frozenset({FILE_IMMUTABILITY_METHOD}),
-               TEST_ADDITION_CLAIM: TEST_ADDITION_CLOSURE_METHODS, DOCUMENTATION_CLAIM: DOCUMENTATION_CLOSURE_METHODS}
+               TEST_ADDITION_CLAIM: TEST_ADDITION_CLOSURE_METHODS, DOCUMENTATION_CLAIM: DOCUMENTATION_CLOSURE_METHODS,
+               FILE_CREATION_CLAIM: frozenset({FILE_CREATION_METHOD})}
     if method not in allowed.get(claim, frozenset()):
         raise ValueError(f"method {method!r} cannot close a {claim} claim")
     if status not in _CLAIM_STATUSES:
@@ -886,6 +899,10 @@ def _effective_closure(
         if (record is not None and record.get("method") in OPERATOR_SUFFICIENCY_METHODS
                 and not _human_acceptance_binds(requirement, record)):
             return None  # the operator's sufficiency was for other words (a resumed or altered record)
+        if (record is not None and record.get("method") in TEXT_BOUND_METHODS
+                and record.get("requirement_text_sha256")
+                != hashlib.sha256((requirement.text or "").encode("utf-8")).hexdigest()):
+            return None  # the observation / creation was judged for other words (a resumed or altered record)
     if required and all(claims.get(claim) for claim in required):
         return {"method": "claims", "claims": {claim: claims[claim] for claim in required}}
     return None
@@ -1101,6 +1118,36 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
             outcome = RequirementOutcome.UNVERIFIED
         outcomes[requirement.id] = outcome
     return outcomes
+
+
+REQUIREMENT_TRUTH_ALL_VERIFIED = "ALL_VERIFIED"
+REQUIREMENT_TRUTH_OPEN = "OPEN_REQUIREMENTS"
+REQUIREMENT_TRUTH_CONTRADICTED = "CONTRADICTED"
+# Outcomes that are RESOLVED by deterministic evidence or by an operator's acceptance (HUMAN_ACCEPTED is operator sufficiency:
+# resolved, counted as verified for this status, never described as proven). NOT_A_CLAIM / DISPOSITIONED are not mandatory
+# requirements at all and are left out of the total.
+_TRUTH_RESOLVED = frozenset({RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED})
+_TRUTH_EXCLUDED = frozenset({RequirementOutcome.NOT_A_CLAIM, RequirementOutcome.DISPOSITIONED})
+REQUIREMENT_TRUTH_MAX_UNRESOLVED = 8
+
+
+def requirement_truth(outcomes: Mapping[str, RequirementOutcome], requirements: RequirementSet) -> Dict[str, Any]:
+    """The typed FINAL requirement truth of a run, derived only from ``requirement_outcomes`` (never a second authority):
+    CONTRADICTED when any mandatory requirement is VIOLATED; ALL_VERIFIED when there is at least one mandatory requirement
+    and every one is closed by evidence (or accepted by an operator); OPEN_REQUIREMENTS otherwise (including a PENDING /
+    UNKNOWN / UNVERIFIED requirement). ``unresolved`` lists, in requirement order, those that are not resolved (bounded)."""
+    mandatory = [(r, outcomes.get(r.id, RequirementOutcome.PENDING)) for r in requirements.requirements
+                 if outcomes.get(r.id, RequirementOutcome.PENDING) not in _TRUTH_EXCLUDED]
+    verified = sum(1 for _r, outcome in mandatory if outcome in _TRUTH_RESOLVED)
+    if any(outcome is RequirementOutcome.VIOLATED for _r, outcome in mandatory):
+        status = REQUIREMENT_TRUTH_CONTRADICTED
+    elif mandatory and verified == len(mandatory):
+        status = REQUIREMENT_TRUTH_ALL_VERIFIED
+    else:
+        status = REQUIREMENT_TRUTH_OPEN
+    unresolved = [{"id": r.id, "text": r.text, "outcome": outcome.value}
+                  for r, outcome in mandatory if outcome not in _TRUTH_RESOLVED][:REQUIREMENT_TRUTH_MAX_UNRESOLVED]
+    return {"status": status, "verified": verified, "total": len(mandatory), "unresolved": unresolved}
 
 
 def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, Dict[str, Any]]:

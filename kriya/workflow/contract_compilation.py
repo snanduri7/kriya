@@ -60,6 +60,7 @@ from kriya.workflow.requirements import (
     CLOSER_NAMED_TESTS,
     DISPOSITION_EVIDENCE_ID,
     DOCUMENTATION_CLAIM,
+    FILE_CREATION_CLAIM,
     FILE_IMMUTABILITY,
     FILE_IMMUTABILITY_CLAIM,
     MUTATION_SCOPE,
@@ -87,7 +88,9 @@ CONTRACT_FORMAT = "kriya.verification_contract/1"
 # operator oracle); an authority's coverage is declared per (requirement, claim). Every contract sealed by /1 is STALE.
 # 3 (BACKEND-FINAL-CLOSURE-005, OD-3): the FILE_IMMUTABILITY claim - a pure freeze of named tracked files is
 # closable from the mutation record instead of a BEHAVIOR claim needing authority; every /2 contract is stale by design.
-CONTRACT_COMPILER_VERSION = 3
+# 4 (REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001): the FILE_CREATION claim and the RUNTIME_STDOUT binding of a
+# BEHAVIOR claim - two anchored whole-statement grammars; every /3 contract is stale by design.
+CONTRACT_COMPILER_VERSION = 4
 CONTRACT_STORE_DIR = "verification-contracts"
 
 # Entry statuses.
@@ -105,6 +108,8 @@ CLOSER_API_PRESERVATION = "api_preservation"
 CLOSER_DOCUMENTATION_NOT_APPLICABLE = "documentation_not_applicable"
 CLOSER_DOCUMENTATION_LIST_ENTRIES = "documentation_list_entries"  # BACKEND-READINESS-004 (owner decision 2)
 CLOSER_TEST_ADDITION = "test_addition"
+CLOSER_FILE_CREATION = "file_creation"
+CLOSER_RUNTIME_STDOUT = "runtime_stdout"
 CLOSER_EXTERNAL_ACCEPTANCE = "external_acceptance_command"
 CLOSER_NOT_A_CLAIM = "not_a_claim"
 CLOSER_OPERATOR_DISPOSITION = "operator_disposition"
@@ -112,6 +117,7 @@ DISPOSITIONED_STATEMENT = "STATEMENT"  # the binding label of a whole-statement 
 
 # Who created the evidence a closer judges.
 AUTHORITY_GOAL = "goal"  # the user's own words (examples, named tests, the statements themselves)
+AUTHORITY_RUNTIME_OBSERVATION = "runtime_observation"  # the application run Kriya executed on this exact candidate
 AUTHORITY_REPOSITORY = "repository"  # deterministic repository facts (tests, tree, mutation record)
 AUTHORITY_ACCEPTANCE_FILE = "acceptance_file"  # B2 operator acceptance file
 AUTHORITY_ACCEPTANCE_APPROVAL = "acceptance_approval"  # B3 human-bound approval
@@ -195,6 +201,21 @@ CLOSER_CONTRACTS: Dict[str, Dict[str, str]] = {
         "pass": "the candidate adds a runnable test file, or its complete structured suite report carries a test "
                 "identity the base's report does not",
         "fail": "never (an absent test leaves the claim open)", "unknown": "no complete report on either side"},
+    CLOSER_FILE_CREATION: {
+        "claim": FILE_CREATION_CLAIM, "authority": AUTHORITY_REPOSITORY,
+        "pass": "the bound literal path did not exist before the candidate wrote it (the run's raw capture) and is a "
+                "regular file of the candidate now",
+        "fail": "never (an absent path, a modified existing path or a similarly named file leaves the claim open)",
+        "unknown": "no raw capture for the path, or the enforce terminal gate (no per-attempt capture)"},
+    CLOSER_RUNTIME_STDOUT: {
+        "claim": BEHAVIOR, "authority": AUTHORITY_RUNTIME_OBSERVATION,
+        "pass": "the whole stdout of the final step of the application run Kriya executed on this exact candidate "
+                "(complete, exit 0, the project interpreter running a file the candidate wrote) equals the stated "
+                "literal, one trailing newline aside, case-sensitive",
+        "fail": "a QUOTED literal and complete stdout of an exit-0 run that differs (an unquoted mismatch only leaves "
+                "the claim open)",
+        "unknown": "no application run, an incomplete or lost stdout, a failed or timed-out step, another candidate, "
+                   "a command that does not run a file the candidate wrote, the enforce terminal gate"},
     CLOSER_EXTERNAL_ACCEPTANCE: {
         "claim": "declared per coverage entry", "authority": AUTHORITY_EXTERNAL_COMMAND,
         "pass": "the sealed operator command exited 0 under Kriya's containment, assets unchanged (operator "
@@ -741,6 +762,9 @@ def compile_verification_contract(
                                                  detail={"frozen_paths": list(scope.detail.get("frozen_paths") or ())}))
                 elif claim == TEST_ADDITION_CLAIM:
                     bindings.append(ClaimBinding(claim, CLOSER_TEST_ADDITION, AUTHORITY_REPOSITORY))
+                elif claim == FILE_CREATION_CLAIM:
+                    bindings.append(ClaimBinding(claim, CLOSER_FILE_CREATION, AUTHORITY_REPOSITORY,
+                                                 detail={"path": scope.detail.get("path")}))
                 elif claim == API_PRESERVATION:
                     external = _covering(authorities, requirement.id, claim, None)
                     if project_language in API_PREDICATE_LANGUAGES:
@@ -793,6 +817,11 @@ def compile_verification_contract(
                     if examples is not None and strength == BEHAVIOR_EXACT:
                         bindings.append(ClaimBinding(claim, CLOSER_DERIVED_EXAMPLES, AUTHORITY_GOAL_EXAMPLES,
                                                      examples.digest, detail=dict(examples.coverage[requirement.id][BEHAVIOR])))
+                    if scope.detail.get("runtime_stdout"):
+                        # the anchored runtime-observation grammar: the expectation is sealed in the binding, read from
+                        # the user's own words (requirement_scopes.runtime_stdout_statement), never from a model.
+                        bindings.append(ClaimBinding(claim, CLOSER_RUNTIME_STDOUT, AUTHORITY_RUNTIME_OBSERVATION,
+                                                     detail=dict(scope.detail["runtime_stdout"])))
                     if external is not None:
                         bindings.append(_external_binding(claim, external, requirement.id))
                     if not any(b.claim == claim for b in bindings):

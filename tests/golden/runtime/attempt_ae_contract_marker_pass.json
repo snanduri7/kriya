@@ -3,6 +3,7 @@
  "gate_outcomes": [
   {
    "attempt": 1,
+   "candidate_digest": "0048f702db0f998cc58d2696af5287dd217f41bb380ab5422646b041732939a2",
    "commands": [
     [
      "<python:1>",
@@ -87,6 +88,7 @@
    "evidence": "mirror.gate_outcome",
    "outcome": {
     "attempt": 1,
+    "candidate_digest": "0048f702db0f998cc58d2696af5287dd217f41bb380ab5422646b041732939a2",
     "commands": [
      [
       "<python:1>",

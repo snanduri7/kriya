@@ -71,6 +71,7 @@
    "evidence": "mirror.gate_outcome",
    "outcome": {
     "attempt": 1,
+    "candidate_digest": "44d8185675645954c85d0ddebb3fe331b744d219cec0d891f4452d36211cb31a",
     "commands": [
      [
       "<python:1>",

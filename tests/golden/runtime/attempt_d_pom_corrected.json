@@ -11,6 +11,7 @@
  "gate_outcomes": [
   {
    "attempt": 1,
+   "candidate_digest": "4f23b66cb657e7f660e599e013583c50fea4d5c95d816f6c03b45cf713059bb6",
    "commands": [
     [
      "javac",
@@ -179,6 +180,7 @@
    "evidence": "mirror.gate_outcome",
    "outcome": {
     "attempt": 1,
+    "candidate_digest": "4f23b66cb657e7f660e599e013583c50fea4d5c95d816f6c03b45cf713059bb6",
     "commands": [
      [
       "javac",

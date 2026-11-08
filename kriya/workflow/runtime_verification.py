@@ -90,6 +90,7 @@ from kriya.workflow.file_resolution import (
     python_target_path_is_test_shaped,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.runtime_observation import candidate_files_digest
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
 from kriya.workflow.worktree import (
@@ -1875,6 +1876,7 @@ async def _execute_runtime_verification_directly(
         "deterministic_result": deps._deterministic_result_provenance_field(verification_authority, grade["passed"]),
         **deps.runtime_evidence_outcome_fields(grade),
         **execution_evidence(run_res),
+        "candidate_digest": candidate_files_digest(ctx.worktree_path, state.all_files_written),
     })
 
 
@@ -2371,6 +2373,9 @@ async def _approve_and_execute_runtime_verification(
             "steps": run_res.get("steps", []),
             "deterministic_result": deps._deterministic_result_provenance_field(verification_authority, grade["passed"]),
             **deps.runtime_evidence_outcome_fields(grade),
+            # the digest of the candidate files THIS run executed: the requirement closers (runtime_observation) read the
+            # run's stdout only while the candidate still has these exact bytes
+            "candidate_digest": candidate_files_digest(ctx.worktree_path, state.all_files_written),
         }
         if self_correction_result is not None and self_correction_result.resolved:
             # Same markers the compile gate's own self-correction

@@ -58,7 +58,14 @@ from kriya.workflow.obligations import ObligationLedger
 from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS
 from kriya.workflow.pytest_stability import classify_with_baseline_stability, record_regression_decision
 from kriya.workflow.pytest_stability import decision_summary as pytest_decision_summary
-from kriya.workflow.requirement_closers import SUITE_BASELINE_FROM_RUN, closer_call, run_requirement_closers
+from kriya.workflow.requirement_closers import (
+    SUITE_BASELINE_FROM_RUN,
+    close_requirements_by_file_creation,
+    close_requirements_by_runtime_stdout,
+    closer_call,
+    created_paths_from_capture,
+    run_requirement_closers,
+)
 from kriya.workflow.requirements import REQUIREMENTS_UNRESOLVED, blocking_requirements, seed_requirement_obligations
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
@@ -753,6 +760,19 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                     workspace_path, revision=state.attempt_number,
                     # the identities this attempt's test-delta gate recorded as executed and passed (None: it recorded none)
                     executed_passed=executed_test_identities(state.gate_outcomes, state.attempt_number),
+                ),
+                "file_creation": lambda: closer_call(
+                    close_requirements_by_file_creation,
+                    resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                    # the paths this run's RAW capture proves did not exist before the candidate wrote them
+                    created_paths=created_paths_from_capture(state.all_files_written, state.all_original_raw),
+                    revision=state.attempt_number,
+                ),
+                "runtime_stdout": lambda: closer_call(
+                    close_requirements_by_runtime_stdout,
+                    resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                    gate_outcomes=state.gate_outcomes, attempt=state.attempt_number,
+                    written_files=state.all_files_written, revision=state.attempt_number,
                 ),
                 "documentation": lambda: closer_call(
                     deps.close_requirements_by_documentation,
