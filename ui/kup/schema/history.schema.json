@@ -25,7 +25,7 @@
           "type": "object",
           "required": ["status", "verified", "accepted", "total"],
           "properties": {
-            "status": { "enum": ["ALL_VERIFIED", "OPEN_REQUIREMENTS", "CONTRADICTED"] },
+            "status": { "enum": ["ALL_VERIFIED", "RESOLVED_WITH_OPERATOR_ACCEPTANCE", "OPEN_REQUIREMENTS", "CONTRADICTED"] },
             "verified": { "type": "integer", "minimum": 0 },
             "accepted": { "type": "integer", "minimum": 0 },
             "total": { "type": "integer", "minimum": 0 }

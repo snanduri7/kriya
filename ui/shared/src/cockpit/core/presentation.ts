@@ -342,10 +342,10 @@ export const NO_RUN_RECIPE_TEXT = 'Kriya did not run this application, so it has
 /** The backend's REQUIREMENT TRUTH of a finished run (kriya/workflow/requirements.py::requirement_truth, copied onto the launch record's `ended`): ALL_VERIFIED (every mandatory requirement closed by deterministic evidence or an
  * operator's acceptance), OPEN_REQUIREMENTS (the change was applied but a requirement has no independent evidence), CONTRADICTED (deterministic counter-evidence). The cockpit shows exactly this; it never recomputes it from
  * outcomes, gates or prose. null when the record carries none (a run recorded before this field existed): that is "not recorded", never "verified". */
-export type RequirementTruthStatus = 'ALL_VERIFIED' | 'OPEN_REQUIREMENTS' | 'CONTRADICTED';
+export type RequirementTruthStatus = 'ALL_VERIFIED' | 'RESOLVED_WITH_OPERATOR_ACCEPTANCE' | 'OPEN_REQUIREMENTS' | 'CONTRADICTED';
 /** `verified` counts requirements closed by deterministic evidence ONLY; `accepted` counts those an operator accepted (operator sufficiency: never called "verified"). */
 export interface RequirementTruth { status: RequirementTruthStatus; verified: number; accepted: number; total: number; unresolved: Array<{ id: string; text: string; outcome: string }> }
-const TRUTH_STATUSES: readonly string[] = ['ALL_VERIFIED', 'OPEN_REQUIREMENTS', 'CONTRADICTED'];
+const TRUTH_STATUSES: readonly string[] = ['ALL_VERIFIED', 'RESOLVED_WITH_OPERATOR_ACCEPTANCE', 'OPEN_REQUIREMENTS', 'CONTRADICTED'];
 /** Validate one backend truth object (a launch record's `requirement_truth` or a `requirement.truth` run event's details); null when malformed. */
 export function parseRequirementTruth(raw: unknown): RequirementTruth | null {
   if (typeof raw !== 'object' || raw === null) return null;
@@ -368,11 +368,13 @@ export function requirementTruthFromEvents(events: readonly { kind: string; deta
 }
 export interface RequirementTruthWords { heading: string; badge: string | null; summary: string | null; applied: string | null; tone: 'ok' | 'warn' | 'bad' }
 /** THE words for a COMPLETED run's requirement truth - the one table every surface reads (owner ruling 2026-11-08): ALL_VERIFIED 'Completed — verified'; OPEN_REQUIREMENTS 'Changes applied — verification incomplete' (apply truth and
- * verification truth are separate authorities); no recorded truth 'Completed' (old, never 'verified'); CONTRADICTED keeps its own non-success words. Open and contradicted never show ordinary green (and never "Run succeeded": `badge` replaces that label). Accepted-by-an-operator requirements are counted apart from verified ones. */
+ * verification truth are separate authorities); RESOLVED_WITH_OPERATOR_ACCEPTANCE 'Completed — requirements resolved'; no recorded truth 'Completed' (old, never 'verified'); CONTRADICTED keeps its own non-success words. Open and contradicted never show ordinary green (and never "Run succeeded": `badge` replaces that label). Accepted-by-an-operator requirements are counted apart from verified ones. */
 export function requirementTruthWords(truth: RequirementTruth | null): RequirementTruthWords {
   if (truth === null) return { heading: 'Completed', badge: null, summary: null, applied: null, tone: 'ok' };
   const open = Math.max(0, truth.total - truth.verified - truth.accepted);
   const counts = `${truth.verified} of ${truth.total} requirements verified${truth.accepted > 0 ? ` · ${truth.accepted} accepted by you` : ''}`;
+  // Every requirement resolved, but at least one only by the operator's acceptance: never worded as verified (human authority is not a proof); the backend decided this, it is not derived from the counts here.
+  if (truth.status === 'RESOLVED_WITH_OPERATOR_ACCEPTANCE') return { heading: 'Completed — requirements resolved', badge: null, summary: `${truth.verified} verified · ${truth.accepted} accepted by you`, applied: null, tone: 'ok' };
   if (truth.status === 'ALL_VERIFIED') return { heading: 'Completed — verified', badge: null, summary: truth.total === 0 ? null : counts, applied: null, tone: 'ok' };
   if (truth.status === 'CONTRADICTED') return { heading: 'Changes applied — a requirement is contradicted', badge: 'a requirement is contradicted', summary: `${counts} · ${open} not verified, at least one contradicted by evidence`, applied: 'Your change was applied, but Kriya recorded evidence that contradicts a requirement. Review it before relying on it.', tone: 'bad' };
   return { heading: 'Changes applied — verification incomplete', badge: 'verification incomplete', summary: truth.total === 0 ? null : `${counts} · ${open} unverified`, applied: 'Your change was applied. Kriya could not independently verify every requirement, so review the result before relying on it.', tone: 'warn' };

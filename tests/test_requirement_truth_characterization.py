@@ -24,6 +24,7 @@ from kriya.workflow.requirements import (
 )
 
 ALL_VERIFIED, OPEN_REQUIREMENTS, CONTRADICTED = "ALL_VERIFIED", "OPEN_REQUIREMENTS", "CONTRADICTED"
+RESOLVED = "RESOLVED_WITH_OPERATOR_ACCEPTANCE"
 _VERIFIED = {RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED, RequirementOutcome.NOT_A_CLAIM, RequirementOutcome.DISPOSITIONED}
 
 
@@ -32,7 +33,9 @@ def truth_class(outcomes) -> str:
     values = list(outcomes.values())
     if any(value is RequirementOutcome.VIOLATED for value in values):
         return CONTRADICTED
-    return ALL_VERIFIED if values and all(value in _VERIFIED for value in values) else OPEN_REQUIREMENTS
+    if values and all(value in _VERIFIED for value in values):
+        return RESOLVED if any(value is RequirementOutcome.HUMAN_ACCEPTED for value in values) else ALL_VERIFIED
+    return OPEN_REQUIREMENTS
 
 
 PERCENT = "Add a function percent(part, whole) to calc.py that returns part as a percentage of whole rounded to one decimal place, and add a pytest test for it.\n"
@@ -163,7 +166,8 @@ def test_case_5_a_substitute_goal_has_no_deterministic_closer_and_is_open():
 
 # the classification itself -------------------------------------------------------------------------------------------------------------------------------------------------------
 @pytest.mark.parametrize("outcomes,expected", [
-    ({"REQ-1": RequirementOutcome.CLOSED_BY_EVIDENCE, "REQ-2": RequirementOutcome.HUMAN_ACCEPTED}, ALL_VERIFIED),
+    ({"REQ-1": RequirementOutcome.CLOSED_BY_EVIDENCE, "REQ-2": RequirementOutcome.HUMAN_ACCEPTED}, RESOLVED),
+    ({"REQ-1": RequirementOutcome.CLOSED_BY_EVIDENCE, "REQ-2": RequirementOutcome.CLOSED_BY_EVIDENCE}, ALL_VERIFIED),
     ({"REQ-1": RequirementOutcome.CLOSED_BY_EVIDENCE, "REQ-2": RequirementOutcome.UNVERIFIED}, OPEN_REQUIREMENTS),
     ({"REQ-1": RequirementOutcome.UNKNOWN}, OPEN_REQUIREMENTS), ({"REQ-1": RequirementOutcome.PENDING}, OPEN_REQUIREMENTS),
     ({"REQ-1": RequirementOutcome.CLOSED_BY_EVIDENCE, "REQ-2": RequirementOutcome.VIOLATED}, CONTRADICTED),

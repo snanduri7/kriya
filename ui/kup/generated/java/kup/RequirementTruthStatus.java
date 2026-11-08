@@ -6,7 +6,7 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum RequirementTruthStatus {
-    ALL_VERIFIED, CONTRADICTED, OPEN_REQUIREMENTS;
+    ALL_VERIFIED, CONTRADICTED, OPEN_REQUIREMENTS, RESOLVED_WITH_OPERATOR_ACCEPTANCE;
 
     @JsonValue
     public String toValue() {
@@ -14,6 +14,7 @@ public enum RequirementTruthStatus {
             case ALL_VERIFIED: return "ALL_VERIFIED";
             case CONTRADICTED: return "CONTRADICTED";
             case OPEN_REQUIREMENTS: return "OPEN_REQUIREMENTS";
+            case RESOLVED_WITH_OPERATOR_ACCEPTANCE: return "RESOLVED_WITH_OPERATOR_ACCEPTANCE";
         }
         return null;
     }
@@ -23,6 +24,7 @@ public enum RequirementTruthStatus {
         if (value.equals("ALL_VERIFIED")) return ALL_VERIFIED;
         if (value.equals("CONTRADICTED")) return CONTRADICTED;
         if (value.equals("OPEN_REQUIREMENTS")) return OPEN_REQUIREMENTS;
+        if (value.equals("RESOLVED_WITH_OPERATOR_ACCEPTANCE")) return RESOLVED_WITH_OPERATOR_ACCEPTANCE;
         throw new IOException("Cannot deserialize RequirementTruthStatus");
     }
 }

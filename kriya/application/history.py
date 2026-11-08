@@ -199,7 +199,7 @@ def scoped_history_list(cfg, trace: TraceHistory, n: int, cursor: Optional[str],
 
 # The closed truth vocabulary (kriya/workflow/requirements.py::REQUIREMENT_TRUTH_*; tests/test_run_list_requirement_truth.py pins this tuple equal to it:
 # the application layer does not import the workflow at module level).
-_TRUTH_STATUSES = ("ALL_VERIFIED", "OPEN_REQUIREMENTS", "CONTRADICTED")
+_TRUTH_STATUSES = ("ALL_VERIFIED", "RESOLVED_WITH_OPERATOR_ACCEPTANCE", "OPEN_REQUIREMENTS", "CONTRADICTED")
 
 
 def _truth_of_events(events: Any) -> Optional[Dict[str, Any]]:

@@ -8,6 +8,7 @@
  */
 import type { ExecutionHostPort, NotifyRequest, NotifyResult } from '../../../host/HostAdapter';
 import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, ExecutionPreflight, ExecutionState, ProjectMemory, StartRunResult } from '../../../model/kup';
+import type { RequirementTruthStatus } from '../../core/presentation';
 
 export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review' | 'runtime_review';
 
@@ -64,7 +65,7 @@ export interface FixtureExecutionOptions {
   /** A SUCCESSFUL run whose launch record carries the backend's verified run recipe (DEV/TEST ONLY): the user-facing steps Kriya's own runtime check executed and saw succeed. */
   runRecipe?: { steps: Array<{ kind: 'setup' | 'run'; command: string }>; environmentNote?: string | null };
   /** A SUCCESSFUL run whose launch record carries the backend's REQUIREMENT TRUTH (DEV/TEST ONLY): ALL_VERIFIED / OPEN_REQUIREMENTS / CONTRADICTED with the unresolved requirements. */
-  requirementTruth?: { status: 'ALL_VERIFIED' | 'OPEN_REQUIREMENTS' | 'CONTRADICTED'; verified: number; accepted?: number; total: number; unresolved?: Array<{ id: string; text: string; outcome?: string }> };
+  requirementTruth?: { status: RequirementTruthStatus; verified: number; accepted?: number; total: number; unresolved?: Array<{ id: string; text: string; outcome?: string }> };
   /** A SUCCESSFUL run whose launch record carries the application run's OBSERVED OUTPUT (DEV/TEST ONLY). */
   runtimeObservation?: { command: string; exitStatus: number | null; stdout: string; truncated?: boolean; stdoutLost?: boolean };
   /** The host has no runtime-command decision path (an older host): the review is shown but cannot be decided from this window. */

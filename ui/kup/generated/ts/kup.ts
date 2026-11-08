@@ -310,7 +310,7 @@ export interface RunSummary {
    * The run's FINAL requirement truth, projected on listing from its own persisted requirement.truth events (the LAST one); absent when the run recorded none (recorded before the event existed): a host words that neutrally and never as verified. The event stays the only authority; this is a read-time projection, not a stored copy.
    */
   requirement_truth?: {
-    status: 'ALL_VERIFIED' | 'OPEN_REQUIREMENTS' | 'CONTRADICTED';
+    status: 'ALL_VERIFIED' | 'RESOLVED_WITH_OPERATOR_ACCEPTANCE' | 'OPEN_REQUIREMENTS' | 'CONTRADICTED';
     verified: number;
     accepted: number;
     total: number;

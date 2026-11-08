@@ -197,7 +197,7 @@ export function notificationFor(run: RunView): { kind: NotifyKind; key: string }
   if (run.stage === 'finished' && run.outcome) {
     if (run.outcome.kind === 'rejected') return null; // the person just decided this themselves
     const truth = run.outcome.kind === 'success' ? requirementTruthOf(run.status?.launch.ended)?.status ?? null : null;
-    const kind: NotifyKind = run.outcome.kind !== 'success' ? 'run_unsuccessful' : truth === 'ALL_VERIFIED' ? 'run_completed_verified' : truth === 'OPEN_REQUIREMENTS' ? 'run_completed_unverified' : truth === 'CONTRADICTED' ? 'run_completed_contradicted' : 'run_completed';
+    const kind: NotifyKind = run.outcome.kind !== 'success' ? 'run_unsuccessful' : truth === 'ALL_VERIFIED' ? 'run_completed_verified' : truth === 'RESOLVED_WITH_OPERATOR_ACCEPTANCE' ? 'run_completed_resolved' : truth === 'OPEN_REQUIREMENTS' ? 'run_completed_unverified' : truth === 'CONTRADICTED' ? 'run_completed_contradicted' : 'run_completed';
     return { kind, key: `${kind}:${run.launchId}` };
   }
   return null;

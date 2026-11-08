@@ -1123,6 +1123,9 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
 REQUIREMENT_TRUTH_ALL_VERIFIED = "ALL_VERIFIED"
 REQUIREMENT_TRUTH_OPEN = "OPEN_REQUIREMENTS"
 REQUIREMENT_TRUTH_CONTRADICTED = "CONTRADICTED"
+# Every mandatory requirement is resolved and at least one of them only by an operator's acceptance (human authority, never a proof). It is NOT ALL_VERIFIED: ALL_VERIFIED
+# means every mandatory requirement is CLOSED_BY_EVIDENCE (owner ruling 2026-11-08; the first cut counted acceptance as verification and the heading said "verified").
+REQUIREMENT_TRUTH_RESOLVED_WITH_ACCEPTANCE = "RESOLVED_WITH_OPERATOR_ACCEPTANCE"
 # Outcomes that are RESOLVED by deterministic evidence or by an operator's acceptance (HUMAN_ACCEPTED is operator sufficiency:
 # resolved for the ALL_VERIFIED status, but COUNTED SEPARATELY as ``accepted`` - never as "verified", never described as proven). NOT_A_CLAIM / DISPOSITIONED are not mandatory
 # requirements at all and are left out of the total.
@@ -1134,7 +1137,8 @@ REQUIREMENT_TRUTH_MAX_UNRESOLVED = 8
 def requirement_truth(outcomes: Mapping[str, RequirementOutcome], requirements: RequirementSet) -> Dict[str, Any]:
     """The typed FINAL requirement truth of a run, derived only from ``requirement_outcomes`` (never a second authority):
     CONTRADICTED when any mandatory requirement is VIOLATED; ALL_VERIFIED when there is at least one mandatory requirement
-    and every one is closed by evidence (or accepted by an operator); OPEN_REQUIREMENTS otherwise (including a PENDING /
+    and every one is CLOSED_BY_EVIDENCE; RESOLVED_WITH_OPERATOR_ACCEPTANCE when every one is resolved but at least one only by
+    an operator's acceptance (acceptance is never verification); OPEN_REQUIREMENTS otherwise (including a PENDING /
     UNKNOWN / UNVERIFIED requirement). ``unresolved`` lists, in requirement order, those that are not resolved (bounded)."""
     mandatory = [(r, outcomes.get(r.id, RequirementOutcome.PENDING)) for r in requirements.requirements
                  if outcomes.get(r.id, RequirementOutcome.PENDING) not in _TRUTH_EXCLUDED]
@@ -1143,7 +1147,7 @@ def requirement_truth(outcomes: Mapping[str, RequirementOutcome], requirements: 
     if any(outcome is RequirementOutcome.VIOLATED for _r, outcome in mandatory):
         status = REQUIREMENT_TRUTH_CONTRADICTED
     elif mandatory and verified + accepted == len(mandatory):
-        status = REQUIREMENT_TRUTH_ALL_VERIFIED
+        status = REQUIREMENT_TRUTH_RESOLVED_WITH_ACCEPTANCE if accepted > 0 else REQUIREMENT_TRUTH_ALL_VERIFIED
     else:
         status = REQUIREMENT_TRUTH_OPEN
     unresolved = [{"id": r.id, "text": r.text, "outcome": outcome.value}

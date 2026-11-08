@@ -37,8 +37,8 @@ def _page(snap):
 
 
 def test_the_closed_status_vocabulary_equals_the_workflows():
-    assert _TRUTH_STATUSES == (workflow_requirements.REQUIREMENT_TRUTH_ALL_VERIFIED, workflow_requirements.REQUIREMENT_TRUTH_OPEN,
-                               workflow_requirements.REQUIREMENT_TRUTH_CONTRADICTED)
+    assert _TRUTH_STATUSES == (workflow_requirements.REQUIREMENT_TRUTH_ALL_VERIFIED, workflow_requirements.REQUIREMENT_TRUTH_RESOLVED_WITH_ACCEPTANCE,
+                               workflow_requirements.REQUIREMENT_TRUTH_OPEN, workflow_requirements.REQUIREMENT_TRUTH_CONTRADICTED)
 
 
 def test_each_listed_run_carries_the_truth_its_own_event_recorded(tmp_path):
@@ -47,11 +47,13 @@ def test_each_listed_run_carries_the_truth_its_own_event_recorded(tmp_path):
         "run-open": [_truth_event("OPEN_REQUIREMENTS", 1, total=3, unresolved=[{"id": "REQ-1", "text": "t", "outcome": "unverified"}])],
         "run-contradicted": [_truth_event("CONTRADICTED", 1, total=2)],
         "run-historical": [{"kind": "attempt.passed", "details": {}}],
+        "run-resolved": [_truth_event("RESOLVED_WITH_OPERATOR_ACCEPTANCE", 1, accepted=2)],
     })
     _trace, runs = _page(snap)
     assert runs["run-verified"]["requirement_truth"] == {"status": "ALL_VERIFIED", "verified": 3, "accepted": 0, "total": 3}
     assert runs["run-open"]["requirement_truth"] == {"status": "OPEN_REQUIREMENTS", "verified": 1, "accepted": 0, "total": 3}  # bounded: no requirement text on the list
     assert runs["run-contradicted"]["requirement_truth"]["status"] == "CONTRADICTED"
+    assert runs["run-resolved"]["requirement_truth"] == {"status": "RESOLVED_WITH_OPERATOR_ACCEPTANCE", "verified": 1, "accepted": 2, "total": 3}  # carried, never folded into ALL_VERIFIED
     assert "requirement_truth" not in runs["run-historical"]  # no event: no field, never "verified"
 
 

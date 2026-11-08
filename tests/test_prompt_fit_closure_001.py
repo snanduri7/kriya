@@ -30,6 +30,8 @@ from kriya.workflow.context_source import SourceDerivationCache
 from kriya.workflow.investigation import InvestigationDependencies, run_investigation_loop
 from kriya.workflow.untrusted_context import UNTRUSTED_REFERENCE_BEGIN, UNTRUSTED_REFERENCE_END
 
+PROJECT_VIEW_HEADER = "=== Current Project View"
+
 THIRTY = "".join(
     f"\n[Source: https://docs.example/{i} (Fetched: 2026-09-27)]\n" + "Ledger entry arithmetic guidance. " * 30 + "\n"
     for i in range(30)
@@ -50,12 +52,20 @@ def test_a_30_entry_reference_at_16k_is_fitted_into_the_architect_request_not_re
     assert capacity.count(system + user) <= capacity.tokens
     # The mandatory text is whole: the plan and the repository model.
     assert user.startswith("Plan:\n") and "Workspace Context:" in user
-    # Every fence is whole (as many ends as begins); entries are cut whole, never mid-entry. Since the Current Project View (c4531ce) the Architect's request carries up to TWO
-    # fenced untrusted blocks - the project view the analysis stage appends to the repository model, and the reference - and only the reference holds "[Source: " entries.
-    begins = user.count(UNTRUSTED_REFERENCE_BEGIN)
-    assert begins == user.count(UNTRUSTED_REFERENCE_END) <= 2
-    fenced = [block.split(UNTRUSTED_REFERENCE_END)[0] for block in user.split(UNTRUSTED_REFERENCE_BEGIN)[1:]]
-    assert len(fenced) == begins and sum("[Source: " in block for block in fenced) == 1  # exactly one fence is the reference
+    # The untrusted-context contract of the Architect request, stated by what each block IS (not by how many fences the request happens to carry): the reference/source text is ONE
+    # fenced block that keeps its "[Source: ...]" entries whole; the Current Project View (c4531ce; rendered per candidate by fit_planner_request) is AT MOST ONE fenced block inside
+    # the Workspace Context part, ahead of the reference, never nested in or merged with it; and no other fenced block exists. Every fence is whole.
+    begin, end = UNTRUSTED_REFERENCE_BEGIN, UNTRUSTED_REFERENCE_END
+    assert user.count(begin) == user.count(end)
+    bodies = [chunk.split(end)[0] for chunk in user.split(begin)[1:]]
+    references = [body for body in bodies if "[Source: " in body]
+    views = [body for body in bodies if PROJECT_VIEW_HEADER in body]
+    assert len(references) == 1                                                  # the reference/source context: once, in its canonical fence
+    assert len(views) == 1 and user.count(PROJECT_VIEW_HEADER) == 1              # the project view (this workspace holds files): exactly once, never repeated into another surface
+    assert all("[Source: " not in body for body in views) and all(PROJECT_VIEW_HEADER not in body for body in references)  # neither is nested in or merged with the other
+    assert len(bodies) == len(references) + len(views)                           # no unexplained third fenced block
+    view_at, reference_at = user.index(views[0]), user.index(references[0])
+    assert user.index("Workspace Context:") < view_at < reference_at             # inside the Workspace Context area, ahead of the reference
     assert 0 < user.count("[Source: ") < 30
 
 

@@ -12,14 +12,15 @@ import { renderModule, renderWorkspaceShell } from '../testing/harness';
 import { overviewModule } from '../modules/overview';
 import { runsModule } from '../modules/runs';
 
-const WORDS = { ALL_VERIFIED: 'Completed — verified', OPEN_REQUIREMENTS: 'Changes applied — verification incomplete', NONE: 'Completed' } as const;
+const WORDS = { ALL_VERIFIED: 'Completed — verified', RESOLVED_WITH_OPERATOR_ACCEPTANCE: 'Completed — requirements resolved', OPEN_REQUIREMENTS: 'Changes applied — verification incomplete', NONE: 'Completed' } as const;
 type Case = keyof typeof WORDS;
 const TRUTH = {
   ALL_VERIFIED: { status: 'ALL_VERIFIED', verified: 3, accepted: 0, total: 3 },
+  RESOLVED_WITH_OPERATOR_ACCEPTANCE: { status: 'RESOLVED_WITH_OPERATOR_ACCEPTANCE', verified: 1, accepted: 2, total: 3 },
   OPEN_REQUIREMENTS: { status: 'OPEN_REQUIREMENTS', verified: 1, accepted: 0, total: 3 },
   NONE: undefined,
 } as const;
-const KIND = { ALL_VERIFIED: 'run_completed_verified', OPEN_REQUIREMENTS: 'run_completed_unverified', NONE: 'run_completed' } as const;
+const KIND = { ALL_VERIFIED: 'run_completed_verified', RESOLVED_WITH_OPERATOR_ACCEPTANCE: 'run_completed_resolved', OPEN_REQUIREMENTS: 'run_completed_unverified', NONE: 'run_completed' } as const;
 const CASES = Object.keys(WORDS) as Case[];
 
 const launchEnded = (c: Case) => ({ launch: { requested_at: '2026-11-08T10:00:00+00:00', ended: { at: '2026-11-08T10:05:00+00:00', exit_code: 0, ...(TRUTH[c] ? { requirement_truth: TRUTH[c] } : {}) } } });
@@ -66,24 +67,31 @@ describe('the result card (live) and the stored run (Runs list + Overview/Replay
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));
     const heading = within(bar).getByRole('heading', { level: 2 });
     if (c === 'NONE') expect(heading).toHaveTextContent(/^Completed$/); else expect(heading).toHaveTextContent(WORDS[c]);
+    if (c === 'RESOLVED_WITH_OPERATOR_ACCEPTANCE') {
+      // operator acceptance is resolution authority, never verification: the detail says so and nothing on the card says "verified" as the outcome
+      expect(within(bar).getByTestId('requirement-truth-summary')).toHaveTextContent('1 verified · 2 accepted by you');
+      expect(bar.textContent).not.toContain('Completed — verified');
+    }
   });
 
   // The fixture models the backend projection: 'fx-brownfield-modify' recorded an OPEN requirement.truth event; 'fx-greenfield-success' recorded none.
-  it.each([['fx-brownfield-modify', WORDS.OPEN_REQUIREMENTS], ['fx-greenfield-success', WORDS.NONE]] as const)('stored run %s: Runs list card and Overview say %s', async (runId, phrase) => {
+  it.each([['fx-brownfield-modify', WORDS.OPEN_REQUIREMENTS], ['fx-digest-only', WORDS.RESOLVED_WITH_OPERATOR_ACCEPTANCE], ['fx-greenfield-success', WORDS.NONE]] as const)('stored run %s: Runs list card and Overview say %s', async (runId, phrase) => {
     const list = renderModule(runsModule);
     await screen.findByText('Milestone fx-milestone-1');
     const metas = Array.from(document.querySelectorAll('.ck-runmeta')).map((m) => m.textContent ?? '');
     expect(metas.some((m) => m.includes(phrase))).toBe(true);   // a card with these words is listed
     expect(metas.every((m) => !/Succeeded/.test(m))).toBe(true);
+    if (runId === 'fx-digest-only') expect(metas.every((m) => !m.includes('Completed — verified'))).toBe(true);   // an accepted requirement is never listed as verified
     list.unmount();
     renderModule(overviewModule, { runId });
     const head = await waitFor(() => { const h = document.querySelector('.ck-result-head'); expect(h).not.toBeNull(); return h!; });
     expect(head.textContent).toContain(phrase);
     expect(head.textContent).not.toMatch(/Succeeded|Run completed/);
+    if (runId === 'fx-digest-only') expect(document.body.textContent).not.toContain('Completed — verified');   // Overview/Replay of an accepted-requirement run
   });
 
   // The selected stored run's header badge (MainWorkspace) reads the same projection as its list card and its Overview.
-  it.each([['Changes applied — verification incomplete', /Fix whitespace handling in CharacterUtil/], ['Completed', /Create a Spring Boot|greenfield|Create/i]] as const)('the run header badge says %s', async (phrase, goal) => {
+  it.each([['Changes applied — verification incomplete', /Fix whitespace handling in CharacterUtil/], ['Completed — requirements resolved', /Update the guide/], ['Completed', /Create a Spring Boot|greenfield|Create/i]] as const)('the run header badge says %s', async (phrase, goal) => {
     renderWorkspaceShell({ page: 'runs', fixture: { workspace: '/fixture/workspace' } });
     await screen.findByRole('navigation', { name: 'Destinations' });
     const list = await screen.findAllByRole('button', { name: /Completed|Changes applied/ });
