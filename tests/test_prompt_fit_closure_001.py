@@ -50,8 +50,12 @@ def test_a_30_entry_reference_at_16k_is_fitted_into_the_architect_request_not_re
     assert capacity.count(system + user) <= capacity.tokens
     # The mandatory text is whole: the plan and the repository model.
     assert user.startswith("Plan:\n") and "Workspace Context:" in user
-    # The fence is whole or absent; entries are cut whole, never mid-entry.
-    assert user.count(UNTRUSTED_REFERENCE_BEGIN) == user.count(UNTRUSTED_REFERENCE_END) <= 1
+    # Every fence is whole (as many ends as begins); entries are cut whole, never mid-entry. Since the Current Project View (c4531ce) the Architect's request carries up to TWO
+    # fenced untrusted blocks - the project view the analysis stage appends to the repository model, and the reference - and only the reference holds "[Source: " entries.
+    begins = user.count(UNTRUSTED_REFERENCE_BEGIN)
+    assert begins == user.count(UNTRUSTED_REFERENCE_END) <= 2
+    fenced = [block.split(UNTRUSTED_REFERENCE_END)[0] for block in user.split(UNTRUSTED_REFERENCE_BEGIN)[1:]]
+    assert len(fenced) == begins and sum("[Source: " in block for block in fenced) == 1  # exactly one fence is the reference
     assert 0 < user.count("[Source: ") < 30
 
 
