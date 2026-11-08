@@ -114,7 +114,7 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
             fitted, design_fit = fit_planner_request(
                 capacity, system_prompt=deps.architect.system_prompt, head=design_head,
                 skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
-                suffix=design_suffix, request="architect",
+                suffix=design_suffix, request="architect", project_view=getattr(ctx, "project_view", None),
                 rebuild_graph=lambda budget: graph_retrieval_result.rebuild_context(workspace_path, budget),
             )
             if design_fit:

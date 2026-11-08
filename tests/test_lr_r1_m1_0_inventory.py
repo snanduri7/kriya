@@ -174,5 +174,7 @@ def test_inventory_counts_the_design_relies_on():
     # MANAGED_SERVICE_CONTRACT_INVALID, as a verification_infrastructure_failure, before the service runs).
     # Gate F (Wave 6): one more typed stop (stage_apply.run_artifact_registry_gate: the milestone's candidate artifact-registry
     # derivation failed before the commit, ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED, a deterministic quality-gate stop).
-    assert records == 96, records
+    # 0a188e9 (effective-argv authority): one more typed stop (runtime_verification._assert_effective_argv: EFFECTIVE_ARGV_NOT_RESOLVED / EFFECTIVE_ARGV_INTERPRETER_MISMATCH,
+    # a verification_infrastructure_failure, nothing executed).
+    assert records == 97, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

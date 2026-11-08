@@ -25,15 +25,16 @@ from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.stage_context import StageContext, StageDeps
 
 
-def _project_before(ctx: StageContext, deps: StageDeps, written: Any) -> str:
+def _project_before(ctx: StageContext, deps: StageDeps, written: Any, *fixed_texts: str) -> str:
     """The BEFORE half of what the Reviewer judges (owner ruling 2026-11-07): the Current Project View's current content of every EXISTING file the candidate touches, the new files named as
     new, and the project's other files by name - from the ONE view the Planner was shown, built before any candidate existed. A candidate's text alone cannot tell "changed the existing
     application" from "wrote a different file" (measured: run 20261107T182659-f963bb85). Empty when no view could be built."""
     view = getattr(ctx, "project_view", None)
     if view is None:
         return ""
-    # Sized against the Reviewer's own request room (a quarter of what its system prompt and goal leave, 4 characters a token), so a small served window degrades it instead of failing the request.
-    room = max(0, deps.agent_request_capacity(deps.config, deps.reviewer, "reviewer").room(deps.reviewer.system_prompt, ctx.goal))
+    # The header is ONE string every role candidate receives and can never be trimmed per candidate, so the BEFORE is sized for the role-chain model with the LEAST room, after the system prompt and the
+    # header text it sits in (goal, evidence/diff): a small served window - or a smaller fallback - degrades it (content -> names) instead of failing the request (test_prompt_fit_role_chain_001).
+    room = max(0, deps.agent_request_capacity(deps.config, deps.reviewer, "reviewer", smallest=True).room(deps.reviewer.system_prompt, ctx.goal, *fixed_texts))
     return render_before_context(view, written, max_chars=min(BEFORE_CONTEXT_MAX_CHARS, room))
 
 
@@ -63,7 +64,7 @@ async def pre_approval_review(
     try:
         verified_evidence = build_reviewer_verified_evidence(state.gate_outcomes) + \
             ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)
-        review_header = f"Goal: {goal}\n{verified_evidence}\n{_project_before(ctx, deps, state.all_files_written)}Files generated:\n"
+        review_header = f"Goal: {goal}\n{verified_evidence}\n{_project_before(ctx, deps, state.all_files_written, verified_evidence)}Files generated:\n"
         # PROMPT-BUDGET-FIT-001B: batches get the room this
         # request leaves after its system prompt and header,
         # refitted for each role candidate that is called.
@@ -149,20 +150,6 @@ async def final_review(ctx: StageContext, deps: StageDeps) -> Any:
     else:
         _log_phase_banner("REVIEW")
         logger.info("Reviewer Agent evaluating results...")
-        if state.final_attempt_contents:
-            goal_header = (
-                f"Goal: {goal}\n\n"
-                "NOTE: Quality gates did not pass within the retry budget - these files were "
-                "NOT applied to the workspace and only reflect the last (failing) attempt.\n"
-                f"Last quality gate error:\n{state.error_context}\n\nFiles from the failing attempt:\n"
-            )
-        else:
-            goal_header = (
-                f"Goal: {goal}\n{build_reviewer_verified_evidence(state.gate_outcomes)}"
-                f"{ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)}"
-                f"\n{_project_before(ctx, deps, state.all_files_written)}Files generated:\n"
-            )
-
         file_contents_for_review: List[Tuple[str, str]] = []
         for filepath in sorted(state.all_files_written):
             if filepath in state.final_attempt_contents:
@@ -174,6 +161,24 @@ async def final_review(ctx: StageContext, deps: StageDeps) -> Any:
                     file_contents_for_review.append((filepath, f.read()))
             except Exception as e:
                 logger.debug(f"Failed to read '{full_path}' for reviewer prompt: {e}")
+
+        candidate_diff_context = build_candidate_diff_context(
+            state.all_original_contents, dict(file_contents_for_review),
+        )
+        if state.final_attempt_contents:
+            goal_header = (
+                f"Goal: {goal}\n\n"
+                "NOTE: Quality gates did not pass within the retry budget - these files were "
+                "NOT applied to the workspace and only reflect the last (failing) attempt.\n"
+                f"Last quality gate error:\n{state.error_context}\n\nFiles from the failing attempt:\n"
+            )
+        else:
+            evidence_text = (f"{build_reviewer_verified_evidence(state.gate_outcomes)}"
+                             f"{ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)}")
+            goal_header = (
+                f"Goal: {goal}\n{evidence_text}"
+                f"\n{_project_before(ctx, deps, state.all_files_written, evidence_text, candidate_diff_context)}Files generated:\n"
+            )
 
         # Reviewer mutation-evidence priority (2026-09-20): a real live
         # incident - a large brownfield file's own candidate diff sat
@@ -190,9 +195,6 @@ async def final_review(ctx: StageContext, deps: StageDeps) -> Any:
         # their own original content - e.g. every written file is
         # brand new) is a complete no-op, byte-identical to before this
         # fix.
-        candidate_diff_context = build_candidate_diff_context(
-            state.all_original_contents, dict(file_contents_for_review),
-        )
         goal_header = candidate_diff_context + goal_header
 
         # Stage 6 SME review, Finding 2: previously concatenated every file's full

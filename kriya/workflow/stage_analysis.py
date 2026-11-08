@@ -19,7 +19,7 @@ from kriya.foundation.human_wait import human_wait
 from kriya.policy.approval import await_if_awaitable, resolve_approval_result
 from kriya.policy.egress import web_lookup_allowed
 from kriya.repository.bound_tree import BoundTreeError
-from kriya.repository.project_view import build_current_project_view, project_view_event_details, render_project_view
+from kriya.repository.project_view import build_current_project_view, project_view_event_details
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -95,10 +95,8 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
             message=f"Current Project View: {len(project_view.files)} file(s) listed",
             details=project_view_event_details(project_view),
         ))
-        # Sized against the Planner's OWN request room (a quarter of what the system prompt, goal and repository model leave, 4 characters a token): on a small served window the view
-        # degrades from content to names to fewer names, so it can never make the request unsatisfiable.
-        view_room = max(0, agent_request_capacity(deps.config, deps.planner, "planner").room(deps.planner.system_prompt, goal, repo_context))
-        repo_context += fence_untrusted_reference(render_project_view(project_view, max_chars=view_room))
+        # NOT appended to ``repo_context``: the Planner's and the Architect's requests render it per role candidate, for that candidate's own room (context_budget.fit_planner_request,
+        # ``project_view=``), so a smaller fallback model is refitted instead of being sent a view sized for the first one (test_prompt_fit_role_chain_001).
         
     # Load local workspace conventions if present
     repo_slug = os.path.basename(workspace_path).lower().strip(".")

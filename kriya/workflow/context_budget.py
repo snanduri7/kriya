@@ -916,6 +916,7 @@ def fit_structural_evidence(
 def fit_planner_request(
     capacity: RequestCapacity, *, system_prompt: str, head: str, skills_prompt: str, graph_context: str,
     reference: str, suffix: str, rebuild_graph: Callable[[int], Tuple[str, Any]], request: str = "planner",
+    project_view: Any = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """The direct Planner request (PROMPT-BUDGET-FIT-001A): ``head`` (goal,
     error, repository model) + skills + graph context + fenced reference +
@@ -925,9 +926,20 @@ def fit_planner_request(
     untrusted reference text). The graph context is rebuilt at its room by
     ``rebuild_graph(budget) -> (text, ContextPackage)`` only when it does not
     fit. Returns the prompt and the fit details (empty when both sections
-    went in unchanged, so the prompt is byte-identical to the unfitted one)."""
+    went in unchanged, so the prompt is byte-identical to the unfitted one).
+
+    ``project_view`` (the Current Project View, kriya/repository/project_view.py) is rendered HERE, for THIS candidate's own
+    capacity - never once for the first model: it degrades from content to names to fewer names inside the room the system
+    prompt and the head leave (a quarter of it, the unit the renderer has always used), so a smaller role-chain fallback is
+    refitted exactly like the graph context and the reference text and the view can never make its request unsatisfiable."""
+    from kriya.repository.project_view import render_project_view
     from kriya.workflow.untrusted_context import fence_untrusted_reference
 
+    if project_view is not None:
+        # the room is what the MANDATORY text (system prompt, head, skills and the suffix blocks) leaves; nothing fits -> no view at all
+        shown = render_project_view(project_view, max_chars=max(0, capacity.room(system_prompt, head, skills_prompt, suffix)))
+        if shown:
+            head = head + fence_untrusted_reference(shown)
     fixed = (system_prompt, head, skills_prompt, suffix)
     omitted_files: List[str] = []
 
@@ -1221,13 +1233,23 @@ def candidate_request_capacity(config: Any, candidate: Any, role: str, *,
 
 
 def agent_request_capacity(config: Any, agent: Any, role: str, *,
-                           output_tokens: Optional[int] = None) -> RequestCapacity:
+                           output_tokens: Optional[int] = None, smallest: bool = False) -> RequestCapacity:
     """The RequestCapacity of ``agent``'s request to its FIRST candidate: its
     role binding (``role_llm``; the primary otherwise), asking for the
     output ``output_tokens`` (else the agent's ``max_output_tokens``) makes
-    that call ask for. Every other candidate is sized by CandidatePrompts."""
+    that call ask for. Every other candidate is sized by CandidatePrompts.
+
+    ``smallest=True``: the capacity of the role-chain candidate with the LEAST room, for text that is FIXED across the chain (a
+    review header is one string every candidate receives; it can never be trimmed per candidate), so it is sized for the model
+    that must still hold it."""
     from kriya.agents.agent import role_output_override
 
+    if smallest:
+        chain = getattr(agent, "_candidates", None)
+        candidates = chain() if callable(chain) else [None]
+        override = role_output_override(agent, output_tokens)
+        return min((candidate_request_capacity(config, candidate, role, max_tokens_override=override) for candidate in candidates),
+                   key=lambda capacity: capacity.tokens)
     return candidate_request_capacity(config, getattr(agent, "role_llm", None), role,
                                       max_tokens_override=role_output_override(agent, output_tokens))
 

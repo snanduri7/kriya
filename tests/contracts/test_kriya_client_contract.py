@@ -31,7 +31,9 @@ DATA_PARAMETERS = frozenset({"ctx", "workspace", "requested", "parent", "name", 
                              "deadline_seconds", "max_endpoints",
                              # D2: a published trace snapshot named by id, or by its Snapshot value (id, directory, manifest), and the
                              # snapshot operations' bounded scalars
-                             "snapshot_id", "snapshot", "verify", "keep"})
+                             "snapshot_id", "snapshot", "verify", "keep",
+                             # run.log (the Kriya Log): the byte offset a page cursor names - a bounded integer
+                             "offset"})
 
 
 @pytest.fixture(params=sorted(IMPLEMENTATIONS))

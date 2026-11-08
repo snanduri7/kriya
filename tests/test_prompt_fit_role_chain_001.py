@@ -204,8 +204,10 @@ def test_a_smaller_planner_fallback_gets_a_request_refitted_to_its_own_room(tmp_
     (reference trimmed to its room) and reaches the model. Before the fix
     the 32K package went to the fallback and the dispatch check refused
     it, so the run raised."""
+    # REFERENCE * 5 (was * 6): the request now also carries the Current Project View (2026-11-07), which takes real room from the optional reference at the PRIMARY's 32K window; the premise this test
+    # asserts (the primary needs no trim, the smaller fallback is refitted) is unchanged - only the fixture's size was re-tuned to the new total.
     run = _run(tmp_path, monkeypatch, primary_window=32768, role="planner", fallback_window=12288,
-               fail=PLANNER, reference=REFERENCE * 6)
+               fail=PLANNER, reference=REFERENCE * 5)
     assert run.error is None and run.refusals == []
     (primary_system, primary_user), = run.transport.by(PRIMARY, *PLANNER)
     (system, user), = run.transport.by(FALLBACK, *PLANNER)
