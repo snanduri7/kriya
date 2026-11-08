@@ -5,7 +5,7 @@
  */
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { requirementTruthOf, requirementTruthWords, runtimeObservationOf } from '../core';
+import { requirementTruthFromEvents, requirementTruthOf, requirementTruthWords, runtimeObservationOf, activityEntries } from '../core';
 import { renderWorkspaceShell } from '../testing/harness';
 
 type Exec = Record<string, unknown>;
@@ -56,6 +56,34 @@ describe('requirement truth on the completed result', () => {
   });
 });
 
+describe('the same truth everywhere the result is worded', () => {
+  it('the badge never says "Run succeeded" for an open run', async () => {
+    const open = await completed({ requirementTruth: OPEN });
+    expect(open.textContent).not.toMatch(/Run succeeded/);
+    expect(open.textContent).toMatch(/verification incomplete/);
+  });
+  it('ACCEPTED requirements are counted apart from verified ones, never called verified', async () => {
+    const bar = await completed({ requirementTruth: { status: 'ALL_VERIFIED', verified: 1, accepted: 2, total: 3 } });
+    expect(within(bar).getByTestId('requirement-truth-summary')).toHaveTextContent('1 of 3 requirements verified · 2 accepted by you');
+    expect(within(bar).getByRole('heading', { level: 2 })).toHaveTextContent('Run completed');
+  });
+  it('the Activity closing line is qualified by the launch record\'s truth', () => {
+    const status = { launch: { requested_at: '2026-11-08T10:00:00+00:00', ended: { at: '2026-11-08T10:05:00+00:00', exit_code: 0, requirement_truth: OPEN } } } as unknown as Parameters<typeof activityEntries>[1];
+    const texts = activityEntries([], status).map((e) => e.text);
+    expect(texts).toContain('Changes applied — verification incomplete');
+    expect(texts).not.toContain('Run completed');
+    const ok = { launch: { ended: { at: '2026-11-08T10:05:00+00:00', exit_code: 0 } } } as unknown as Parameters<typeof activityEntries>[1];
+    expect(activityEntries([], ok).map((e) => e.text)).toContain('Run completed');
+  });
+  it('a stored run\'s truth is the LAST requirement.truth event; none recorded is null, malformed is null', () => {
+    const event = (status: string, verified: number) => ({ kind: 'requirement.truth', details: { status, verified, accepted: 0, total: 2, unresolved: [] } });
+    expect(requirementTruthFromEvents([event('OPEN_REQUIREMENTS', 1), { kind: 'other', details: {} }, event('ALL_VERIFIED', 2)])?.status).toBe('ALL_VERIFIED');
+    expect(requirementTruthFromEvents([{ kind: 'other', details: {} }])).toBeNull();
+    expect(requirementTruthFromEvents(null)).toBeNull();
+    expect(requirementTruthFromEvents([{ kind: 'requirement.truth', details: { status: 'NOPE' } }])).toBeNull();
+  });
+});
+
 describe('observed output on the completed result', () => {
   it('shows the command, the output and the exit status exactly as recorded', async () => {
     const bar = await completed({ runtimeObservation: { command: 'python3 hello.py', exitStatus: 0, stdout: 'hello world\n' } });
@@ -89,6 +117,6 @@ describe('the projections validate the backend record and derive nothing', () =>
   it('words: not recorded keeps today\'s words, open and contradicted never say "Run completed"', () => {
     expect(requirementTruthWords(null)).toMatchObject({ heading: 'Run completed', tone: 'ok', summary: null });
     expect(requirementTruthWords(requirementTruthOf({ requirement_truth: OPEN }))).toMatchObject({ heading: 'Changes applied — verification incomplete', tone: 'warn' });
-    expect(requirementTruthWords({ status: 'CONTRADICTED', verified: 0, total: 1, unresolved: [] }).heading).not.toBe('Run completed');
+    expect(requirementTruthWords({ status: 'CONTRADICTED', verified: 0, accepted: 0, total: 1, unresolved: [] }).heading).not.toBe('Run completed');
   });
 });

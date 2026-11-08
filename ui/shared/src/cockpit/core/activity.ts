@@ -4,6 +4,7 @@
  * gap in the records, never filled in. Pure: the drawer reads, this maps.
  */
 import { gateSteps } from './gateSteps';
+import { requirementTruthOf, requirementTruthWords } from './presentation';
 import { payloadOf, type EvidenceRecord } from './records';
 import { attemptRejections } from './retryFacts';
 import type { LaunchStatus } from '../../model/kup';
@@ -78,6 +79,13 @@ export function activityFromLaunch(status: LaunchStatus | null): ActivityEntry[]
 /** The merged Activity list: the records and the launch record's review lines, ordered by their own recorded time (a line with no time keeps the order it was produced in), the launch's
  * duplicate "Run started"/"Run completed" dropped when the evidence already has them. */
 export function activityEntries(records: readonly EvidenceRecord[], status: LaunchStatus | null): ActivityEntry[] {
+  const merged = mergedActivity(records, status);
+  // The backend's requirement truth qualifies the closing line: an open or contradicted run never ends on an ordinary green "Run completed".
+  const words = requirementTruthWords(requirementTruthOf(status?.launch.ended));
+  return words.tone === 'ok' ? merged : merged.map((e) => (e.text === 'Run completed' ? { ...e, text: words.heading, tone: 'info' as const } : e));
+}
+
+function mergedActivity(records: readonly EvidenceRecord[], status: LaunchStatus | null): ActivityEntry[] {
   const fromRecords = activityFromRecords(records);
   const hasStart = fromRecords.some((e) => e.text === 'Run started');
   const hasEnd = fromRecords.some((e) => e.text === 'Run completed' || e.text === 'Run ended');

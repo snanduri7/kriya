@@ -191,6 +191,23 @@ def test_control_b_exit_zero_but_wrong_value_is_violated_for_a_quoted_literal(tm
     assert requirement_evidence(ledger, reqs)["REQ-2"]["observed"] == "goodbye"
 
 
+def test_a_quoted_mismatch_blocks_the_run_under_every_policy_including_the_default_record(tmp_path):
+    """TRACED + tested at the blocking decision the development loop applies: VIOLATED always blocks, so a run that printed the wrong quoted value stops with requirements_unresolved instead of being applied."""
+    from kriya.workflow.requirements import blocking_requirements
+
+    root = _candidate(tmp_path, {"hello.py": "print('goodbye')\n"})
+    outcome = _outcome(root, ["hello.py"], [_step([PYTHON, "hello.py"], "goodbye\n")])
+    _, outcomes, ledger, reqs = _stdout_close(QUOTED, root, [outcome])
+    assert outcomes["REQ-2"] is RequirementOutcome.VIOLATED
+    record = blocking_requirements(ledger, reqs, unknown_policy="record", unverified_policy="record")
+    assert [(r.id, o.value) for r, o in record] == [("REQ-2", "violated")]           # the default policy: the contradicted requirement alone blocks
+    block = blocking_requirements(ledger, reqs, unknown_policy="record", unverified_policy="block")
+    assert ("REQ-2", "violated") in [(r.id, o.value) for r, o in block]               # and it blocks under the strict policy too
+    # while an unquoted mismatch (open, never violated) does not block under the default policy
+    _, _, ledger2, reqs2 = _stdout_close(UNQUOTED, root, [_outcome(root, ["hello.py"], [_step([PYTHON, "hello.py"], "Hello World\n")])])
+    assert [r.id for r, _ in blocking_requirements(ledger2, reqs2, unverified_policy="record")] == []
+
+
 @pytest.mark.parametrize("stdout", ["hello world!\n", "hello world\n\n", " hello world\n", "say hello world\n", "hello\n", ""])
 def test_whole_stdout_is_compared_no_substring_no_trimming(tmp_path, stdout):
     root = _candidate(tmp_path)

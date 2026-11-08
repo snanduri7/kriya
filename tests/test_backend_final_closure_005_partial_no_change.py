@@ -395,7 +395,7 @@ def test_n1_the_recognizer_is_a_closed_vocabulary_over_exact_tracked_paths():
         assert frozen_file_statement(text, TRACKED) == (), text
     assert frozen_file_statement("Do not modify README.md.", []) == ()  # no base tree: nothing can be frozen
     assert FILE_IMMUTABILITY_CLAIM in CLAIM_KINDS  # an operator disposition may name the claim
-    assert CONTRACT_COMPILER_VERSION == 3
+    assert CONTRACT_COMPILER_VERSION == 4  # 4: the FILE_CREATION claim and the RUNTIME_STDOUT binding (2026-11-08); 3 was the FILE_IMMUTABILITY claim
 
 
 def test_n2_the_compiled_contract_binds_the_frozen_paths_and_a_frozen_test_is_a_freeze_not_a_regression_claim():

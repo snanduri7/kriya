@@ -187,7 +187,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:32ca5c7fc1f2d029"
+      "event": "sha256:733b3130ff7c2ca8"
      },
      "event": "verification_contract.compiled",
      "kind": "mirror.event",
@@ -208,11 +208,32 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:81564c21128f8c4c"
+      "event": "sha256:7787f1b2ef0eedaa"
      },
      "event": "verification_contract.sealed",
      "kind": "mirror.event",
      "payload": "sha256:e6c4d0baf6fac7ec",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:8b5a17eb615fa30a"
+     },
+     "event": "project_view.built",
+     "kind": "mirror.event",
+     "payload": "sha256:03b7e29204334787",
      "payload_keys": [
       "attempt",
       "authority",
@@ -421,16 +442,16 @@
   "requests": {
    "architect": [
     {
-     "chars": 657,
-     "text": "sha256:c72d44930e1fe516"
+     "chars": 1703,
+     "text": "sha256:650547d1fb3a9851"
     }
    ],
    "developer": [],
    "lessons": [],
    "planner": [
     {
-     "chars": 701,
-     "text": "sha256:3ab868a291f7fc91"
+     "chars": 1747,
+     "text": "sha256:82c7a475d44b503b"
     }
    ],
    "reviewer": []
@@ -706,16 +727,23 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:89844e8375dd5fea",
+     "details": "sha256:d04dc1d876d1f036",
      "kind": "verification_contract.compiled",
      "source": "workflow.run_generation_workflow"
     },
     {
      "attempt": 0,
      "authority": "authoritative",
-     "details": "sha256:857f7c253ea81b16",
+     "details": "sha256:ea74a30b27fabbf8",
      "kind": "verification_contract.sealed",
      "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:ffe4eddf2e4bc360",
+     "kind": "project_view.built",
+     "source": "workflow.analyze_work_unit"
     },
     {
      "attempt": 0,

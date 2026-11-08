@@ -4,6 +4,7 @@
  * producers in kriya/core/attempt_evidence/scope.py), not the design documents'.
  */
 import type { RunDetail } from '../../model/kup';
+import { parseRequirementTruth, type RequirementTruth } from './presentation';
 import { ofKind, payloadOf, type EvidenceRecord } from './records';
 import { gateRows, recoveries, fallbacks, type FallbackFacts, type RecoveryFacts } from './selectors';
 
@@ -195,6 +196,12 @@ export function requirementsFacts(events: readonly S1Event[] | null): Requiremen
     lineage: all.filter((e) => e.kind === 'requirement.lineage').map((e) => ({ stage: str(e.details.stage), cited: strings(e.details.cited), omitted: strings(e.details.omitted) })),
     planEvents: all.filter((e) => e.kind.startsWith('structured_plan_')).map((e) => ({ kind: e.kind, reasonCodes: strings(e.details.reason_codes), classification: str(e.details.classification), accepted: bool(e.details.accepted), valid: bool(e.details.valid), repairAttempt: num(e.details.repair_attempt ?? e.details.repair_attempts), message: e.message })),
   };
+}
+
+/** The run's FINAL requirement truth from its own events: the LAST `requirement.truth` event (the backend emits one at every closure; the last is final). null when the run recorded none (a run from before this event existed): never "verified". */
+export function requirementTruthFromEvents(events: readonly { kind: string; details?: unknown }[] | null): RequirementTruth | null {
+  const last = [...(events ?? [])].reverse().find((e) => e.kind === 'requirement.truth');
+  return last ? parseRequirementTruth(last.details) : null;
 }
 
 export function obligations(records: readonly EvidenceRecord[], attempt: number | null): { seq: number; ledgerRevision: number | null; ledgerDigest: string | null; unresolvedTerminal: number } | null {

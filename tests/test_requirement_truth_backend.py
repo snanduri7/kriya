@@ -27,7 +27,7 @@ def _truth(*outcomes):
 
 @pytest.mark.parametrize("outcomes,status,verified,total", [
     ((O.CLOSED_BY_EVIDENCE, O.CLOSED_BY_EVIDENCE), REQUIREMENT_TRUTH_ALL_VERIFIED, 2, 2),
-    ((O.CLOSED_BY_EVIDENCE, O.HUMAN_ACCEPTED), REQUIREMENT_TRUTH_ALL_VERIFIED, 2, 2),
+    ((O.CLOSED_BY_EVIDENCE, O.HUMAN_ACCEPTED), REQUIREMENT_TRUTH_ALL_VERIFIED, 1, 2),     # accepted by an operator: resolved, but never COUNTED as verified
     ((O.CLOSED_BY_EVIDENCE, O.UNVERIFIED), REQUIREMENT_TRUTH_OPEN, 1, 2),
     ((O.UNKNOWN, O.PENDING), REQUIREMENT_TRUTH_OPEN, 0, 2),
     ((O.CLOSED_BY_EVIDENCE, O.VIOLATED, O.UNVERIFIED), REQUIREMENT_TRUTH_CONTRADICTED, 1, 3),
@@ -37,6 +37,12 @@ def _truth(*outcomes):
 def test_status_is_derived_from_the_outcomes_alone(outcomes, status, verified, total):
     truth = _truth(*outcomes)
     assert (truth["status"], truth["verified"], truth["total"]) == (status, verified, total)
+
+
+def test_operator_acceptance_is_counted_apart_from_verification():
+    truth = _truth(O.CLOSED_BY_EVIDENCE, O.HUMAN_ACCEPTED, O.HUMAN_ACCEPTED)
+    assert (truth["verified"], truth["accepted"], truth["total"], truth["status"]) == (1, 2, 3, REQUIREMENT_TRUTH_ALL_VERIFIED)
+    assert _truth(O.HUMAN_ACCEPTED, O.UNVERIFIED)["status"] == REQUIREMENT_TRUTH_OPEN
 
 
 def test_unresolved_lists_the_open_requirements_in_order_with_their_outcome_and_is_bounded():
@@ -53,11 +59,11 @@ def test_a_requirement_missing_from_the_outcomes_is_open_never_verified():
 
 def test_the_launch_record_copies_the_truth_bounded_and_redacted():
     token = "ghp_" + "a" * 36
-    result = {"requirement_truth": {"status": "OPEN_REQUIREMENTS", "verified": 1, "total": 3,
+    result = {"requirement_truth": {"status": "OPEN_REQUIREMENTS", "verified": 1, "accepted": 1, "total": 3,
                                     "unresolved": [{"id": "REQ-2", "text": f"print {token} " + "x" * 500, "outcome": "unverified"}] + [
                                         {"id": f"REQ-{i}", "text": "t", "outcome": "unverified"} for i in range(3, 30)]}}
     field = _requirement_truth_field(result)["requirement_truth"]
-    assert field["status"] == "OPEN_REQUIREMENTS" and (field["verified"], field["total"]) == (1, 3)
+    assert field["status"] == "OPEN_REQUIREMENTS" and (field["verified"], field["accepted"], field["total"]) == (1, 1, 3)
     assert token not in field["unresolved"][0]["text"] and len(field["unresolved"][0]["text"]) <= 240 and len(field["unresolved"]) == 8
 
 

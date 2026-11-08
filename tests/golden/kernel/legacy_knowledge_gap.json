@@ -187,7 +187,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:65d69db707a49df3"
+      "event": "sha256:606a3c27e9c2c140"
      },
      "event": "verification_contract.compiled",
      "kind": "mirror.event",
@@ -208,7 +208,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:b20de2e3eb428303"
+      "event": "sha256:ced31db0d9297b72"
      },
      "event": "verification_contract.sealed",
      "kind": "mirror.event",
@@ -559,14 +559,14 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:b4fd6552f5eed52e",
+     "details": "sha256:49655f49eb565739",
      "kind": "verification_contract.compiled",
      "source": "workflow.run_generation_workflow"
     },
     {
      "attempt": 0,
      "authority": "authoritative",
-     "details": "sha256:516eb56c6cefd0e9",
+     "details": "sha256:bb8e2049000fdc70",
      "kind": "verification_contract.sealed",
      "source": "workflow.run_generation_workflow"
     },

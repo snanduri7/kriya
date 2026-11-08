@@ -187,7 +187,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:32ca5c7fc1f2d029"
+      "event": "sha256:733b3130ff7c2ca8"
      },
      "event": "verification_contract.compiled",
      "kind": "mirror.event",
@@ -208,11 +208,32 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:81564c21128f8c4c"
+      "event": "sha256:7787f1b2ef0eedaa"
      },
      "event": "verification_contract.sealed",
      "kind": "mirror.event",
      "payload": "sha256:e6c4d0baf6fac7ec",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:944c6519b4e44131"
+     },
+     "event": "project_view.built",
+     "kind": "mirror.event",
+     "payload": "sha256:03b7e29204334787",
      "payload_keys": [
       "attempt",
       "authority",
@@ -337,8 +358,8 @@
    "developer": [],
    "planner": [
     {
-     "chars": 701,
-     "text": "sha256:865e7d7962dc4370"
+     "chars": 1535,
+     "text": "sha256:a78878b551461d4a"
     }
    ]
   },
@@ -579,16 +600,23 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:89844e8375dd5fea",
+     "details": "sha256:d04dc1d876d1f036",
      "kind": "verification_contract.compiled",
      "source": "workflow.run_generation_workflow"
     },
     {
      "attempt": 0,
      "authority": "authoritative",
-     "details": "sha256:857f7c253ea81b16",
+     "details": "sha256:ea74a30b27fabbf8",
      "kind": "verification_contract.sealed",
      "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:871cddd00ce1cb10",
+     "kind": "project_view.built",
+     "source": "workflow.analyze_work_unit"
     },
     {
      "attempt": 0,

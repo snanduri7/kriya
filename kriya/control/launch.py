@@ -344,14 +344,14 @@ def _requirement_truth_field(result: Dict[str, Any]) -> Dict[str, Any]:
     truth = result.get("requirement_truth")
     if not isinstance(truth, dict) or truth.get("status") not in REQUIREMENT_TRUTH_STATUSES:
         return {}
-    verified, total = truth.get("verified"), truth.get("total")
-    if not isinstance(verified, int) or isinstance(verified, bool) or not isinstance(total, int) or isinstance(total, bool):
+    verified, total, accepted = truth.get("verified"), truth.get("total"), truth.get("accepted", 0)
+    if any(not isinstance(n, int) or isinstance(n, bool) for n in (verified, total, accepted)):
         return {}
     rows = [{"id": redact_text(str(row["id"]))[:40], "text": redact_text(row["text"])[:REQUIREMENT_TRUTH_MAX_TEXT],
              "outcome": str(row.get("outcome") or "unverified")[:40]}
             for row in (truth.get("unresolved") if isinstance(truth.get("unresolved"), list) else [])[:REQUIREMENT_TRUTH_MAX_ROWS]
             if isinstance(row, dict) and isinstance(row.get("id"), str) and isinstance(row.get("text"), str)]
-    return {"requirement_truth": {"status": truth["status"], "verified": verified, "total": total, "unresolved": rows}}
+    return {"requirement_truth": {"status": truth["status"], "verified": verified, "accepted": accepted, "total": total, "unresolved": rows}}
 
 
 def _runtime_observation_field(result: Dict[str, Any]) -> Dict[str, Any]:

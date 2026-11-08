@@ -1,4 +1,4 @@
-import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, writeScopeOf, RunCapabilityStrip, RunMemoryLine, ReplayNotice, memoryRunIdOf, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, writeScopeOf, RunCapabilityStrip, RunMemoryLine, ReplayNotice, RequirementTruthBlock, requirementTruthFromEvents, requirementTruthWords, memoryRunIdOf, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
 const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
@@ -25,13 +25,17 @@ function Overview() {
         const events = hasData(detail) ? detail.data.run_events.data ?? [] : [];
         const app = hasData(detail) && detail.data.application_outcome?.availability === 'recorded' ? detail.data.application_outcome.data ?? null : null;
         const outcome = OUTCOME[(ctx.status === 'success' || ctx.status === 'failure' || ctx.status === 'in_progress' ? ctx.status : 'in_progress') as keyof typeof OUTCOME];
+        // The run's FINAL requirement truth from its own events (a stored run shows the same truth the live one did; a run recorded before the event existed shows none, never "verified").
+        const truth = ctx.status === 'success' ? requirementTruthFromEvents(events) : null;
+        const truthWords = requirementTruthWords(truth);
         return (
           <div style={{ display: 'grid', gap: 8 }}>
             <section className="ck-overview" aria-label="Run result" data-status={ctx.status ?? 'unknown'}>
-              <h3 className="ck-result-head"><span aria-hidden="true">{ctx.status ? outcome.mark : '•'}</span> {ctx.status ? outcome.words : 'Outcome not recorded'}</h3>
+              <h3 className="ck-result-head"><span aria-hidden="true">{ctx.status ? (truthWords.tone === 'ok' ? outcome.mark : '⚠') : '•'}</span> {ctx.status ? (truthWords.tone === 'ok' ? outcome.words : truthWords.heading) : 'Outcome not recorded'}</h3>
               <p className="ck-result-goal">{goalTitle(ctx.displayGoal)}</p>
               <ReplayNotice runId={ctx.runId} status={ctx.status} />
-              {ctx.status === 'success' ? <p>Your change was recorded as complete.</p> : null}
+              {ctx.status === 'success' ? <p>{truthWords.applied ?? 'Your change was recorded as complete.'}</p> : null}
+              <RequirementTruthBlock truth={truth} words={truthWords} />
 
               {sealedEvidence ? <RunCapabilityStrip cells={runCapabilityCells({
                 modelCalls: records ? ofKind(records, 'model.response').length : null,

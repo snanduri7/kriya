@@ -1124,7 +1124,7 @@ REQUIREMENT_TRUTH_ALL_VERIFIED = "ALL_VERIFIED"
 REQUIREMENT_TRUTH_OPEN = "OPEN_REQUIREMENTS"
 REQUIREMENT_TRUTH_CONTRADICTED = "CONTRADICTED"
 # Outcomes that are RESOLVED by deterministic evidence or by an operator's acceptance (HUMAN_ACCEPTED is operator sufficiency:
-# resolved, counted as verified for this status, never described as proven). NOT_A_CLAIM / DISPOSITIONED are not mandatory
+# resolved for the ALL_VERIFIED status, but COUNTED SEPARATELY as ``accepted`` - never as "verified", never described as proven). NOT_A_CLAIM / DISPOSITIONED are not mandatory
 # requirements at all and are left out of the total.
 _TRUTH_RESOLVED = frozenset({RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED})
 _TRUTH_EXCLUDED = frozenset({RequirementOutcome.NOT_A_CLAIM, RequirementOutcome.DISPOSITIONED})
@@ -1138,16 +1138,17 @@ def requirement_truth(outcomes: Mapping[str, RequirementOutcome], requirements: 
     UNKNOWN / UNVERIFIED requirement). ``unresolved`` lists, in requirement order, those that are not resolved (bounded)."""
     mandatory = [(r, outcomes.get(r.id, RequirementOutcome.PENDING)) for r in requirements.requirements
                  if outcomes.get(r.id, RequirementOutcome.PENDING) not in _TRUTH_EXCLUDED]
-    verified = sum(1 for _r, outcome in mandatory if outcome in _TRUTH_RESOLVED)
+    verified = sum(1 for _r, outcome in mandatory if outcome is RequirementOutcome.CLOSED_BY_EVIDENCE)
+    accepted = sum(1 for _r, outcome in mandatory if outcome is RequirementOutcome.HUMAN_ACCEPTED)  # operator sufficiency: never "verified"
     if any(outcome is RequirementOutcome.VIOLATED for _r, outcome in mandatory):
         status = REQUIREMENT_TRUTH_CONTRADICTED
-    elif mandatory and verified == len(mandatory):
+    elif mandatory and verified + accepted == len(mandatory):
         status = REQUIREMENT_TRUTH_ALL_VERIFIED
     else:
         status = REQUIREMENT_TRUTH_OPEN
     unresolved = [{"id": r.id, "text": r.text, "outcome": outcome.value}
                   for r, outcome in mandatory if outcome not in _TRUTH_RESOLVED][:REQUIREMENT_TRUTH_MAX_UNRESOLVED]
-    return {"status": status, "verified": verified, "total": len(mandatory), "unresolved": unresolved}
+    return {"status": status, "verified": verified, "accepted": accepted, "total": len(mandatory), "unresolved": unresolved}
 
 
 def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, Dict[str, Any]]:

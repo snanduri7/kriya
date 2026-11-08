@@ -240,7 +240,7 @@ def test_the_completed_result_of_a_refused_final_review_carries_the_refusal():
     with patch("kriya.control.run_coordinator.owning_run_committed_work_units", return_value=None):
         result = _completed(state, _deps(), failure_category="final_review_refused")
     golden_keys = _golden("legacy_final_review_refused")["result"]["legacy_result"]["keys"]
-    assert sorted(result) == sorted(set(golden_keys) - {"requirements"})   # no requirement set in this unit
+    assert sorted(result) == sorted(set(golden_keys) - {"requirements", "requirement_truth"})   # no requirement set in this unit
     assert result["final_review_refusal"] == {**refusal, "candidate_applied": True, "committed_work_units": None,
                                               "rolled_back": False}
     assert (result["failure_category"], result["quality_gates_passed"]) == ("final_review_refused", False)
@@ -256,7 +256,7 @@ def test_the_completed_result_fields_on_a_failed_and_a_passed_run():
     result = _completed(failed, _deps(), failure_category="environment_failure",
                         failure_report_dicts=[{"failure_type": "compile"}], unresolved_skill_gap_names=["y", "x", "y"])
     golden_keys = _golden("legacy_gates_exhausted")["result"]["legacy_result"]["keys"]
-    assert sorted(result) == sorted(set(golden_keys) - {"requirements"})
+    assert sorted(result) == sorted(set(golden_keys) - {"requirements", "requirement_truth"})
     assert "final_review_refusal" not in result and "ownership_findings" not in result
     assert result["environment_failure"] == "TOOLCHAIN_MISSING: x" and result["no_progress_reason"] == "R"
     assert result["completion_kind"] is None and result["unchanged_files"] == []

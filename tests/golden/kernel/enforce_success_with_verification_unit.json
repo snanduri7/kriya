@@ -184,6 +184,27 @@
     {
      "attempt": null,
      "content": {
+      "event": "sha256:944c6519b4e44131"
+     },
+     "event": "project_view.built",
+     "kind": "mirror.event",
+     "payload": "sha256:03b7e29204334787",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "structured"
+    },
+    {
+     "attempt": null,
+     "content": {
       "evidence": "sha256:4c19786b92921d81"
      },
      "kind": "mirror.evidence",
@@ -591,7 +612,7 @@
     {
      "attempt": 1,
      "kind": "prompt.sections",
-     "payload": "sha256:6144f7bbc70d0753",
+     "payload": "sha256:ef944a4c9d63349a",
      "payload_keys": [
       "builds",
       "fitter",
@@ -610,7 +631,7 @@
     {
      "attempt": 1,
      "kind": "model.result",
-     "payload": "sha256:4c5bb98b683ca3b6",
+     "payload": "sha256:ab3ded7bcba1f115",
      "payload_keys": [
       "backend_error",
       "backend_status",
@@ -776,7 +797,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:69ab561098f85ee5"
+      "event": "sha256:f953c7ade9c74bad"
      },
      "event": "model.role_metrics",
      "kind": "mirror.event",
@@ -875,7 +896,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:3d624fc7bd2dd6a6"
+      "event": "sha256:cbf72fc0d21bd6e1"
      },
      "event": "evidence.attempt_store",
      "kind": "mirror.event",
@@ -922,6 +943,27 @@
      "event": "model.role_independence",
      "kind": "mirror.event",
      "payload": "sha256:cb6d658abeb32638",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "structured"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:944c6519b4e44131"
+     },
+     "event": "project_view.built",
+     "kind": "mirror.event",
+     "payload": "sha256:03b7e29204334787",
      "payload_keys": [
       "attempt",
       "authority",
@@ -1170,7 +1212,7 @@
     {
      "attempt": null,
      "kind": "prompt.sections",
-     "payload": "sha256:82daa0c0dd8a4af7",
+     "payload": "sha256:e376c0bd95d755f9",
      "payload_keys": [
       "builds",
       "fitter",
@@ -1340,7 +1382,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:12dd5fc860606d7f"
+      "event": "sha256:fc9993bb3a96d78b"
      },
      "event": "verification_contract.compiled",
      "kind": "mirror.event",
@@ -1361,7 +1403,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:ce4e812c445ae559"
+      "event": "sha256:b097a1b22ffff826"
      },
      "event": "verification_contract.sealed",
      "kind": "mirror.event",
@@ -1437,6 +1479,7 @@
    "evidence.attempt_store",
    "model.runtime",
    "model.role_independence",
+   "project_view.built",
    "validation_baseline.policy",
    "attempt.started",
    "context.retry_target_source",
@@ -1456,6 +1499,7 @@
    "evidence.attempt_store",
    "model.runtime",
    "model.role_independence",
+   "project_view.built",
    "validation_baseline.policy",
    "candidate_gates.passed",
    "static_analysis.result",
@@ -1562,7 +1606,7 @@
    "tool_attempts": {},
    "tree_hash": "58afe713a64fc71c931ecc8118b8a5a04e632b98",
    "updated_at": "<time>",
-   "verification_contract_digest": "4a7e2b5f2056a18fb1fe7dada34fb11a5fbd80e3dc617e5e7ea3b387c7f81e0c",
+   "verification_contract_digest": "9c5f373d26a4741f0f44a400cb8545b1820c2e1c50289470d3b6f4f6ce06c1c6",
    "workspace_content_hash": "bbaa46a456edcd46c49e69640bb4dc1c9cc173826d2475685e000711e21357a4"
   },
   "decisions": [
@@ -1942,7 +1986,7 @@
      "admission": "VERIFICATION_AUTHORITY_REQUIRED",
      "authorities": [],
      "base_revision": "9feb8d6e4a285cf42532663f0e23150071dbba90",
-     "contract_digest": "4a7e2b5f2056a18fb1fe7dada34fb11a5fbd80e3dc617e5e7ea3b387c7f81e0c",
+     "contract_digest": "9c5f373d26a4741f0f44a400cb8545b1820c2e1c50289470d3b6f4f6ce06c1c6",
      "dispositions": null,
      "format": "kriya.verification_contract/1",
      "goal_digest": "91a70e16b303e1a12b681a9e559c7b1e0ca83637245f6aff90fbe90d87e0b934",
@@ -1997,7 +2041,7 @@
      ],
      "stored_path": {
       "chars": 106,
-      "text": "sha256:5e1eb68db1717fcc"
+      "text": "sha256:389cb1ab421c4831"
      },
      "totals": {
       "ambiguous": 0,
@@ -2127,6 +2171,13 @@
     },
     {
      "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:871cddd00ce1cb10",
+     "kind": "project_view.built",
+     "source": "workflow.analyze_work_unit"
+    },
+    {
+     "attempt": 0,
      "authority": "auxiliary",
      "details": "sha256:baa6ff663d0dc636",
      "kind": "validation_baseline.policy",
@@ -2226,7 +2277,7 @@
     {
      "attempt": 1,
      "authority": "auxiliary",
-     "details": "sha256:8ec80db9e9bc546f",
+     "details": "sha256:052489194ed70155",
      "kind": "model.role_metrics",
      "source": "workflow"
     }
@@ -2246,7 +2297,7 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:671a01cd3c289386",
+     "details": "sha256:0dbc737f2061aefa",
      "kind": "evidence.attempt_store",
      "source": "workflow.run_generation_workflow"
     },
@@ -2263,6 +2314,13 @@
      "details": "sha256:46ec10ede5ee60f8",
      "kind": "model.role_independence",
      "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:871cddd00ce1cb10",
+     "kind": "project_view.built",
+     "source": "workflow.analyze_work_unit"
     },
     {
      "attempt": 0,
@@ -2315,14 +2373,14 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:64e6436f32b5d5b5",
+     "details": "sha256:ce77ef9629e02d78",
      "kind": "verification_contract.compiled",
      "source": "workflow_controller.enforce"
     },
     {
      "attempt": 0,
      "authority": "authoritative",
-     "details": "sha256:561c66f3e781206b",
+     "details": "sha256:65a6807a27f5b641",
      "kind": "verification_contract.sealed",
      "source": "workflow_controller.enforce"
     },

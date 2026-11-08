@@ -53,11 +53,14 @@ def _recording_bindings(log, *, results=None):
     return {name: binding(name) for name in CLOSER_SEQUENCE}
 
 
-def test_the_sequence_is_the_eleven_closers_in_the_order_both_sites_ran_them():
+def test_the_sequence_is_the_thirteen_closers_in_the_order_both_sites_run_them():
+    # 2026-11-08 (REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001): file_creation and runtime_stdout join the contract group, before documentation.
     assert CLOSER_SEQUENCE == (
         "mutation_scope", "acceptance", "authority_bundle", "derived_examples", "api_preservation", "test_addition",
-        "documentation", "named_tests", "test_immutability", "file_immutability", "suite_preservation")
-    assert CONTRACT_CLOSERS == ("authority_bundle", "derived_examples", "api_preservation", "test_addition", "documentation")
+        "file_creation", "runtime_stdout", "documentation", "named_tests", "test_immutability", "file_immutability",
+        "suite_preservation")
+    assert CONTRACT_CLOSERS == ("authority_bundle", "derived_examples", "api_preservation", "test_addition", "file_creation",
+                                "runtime_stdout", "documentation")
     assert set(CONTRACT_CLOSERS) <= set(CLOSER_SEQUENCE)
 
 

@@ -5,6 +5,7 @@ export { localClock, shouldStickToBottom } from './activity';
 export { CopyText } from './CopyText';
 export { HowToRun } from './HowToRun';
 export { ObservedOutput } from './ObservedOutput';
+export { RequirementTruthBlock } from './RequirementTruthBlock';
 export { KriyaLogView } from './KriyaLogView';
 export { useRunLog } from './useRunLog';
 export * from './availability';

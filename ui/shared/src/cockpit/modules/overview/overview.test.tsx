@@ -48,7 +48,8 @@ describe('Overview', () => {
   it('opens with a plain summary - the outcome, the changed files and the recorded validation - before any identifier', async () => {
     renderModule(overviewModule, { runId: 'fx-brownfield-modify' });
     const summary = await screen.findByRole('region', { name: 'Run result' });
-    expect(within(summary).getByRole('heading', { name: /Run completed/ })).toBeInTheDocument();
+    expect(within(summary).getByRole('heading', { name: /Changes applied — verification incomplete/ })).toBeInTheDocument();   // the stored run's own requirement.truth event: the same truth a live run shows
+    expect(within(summary).getByTestId('requirement-truth-summary')).toHaveTextContent('1 of 2 requirements verified · 1 unverified');
     expect(within(await within(summary).findByRole('list', { name: 'Changed files' })).getAllByRole('listitem').length).toBeGreaterThan(0);
     expect(summary.textContent).toMatch(/passed/);
     expect(summary.textContent).not.toMatch(/sha256|seq \d|mirror\.|sealed_store|model call/); // meaning first: no mechanism on the result

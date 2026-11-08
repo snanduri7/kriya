@@ -204,6 +204,10 @@ function withS1(scenario: Scenario): Scenario {
     s1('requirement.derived', 0, 'workflow.run_generation_workflow', '2 original requirement(s) derived', { digest: hex(90), goal_digest: hex(91), version: 1, requirements: [{ id: 'REQ-1', kind: 'requirement', ordinal: 1, source: 'goal', text: scenario.goal }, { id: 'REQ-2', kind: 'constraint', ordinal: 2, source: 'goal', text: 'Do not modify any other file.' }] }),
     s1('requirement.lineage', 0, 'workflow.run_generation_workflow', "plan cites ['REQ-1']; omitted (still active) ['REQ-2']", { stage: 'plan', cited: ['REQ-1'], omitted: ['REQ-2'], requirement_set_digest: hex(90) }),
   ];
+  if (scenario.id === 'fx-brownfield-modify') {
+    // The usual brownfield result: the test-addition requirement is closed by evidence, the behaviour requirement (a formula over parameters) has no deterministic authority - the backend's requirement.truth event says so.
+    events.push(s1('requirement.truth', 1, 'workflow.requirement_closure', 'requirement truth: OPEN_REQUIREMENTS (1 verified, 0 accepted, 2 mandatory)', { requirement_set_digest: hex(90), status: 'OPEN_REQUIREMENTS', verified: 1, accepted: 0, total: 2, unresolved: [{ id: 'REQ-1', text: scenario.goal, outcome: 'unverified' }] }));
+  }
   if (scenario.id === 'fx-greenfield-compile-retry') {
     events.push(s1('structured_plan_validation', 0, 'workflow.legacy_planner_repair', 'Legacy Planner output failed structured-plan schema validation (repair_attempts_so_far=0).', { valid: false, repair_attempts: 0, reason_codes: ['TOOL_SUBTASK_MISSING_TOOL_NAME'] }),
       s1('structured_plan_repair_requested', 0, 'workflow.legacy_planner_repair', 'Requesting bounded Planner repair (attempt 1/2).', { repair_attempt: 1, reason_codes: ['TOOL_SUBTASK_MISSING_TOOL_NAME'] }),

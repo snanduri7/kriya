@@ -1,6 +1,6 @@
 import { OpenInEditorButton, RevealButton } from './WorkspaceFacts';
 import { folderFact } from './Readiness';
-import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, runRecipeOf, HowToRun, ObservedOutput, requirementTruthOf, requirementTruthWords, runtimeObservationOf, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, RunStepper, activityText, changeSummary, localClock, progressCounts, runPhase, useRunActivity, useWorkspaceUi, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, runRecipeOf, HowToRun, ObservedOutput, RequirementTruthBlock, requirementTruthOf, requirementTruthWords, runtimeObservationOf, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, RunStepper, activityText, changeSummary, localClock, progressCounts, runPhase, useRunActivity, useWorkspaceUi, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const ACTIVITY_MARK = { info: '•', ok: '✓', bad: '✕', wait: '⚠' } as const;
@@ -55,12 +55,7 @@ function Completed({ phase }: { phase: RunPhase }) {
       </p>
       {created && projectName ? <p className="ck-project-name" data-testid="created-project">{projectName}</p> : null}
 
-      {truth !== null ? (
-        <section className="ck-truth" data-testid="requirement-truth" data-status={truth.status} aria-label="Requirement verification">
-          <p data-testid="requirement-truth-summary"><strong>{truthWords.summary}</strong></p>
-          {truth.unresolved.length ? <ul className="ck-truth-open" aria-label="Unverified requirements">{truth.unresolved.map((u) => <li key={u.id} data-testid="requirement-unresolved"><span className="mono small">{u.id}</span> {u.text}{u.outcome === 'violated' ? <span className="muted small"> · contradicted by evidence</span> : null}</li>)}</ul> : null}
-        </section>
-      ) : null}
+      <RequirementTruthBlock truth={truth} words={truthWords} />
 
       <h3>What changed</h3>
       {files === null ? <p className="muted" role="status">{reading('changes')}</p>
@@ -219,7 +214,7 @@ export function CurrentRun() {
         <div role="status" aria-live="polite" className="ck-current-status">
           <span className={`ck-dot ${finished && phase.state === 'COMPLETED' && completedWords.tone !== 'ok' ? completedWords.tone : phase.tone}`} aria-hidden="true">{cancelled || byYou ? '■' : finished ? (phase.state === 'COMPLETED' ? (completedWords.tone === 'ok' ? '✓' : '⚠') : phase.state === 'STOPPED' ? '■' : '✕') : '●'}</span>
           <h2>{heading}</h2>
-          <Badge tone={cancelled || byYou ? 'warn' : finished && phase.state === 'COMPLETED' && completedWords.tone !== 'ok' ? completedWords.tone : TONE[phase.tone]}>{cancelled ? (ex.cancelState.phase === 'settled' && ex.cancelState.folder.kind === 'clean' ? 'cancelled by you' : 'cancelled by you - check the folder') : cancelling ? 'cancelling' : finished ? run.outcome!.label : phase.state === 'WAITING_FOR_APPROVAL' ? 'needs you' : 'in progress'}</Badge>
+          <Badge tone={cancelled || byYou ? 'warn' : finished && phase.state === 'COMPLETED' && completedWords.tone !== 'ok' ? completedWords.tone : TONE[phase.tone]}>{cancelled ? (ex.cancelState.phase === 'settled' && ex.cancelState.folder.kind === 'clean' ? 'cancelled by you' : 'cancelled by you - check the folder') : cancelling ? 'cancelling' : finished ? (phase.state === 'COMPLETED' && completedWords.badge !== null ? completedWords.badge : run.outcome!.label) : phase.state === 'WAITING_FOR_APPROVAL' ? 'needs you' : 'in progress'}</Badge>
         </div>
         {elapsed ? <span className="muted small" title="Local clock since the launch was recorded - presentation only">elapsed {elapsed}</span> : null}
         {ex.canCancel && live ? <button type="button" className="ck-cancel" onClick={() => void ex.cancelRun()}>Cancel Run</button> : null}

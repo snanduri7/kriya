@@ -66,7 +66,13 @@ from kriya.workflow.requirement_closers import (
     created_paths_from_capture,
     run_requirement_closers,
 )
-from kriya.workflow.requirements import REQUIREMENTS_UNRESOLVED, blocking_requirements, seed_requirement_obligations
+from kriya.workflow.requirements import (
+    REQUIREMENTS_UNRESOLVED,
+    blocking_requirements,
+    requirement_outcomes,
+    requirement_truth,
+    seed_requirement_obligations,
+)
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
 from kriya.workflow.semantic_region_authority import find_unauthorized_semantic_changes
@@ -821,6 +827,15 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                         f"{c['requirement']}={'closed' if c['closed'] else 'open'}" for c in closures),
                     details={"requirement_set_digest": requirement_set.digest, "closures": closures},
                 ))
+            # The typed requirement truth AS OF this closure, in the run's own events (persisted with the trace, so a stored run
+            # shows the same truth as the live one): the LAST such event of a run is its final truth.
+            truth = requirement_truth(requirement_outcomes(resolved_obligation_ledger, requirement_set), requirement_set)
+            state.record_event(RunEvent(
+                kind="requirement.truth", attempt=state.attempt_number, source="workflow.requirement_closure",
+                authority=EventAuthority.AUTHORITATIVE,
+                message=f"requirement truth: {truth['status']} ({truth['verified']} verified, {truth['accepted']} accepted, {truth['total']} mandatory)",
+                details={"requirement_set_digest": requirement_set.digest, **truth},
+            ))
             blocking = blocking_requirements(
                 resolved_obligation_ledger, requirement_set,
                 unknown_policy=autonomy_policy.requirement_unknown_policy,

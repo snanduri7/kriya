@@ -121,6 +121,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_effective_argv_authority.py': ('S', 'M'),
  'tests/test_verified_run_recipe.py': ('S', 'M'),
  'tests/test_run_log_projection.py': ('S', 'M'),
+ 'tests/test_requirement_truth_pipeline.py': ('S', 'M'),
  'tests/test_test_addition_closer_structural.py': ('S', 'M'),
  'tests/test_requirement_truth_characterization.py': ('S', 'M'),
  'tests/test_w33_bound_membership_guards.py': ('S', 'M'),

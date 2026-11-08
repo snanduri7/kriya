@@ -187,7 +187,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:32ca5c7fc1f2d029"
+      "event": "sha256:733b3130ff7c2ca8"
      },
      "event": "verification_contract.compiled",
      "kind": "mirror.event",
@@ -208,11 +208,32 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:81564c21128f8c4c"
+      "event": "sha256:7787f1b2ef0eedaa"
      },
      "event": "verification_contract.sealed",
      "kind": "mirror.event",
      "payload": "sha256:e6c4d0baf6fac7ec",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:944c6519b4e44131"
+     },
+     "event": "project_view.built",
+     "kind": "mirror.event",
+     "payload": "sha256:03b7e29204334787",
      "payload_keys": [
       "attempt",
       "authority",
@@ -644,7 +665,7 @@
     {
      "attempt": 1,
      "kind": "prompt.sections",
-     "payload": "sha256:b63abb5cd3b25553",
+     "payload": "sha256:6c915ac481731ac4",
      "payload_keys": [
       "builds",
       "fitter",
@@ -708,13 +729,14 @@
       "output": "sha256:09e68acad2d1c83a"
      },
      "kind": "gate.result",
-     "payload": "sha256:3f8a7e12fcf24481",
+     "payload": "sha256:437e253104df1abe",
      "payload_keys": [
       "duration_seconds",
       "error_type",
       "exit_code",
       "gate",
       "output_bytes",
+      "purpose",
       "runtime_artifacts",
       "stage",
       "success",
@@ -752,6 +774,27 @@
      "event": "candidate_gates.passed",
      "kind": "mirror.event",
      "payload": "sha256:ca0dbdcca166fb17",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:317d6957cf65bd4b"
+     },
+     "event": "requirement.truth",
+     "kind": "mirror.event",
+     "payload": "sha256:47251d58b109fac3",
      "payload_keys": [
       "attempt",
       "authority",
@@ -894,7 +937,7 @@
     {
      "attempt": null,
      "kind": "prompt.sections",
-     "payload": "sha256:f094dc3a4814a6c9",
+     "payload": "sha256:149505f5cf1f9944",
      "payload_keys": [
       "builds",
       "fitter",
@@ -1109,6 +1152,7 @@
     "plan",
     "plan_scope_conflict",
     "quality_gates_passed",
+    "requirement_truth",
     "requirements",
     "retry_progress",
     "review",
@@ -1233,6 +1277,22 @@
     },
     "plan_scope_conflict": null,
     "quality_gates_passed": false,
+    "requirement_truth": {
+     "accepted": 0,
+     "status": "OPEN_REQUIREMENTS",
+     "total": 1,
+     "unresolved": [
+      {
+       "id": "REQ-1",
+       "outcome": "pending",
+       "text": {
+        "chars": 52,
+        "text": "sha256:0f3c92131d8b5897"
+       }
+      }
+     ],
+     "verified": 0
+    },
     "requirements": {
      "digest": "fa33368f735ceabf231dc4a3ff814c986cf58c17c883dad894d94befc4267ee8",
      "evidence": {},
@@ -1406,16 +1466,23 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:89844e8375dd5fea",
+     "details": "sha256:d04dc1d876d1f036",
      "kind": "verification_contract.compiled",
      "source": "workflow.run_generation_workflow"
     },
     {
      "attempt": 0,
      "authority": "authoritative",
-     "details": "sha256:857f7c253ea81b16",
+     "details": "sha256:ea74a30b27fabbf8",
      "kind": "verification_contract.sealed",
      "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:871cddd00ce1cb10",
+     "kind": "project_view.built",
+     "source": "workflow.analyze_work_unit"
     },
     {
      "attempt": 0,
@@ -1521,6 +1588,13 @@
      "details": "sha256:d96a1feadd9827f2",
      "kind": "candidate_gates.passed",
      "source": "workflow"
+    },
+    {
+     "attempt": 1,
+     "authority": "authoritative",
+     "details": "sha256:687b581102df62f0",
+     "kind": "requirement.truth",
+     "source": "workflow.requirement_closure"
     },
     {
      "attempt": 1,
