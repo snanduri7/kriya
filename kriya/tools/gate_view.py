@@ -21,8 +21,10 @@ tree binding (kriya/workflow/file_integrity.py); this module only builds, guards
 from __future__ import annotations
 
 import hashlib
+import itertools
 import logging
 import os
+import re
 import shutil
 import threading
 from dataclasses import dataclass, field
@@ -33,6 +35,7 @@ from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.repository.bound_tree import BOUND_TREE_IDENTITY_MISMATCH, BoundTreeError, copy_and_prove
 from kriya.repository.snapshot import _content_identity, _stat_identity, visible_repository_paths
 from kriya.tools.containment import ContainmentSetupError
+from kriya.tools.dependency_cache import _process_alive
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,10 @@ class GateView:
         must not turn a verdict into an error or replace the gate's own exception."""
         try:
             _remove_tree(self.root)
+            if os.path.lexists(self.root):
+                # MEASURED (P1 incident): right after a container that bind-mounted the view exits, the host's rmdir of its mount-point directories can fail (EACCES) for a moment; the
+                # removal swallows that, so the leftover was neither detected nor logged. It is Kriya's own leftover: the next claim sweeps it (``_sweep_leftover_views``).
+                logger.warning("Gate view %s could not be fully removed; it is left in place and swept by the next view claim", self.root)
         except Exception as error:  # pylint: disable=broad-except
             logger.warning("Gate view %s could not be removed (%s); it is left in place", self.root, error)
         finally:
@@ -105,26 +112,53 @@ def _remove_tree(path: str) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+# A view that a container will bind-mount gets a name no earlier view ever had. MEASURED (P1 incident RUNTIME-CONTAINED-ENVIRONMENT-INTERMITTENT-DOCKER-FAILURES-001): under Docker Desktop
+# file sharing, a host directory that is removed and recreated under the SAME name and bound within moments is sometimes stale in the VM - the daemon rejects the `.kriya` anchor ("bind source
+# path does not exist") or the nested venv mount arrives empty. A Kriya-free probe with the failing container's exact mount shape, same load, interleaved: reused name 117 of 120 containers
+# failed, never-used names 0 of 120; reused name on a quiet host 0 of 25. The name is `view-` + 16 hex of the tree's real path + 8 hex owner pid + 6 hex counter (all hex, so the pid
+# is readable from the name without a marker file inside the view, which must hold exactly the bound set).
+_UNIQUE_VIEW_NAME = re.compile(r"^view-([0-9a-f]{16})([0-9a-f]{8})([0-9a-f]{6})$")
+_VIEW_COUNTER = itertools.count(1)
+
+
+def _tree_key(origin: str) -> str:
+    return hashlib.sha256(os.path.realpath(origin).encode("utf-8")).hexdigest()[:16]
+
+
 def _claim_root(base: str, origin: str) -> str:
-    """The directory for one view of ``origin``: STABLE for that tree (``view-<hash of its real path>``), because a gate's output names the
-    directory it ran in and the retry loop compares failures between attempts - a fresh random name per gate would make identical failures
-    look distinct. A directory a failed cleanup left behind is Kriya's own and is replaced; one open in this process gets a numbered sibling."""
-    key = hashlib.sha256(os.path.realpath(origin).encode("utf-8")).hexdigest()[:16]
-    number = 0
+    """A directory for one view of ``origin`` that no view of this tree - in this process or any other - has ever had. Leftovers of dead or finished owners are swept first."""
+    _sweep_leftover_views(base)
+    key = _tree_key(origin)
     while True:
-        path = os.path.join(base, f"view-{key}" + (f"-{number}" if number else ""))
+        path = os.path.join(base, f"view-{key}{os.getpid():08x}{next(_VIEW_COUNTER) % 0x1000000:06x}")
         with _ACTIVE_LOCK:
-            if path not in _ACTIVE_ROOTS:
-                if os.path.lexists(path):
-                    _remove_tree(path)
-                try:
-                    os.makedirs(path, mode=0o700)
-                except FileExistsError:  # could not be removed: another sibling
-                    number += 1
-                    continue
-                _ACTIVE_ROOTS.add(path)
-                return os.path.realpath(path)
-        number += 1
+            try:
+                os.makedirs(path, mode=0o700)
+            except FileExistsError:  # a counter that wrapped onto a leftover: take the next number
+                continue
+            _ACTIVE_ROOTS.add(os.path.realpath(path))
+        return os.path.realpath(path)
+
+
+def _sweep_leftover_views(base: str) -> None:
+    """Remove unique-named views nobody owns any more: the owner pid (readable from the name) is dead, or it is THIS process and the view is not open. A live OTHER process's view is never
+    touched (the one cross-process safety this naming provides: a stable name made every claim delete whatever it found)."""
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return
+    for name in names:
+        match = _UNIQUE_VIEW_NAME.match(name)
+        if match is None:
+            continue
+        pid = int(match.group(2), 16)
+        path = os.path.join(base, name)
+        with _ACTIVE_LOCK:
+            if os.path.realpath(path) in _ACTIVE_ROOTS:
+                continue
+            if pid != os.getpid() and _process_alive(pid):
+                continue
+        _remove_tree(path)
 
 
 def views_directory(state_root: str) -> str:
@@ -142,6 +176,9 @@ def is_git_work_tree(root: str) -> bool:
 def build_gate_view(origin: str, *, state_root: str, manifest: Optional[Mapping[str, Optional[str]]] = None,
                     extra_paths: Iterable[str] = (), environment_roots: Tuple[str, ...] = ()) -> GateView:
     """Copy the bound set of ``origin`` into a fresh directory and prove the copy.
+
+    The directory's name is one no earlier view ever had (``_claim_root``). Failure text names it, so failure identity (kriya/workflow/failure_grounding.py) strips it as per-run noise: what
+    the retry loop compares between attempts is the failure, not the directory.
 
     ``manifest`` (relpath -> the content identity the path was bound to) comes from the tree binding; every manifest path is
     verified against it after the copy. Without a binding the set is Git's own view of ``origin`` and each path is verified

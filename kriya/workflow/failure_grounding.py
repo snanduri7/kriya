@@ -77,6 +77,8 @@ _RUN_NOISE_PATTERNS = (
     (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"), "<timestamp>"),
     (re.compile(r"\btmp[a-z0-9_]{8}\b"), "tmp?"),  # Python tempfile names
     (re.compile(r"\b(pid|PID)([ =:]+)\d+\b"), r"\1\2?"),
+    # A gate runs in a view whose directory name no earlier view had (kriya/tools/gate_view.py): output that names it (a pytest rootdir, a traceback path) is the same failure under another name.
+    (re.compile(r"/gate-views/view-[0-9a-f]+(?:-\d+)?"), "/gate-views/<view>"),
     # Line numbers an edit shifts (PRD-036 rc8 matrix trial 2, C10): the same
     # defect moved from line 10 to 12, 14, 16 as the model added lines.
     # Structured Java evidence already keeps basenames only (see below).

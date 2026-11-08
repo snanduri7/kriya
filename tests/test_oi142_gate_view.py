@@ -294,7 +294,7 @@ def test_every_outermost_gate_gets_its_own_fresh_view_and_a_nested_gate_shares_i
     _verification_gate("tests")(second)(validator)
     first_view, second_view = seen[0], seen[1]
     assert first_view != str(root) and second_view != str(root)
-    # the directory NAME is stable per tree (failure text names it; the retry loop compares failures between attempts) but the view is rebuilt: below,
+    # the directory name is never reused (P1 incident: Docker Desktop file sharing can hold a stale view of a reused host path) and the view is rebuilt: below,
     # nothing the first gate wrote is there for the second
     assert nested_seen == [first_view]                     # a gate nested in a gate runs in that gate's view
     assert seen[2] is False                                # what the first gate wrote died with its view
@@ -1139,19 +1139,20 @@ def test_every_application_maven_and_managed_service_spawn_in_the_engine_goldens
     assert ("engine_managed_service_approved.json", True) in view_rows, "the managed-service launch is in the goldens, in a view"
 
 
-# --- a view's directory name is stable per tree (failure text names it; retry detection compares failures across attempts) ----------------
+# --- a view's directory name identifies its tree and is never reused (failure identity strips it: tests/test_gate_view_unique_bind_source_001.py) ----------------
 
-def test_the_view_directory_is_the_same_for_every_gate_on_one_tree_and_different_for_another_tree(tmp_path):
+def test_the_view_directory_prefix_is_the_tree_and_no_directory_is_ever_reused(tmp_path):
     first, second = _repo(tmp_path, name="one"), _repo(tmp_path, name="two")
     seen = []
     for root in (first, first, second):
         view = _build(root)
-        seen.append(view.root)
+        seen.append(os.path.basename(view.root))
         view.close()
-    assert seen[0] == seen[1] and seen[0] != seen[2]
+    assert seen[0][:21] == seen[1][:21] != seen[2][:21]        # `view-` + 16 hex of the tree's real path
+    assert len(set(seen)) == 3                                  # but every view got a directory name nobody had before
 
 
-def test_two_views_of_one_tree_open_at_once_get_distinct_directories_and_a_leftover_is_replaced(tmp_path):
+def test_two_views_of_one_tree_open_at_once_get_distinct_directories_and_a_leftover_is_swept_not_reused(tmp_path):
     root = _repo(tmp_path)
     opened = _build(root)
     sibling = _build(root)
@@ -1165,7 +1166,7 @@ def test_two_views_of_one_tree_open_at_once_get_distinct_directories_and_a_lefto
     gate_view._ACTIVE_ROOTS.discard(leftover.root)  # as if the process that built it had died before cleaning up
     again = _build(root)
     try:
-        assert again.root == leftover.root and not Path(again.root, "residue.txt").exists()
+        assert again.root != leftover.root and not os.path.lexists(leftover.root)   # swept (this process owns it and it is not open), and its name is not handed out again
     finally:
         again.close()
 
