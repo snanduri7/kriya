@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { PROJECT_PAGE, runPhase, useDispatch, useElapsed, useExecution, useNavigate, useProvider } from '../core';
+import { PROJECT_PAGE, requirementTruthOf, requirementTruthWords, runPhase, useDispatch, useElapsed, useExecution, useNavigate, useProvider } from '../core';
 
 const GOAL_SHOWN = 56;
 const short = (goal: string): string => { const one = goal.trim().replace(/\s+/g, ' '); return one.length > GOAL_SHOWN ? `${one.slice(0, GOAL_SHOWN - 1)}…` : one; };
@@ -35,8 +35,9 @@ export function ActiveRunBanner() {
   if (!run) return null;
   const phase = runPhase(run);
   const goal = ex.goal.trim() ? short(ex.goal) : null;
-  const mark = phase.terminal ? (phase.state === 'COMPLETED' ? '✓' : phase.state === 'STOPPED' ? '■' : '✕') : phase.needsAction ? '⚠' : '●';
-  const word = phase.terminal ? (phase.state === 'COMPLETED' ? 'Run completed' : phase.state === 'STOPPED' ? 'Run stopped' : 'Run failed') : 'Run active';
+  const completed = requirementTruthWords(requirementTruthOf(run.status?.launch.ended));   // the backend's requirement truth: open or contradicted is never ordinary green
+  const mark = phase.terminal ? (phase.state === 'COMPLETED' ? (completed.tone === 'ok' ? '✓' : '⚠') : phase.state === 'STOPPED' ? '■' : '✕') : phase.needsAction ? '⚠' : '●';
+  const word = phase.terminal ? (phase.state === 'COMPLETED' ? completed.heading : phase.state === 'STOPPED' ? 'Run stopped' : 'Run failed') : 'Run active';
   return (
     <section className={`ck-runbar ck-state${phase.needsAction ? ' ck-attention' : ''}`} role="status" aria-live="polite" aria-label="Active run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-state={phase.state} data-timing={JSON.stringify(run.timing)}>
       <div className="ck-runbar-head">

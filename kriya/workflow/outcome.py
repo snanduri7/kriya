@@ -25,9 +25,11 @@ from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
     requirement_evidence,
     requirement_outcomes,
+    requirement_truth,
     requirement_verdict_details,
 )
 from kriya.workflow.run_recipe import derive_verified_run_recipe
+from kriya.workflow.runtime_observation import observed_run_output
 from kriya.workflow.stage_context import RunState, StageDeps
 
 # PRD-032: the environment_failure prefix of a terminal commit that did not
@@ -309,6 +311,8 @@ def completed_result(
         **({"post_commit_persistence_errors": list(state.post_commit_persistence_errors)} if state.post_commit_persistence_errors else {}),
         # The run recipe: only for a run that passed, only from the application runtime check Kriya really executed (kriya/workflow/run_recipe.py); absent otherwise.
         **({"verified_run_recipe": recipe} if quality_passed and (recipe := derive_verified_run_recipe(state.gate_outcomes, state.attempt_number, workspace_path)) else {}),
+        # What the passed application run printed (display evidence, redacted and capped; kriya/workflow/runtime_observation.py).
+        **({"runtime_observation": observation} if quality_passed and (observation := observed_run_output(state.gate_outcomes, state.attempt_number)) else {}),
         "failure_report": failure_report_dicts,
         "plan_scope_conflict": state.plan_scope_conflict,
         "toolchain_warning": state.toolchain_warning,
@@ -341,7 +345,9 @@ def completed_result(
             # MODEL-EVIDENCE-HARDENING-001: each verdict with its reason
             # code, evidence, verifier identity and judged candidate.
             "verdicts": requirement_verdict_details(resolved_obligation_ledger, requirement_set),
-        }} if requirement_set is not None else {}),
+        }, "requirement_truth": requirement_truth(
+            requirement_outcomes(resolved_obligation_ledger, requirement_set), requirement_set,
+        )} if requirement_set is not None else {}),
     }
 
 

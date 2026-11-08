@@ -334,6 +334,42 @@ export function runRecipeOf(ended: unknown): RunRecipe | null {
   return { steps: clean, entrypoint: typeof entrypoint === 'string' ? entrypoint : null, note: typeof note === 'string' ? note : null, statement: typeof statement === 'string' ? statement : null };
 }
 export const NO_RUN_RECIPE_TEXT = 'Kriya did not run this application, so it has no verified run command.';
+
+/** The backend's REQUIREMENT TRUTH of a finished run (kriya/workflow/requirements.py::requirement_truth, copied onto the launch record's `ended`): ALL_VERIFIED (every mandatory requirement closed by deterministic evidence or an
+ * operator's acceptance), OPEN_REQUIREMENTS (the change was applied but a requirement has no independent evidence), CONTRADICTED (deterministic counter-evidence). The cockpit shows exactly this; it never recomputes it from
+ * outcomes, gates or prose. null when the record carries none (a run recorded before this field existed): that is "not recorded", never "verified". */
+export type RequirementTruthStatus = 'ALL_VERIFIED' | 'OPEN_REQUIREMENTS' | 'CONTRADICTED';
+export interface RequirementTruth { status: RequirementTruthStatus; verified: number; total: number; unresolved: Array<{ id: string; text: string; outcome: string }> }
+const TRUTH_STATUSES: readonly string[] = ['ALL_VERIFIED', 'OPEN_REQUIREMENTS', 'CONTRADICTED'];
+export function requirementTruthOf(ended: unknown): RequirementTruth | null {
+  const raw = typeof ended === 'object' && ended !== null ? (ended as { requirement_truth?: unknown }).requirement_truth : undefined;
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { status, verified, total, unresolved } = raw as { status?: unknown; verified?: unknown; total?: unknown; unresolved?: unknown };
+  if (typeof status !== 'string' || !TRUTH_STATUSES.includes(status) || !Number.isInteger(verified) || !Number.isInteger(total)) return null;
+  const rows = Array.isArray(unresolved) ? unresolved.flatMap((u): Array<{ id: string; text: string; outcome: string }> => {
+    const row = u as { id?: unknown; text?: unknown; outcome?: unknown };
+    return typeof row?.id === 'string' && typeof row.text === 'string' ? [{ id: row.id, text: row.text, outcome: typeof row.outcome === 'string' ? row.outcome : 'unverified' }] : [];
+  }) : [];
+  return { status: status as RequirementTruthStatus, verified: verified as number, total: total as number, unresolved: rows };
+}
+export interface RequirementTruthWords { heading: string; summary: string | null; applied: string | null; tone: 'ok' | 'warn' | 'bad' }
+/** The words for a COMPLETED run's requirement truth. ALL_VERIFIED keeps the ordinary "Run completed"; the other two never show ordinary green. A completed run with NO recorded truth keeps today's words (it is old, not verified). */
+export function requirementTruthWords(truth: RequirementTruth | null): RequirementTruthWords {
+  if (truth === null || truth.status === 'ALL_VERIFIED') return { heading: 'Run completed', summary: truth === null || truth.total === 0 ? null : `${truth.verified} of ${truth.total} requirements verified`, applied: null, tone: 'ok' };
+  const open = Math.max(0, truth.total - truth.verified);
+  if (truth.status === 'CONTRADICTED') return { heading: 'Changes applied — a requirement is contradicted', summary: `${truth.verified} of ${truth.total} requirements verified · ${open} not verified, at least one contradicted by evidence`, applied: 'Your change was applied, but Kriya recorded evidence that contradicts a requirement. Review it before relying on it.', tone: 'bad' };
+  return { heading: 'Changes applied — verification incomplete', summary: `${truth.verified} of ${truth.total} requirements verified · ${open} unverified`, applied: 'Your change was applied. Kriya could not independently verify every requirement, so review the result before relying on it.', tone: 'warn' };
+}
+
+/** The application run's OBSERVED OUTPUT as the backend recorded it (kriya/workflow/runtime_observation.py::observed_run_output, redacted and capped there): what the run printed, shown as evidence - it proves nothing by itself. */
+export interface RuntimeObservation { command: string; exitStatus: number | null; stdout: string; truncated: boolean; stdoutLost: boolean }
+export function runtimeObservationOf(ended: unknown): RuntimeObservation | null {
+  const raw = typeof ended === 'object' && ended !== null ? (ended as { runtime_observation?: unknown }).runtime_observation : undefined;
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { command, exit_status: exitStatus, stdout, truncated, stdout_lost: lost } = raw as { command?: unknown; exit_status?: unknown; stdout?: unknown; truncated?: unknown; stdout_lost?: unknown };
+  if (typeof command !== 'string' || command === '' || typeof stdout !== 'string') return null;
+  return { command, exitStatus: Number.isInteger(exitStatus) ? (exitStatus as number) : null, stdout, truncated: truncated === true, stdoutLost: lost === true };
+}
 export interface MembershipStopWords { title: string; body: string; names: string | null; action: string; note: string }
 const MAX_NAMES_SHOWN = 5;
 const MAX_NAME_LENGTH = 60;

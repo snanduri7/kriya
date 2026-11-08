@@ -346,3 +346,14 @@
 .ck-logline[data-level="WARNING"] .ck-loglevel, .ck-logline[data-level="WARNING"] .ck-logmsg { color: var(--ck-warn, #d9a441); }
 .ck-logline[data-level="ERROR"] .ck-loglevel, .ck-logline[data-level="CRITICAL"] .ck-loglevel, .ck-logline[data-level="ERROR"] .ck-logmsg, .ck-logline[data-level="CRITICAL"] .ck-logmsg { color: var(--ck-bad); }
 .ck-logline[data-level="INFO"] .ck-loglevel { color: var(--ck-accent); }
+
+/* REQUIREMENT TRUTH and OBSERVED OUTPUT (owner sign-off 2026-11-08): evidence the backend recorded, shown quietly. */
+.ck-truth { margin: 10px 0 4px; padding: 10px 14px; border: 1px solid var(--ck-line); border-left: 3px solid var(--ck-warn); border-radius: 8px; background: color-mix(in srgb, var(--ck-warn) 6%, transparent); }
+.ck-truth[data-status="ALL_VERIFIED"] { border-left-color: var(--ck-ok); background: color-mix(in srgb, var(--ck-ok) 5%, transparent); }
+.ck-truth[data-status="CONTRADICTED"] { border-left-color: var(--ck-bad); background: color-mix(in srgb, var(--ck-bad) 6%, transparent); }
+.ck-truth p { margin: 0 0 4px; }
+.ck-truth-open { margin: 4px 0 0; padding-left: 18px; }
+.ck-observed { margin: 10px 0 4px; padding: 10px 14px; border: 1px solid var(--ck-line); border-radius: 8px; }
+.ck-observed h4 { margin: 0 0 6px; font-size: 13px; }
+.ck-observed-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; margin: 3px 0; }
+.ck-observed-stdout { flex: 1 1 100%; margin: 2px 0; padding: 8px 10px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: 6px; background: color-mix(in srgb, var(--ck-line) 35%, transparent); }

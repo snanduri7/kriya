@@ -279,6 +279,8 @@ class LaunchSession:
             "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
             **_membership_stop_field(result),
             **_run_recipe_field(result),
+            **_requirement_truth_field(result),
+            **_runtime_observation_field(result),
         })
         if self.review_channel is not None:
             self.review_channel.close()
@@ -329,6 +331,39 @@ def _run_recipe_field(result: Dict[str, Any]) -> Dict[str, Any]:
         "statement": redact_text(evidence["statement"])[:RUN_RECIPE_MAX_TEXT] if isinstance(evidence.get("statement"), str) else None,
         "attempt": evidence.get("attempt") if isinstance(evidence.get("attempt"), int) else None,
     }}
+
+
+REQUIREMENT_TRUTH_STATUSES = ("ALL_VERIFIED", "OPEN_REQUIREMENTS", "CONTRADICTED")
+REQUIREMENT_TRUTH_MAX_ROWS = 8
+REQUIREMENT_TRUTH_MAX_TEXT = 240
+
+
+def _requirement_truth_field(result: Dict[str, Any]) -> Dict[str, Any]:
+    """The run's typed REQUIREMENT TRUTH (kriya/workflow/requirements.py::requirement_truth), copied bounded and redacted: the status, the verified and total counts and the unresolved requirements (id, text, outcome). The desktop shows
+    exactly this and never recomputes it. ``{}`` when the result carries none (a stop before requirements, a malformed value). Additive on ``ended``."""
+    truth = result.get("requirement_truth")
+    if not isinstance(truth, dict) or truth.get("status") not in REQUIREMENT_TRUTH_STATUSES:
+        return {}
+    verified, total = truth.get("verified"), truth.get("total")
+    if not isinstance(verified, int) or isinstance(verified, bool) or not isinstance(total, int) or isinstance(total, bool):
+        return {}
+    rows = [{"id": redact_text(str(row["id"]))[:40], "text": redact_text(row["text"])[:REQUIREMENT_TRUTH_MAX_TEXT],
+             "outcome": str(row.get("outcome") or "unverified")[:40]}
+            for row in (truth.get("unresolved") if isinstance(truth.get("unresolved"), list) else [])[:REQUIREMENT_TRUTH_MAX_ROWS]
+            if isinstance(row, dict) and isinstance(row.get("id"), str) and isinstance(row.get("text"), str)]
+    return {"requirement_truth": {"status": truth["status"], "verified": verified, "total": total, "unresolved": rows}}
+
+
+def _runtime_observation_field(result: Dict[str, Any]) -> Dict[str, Any]:
+    """The application run's OBSERVED OUTPUT (kriya/workflow/runtime_observation.py::observed_run_output): command, exit status and stdout - redacted again here, then cut - with the truncated / lost flags. ``{}`` when absent."""
+    seen = result.get("runtime_observation")
+    if not isinstance(seen, dict) or not isinstance(seen.get("command"), str) or not isinstance(seen.get("stdout"), str):
+        return {}
+    code = seen.get("exit_status")
+    return {"runtime_observation": {
+        "command": redact_text(seen["command"])[:RUN_RECIPE_MAX_TEXT], "exit_status": code if isinstance(code, int) and not isinstance(code, bool) else None,
+        "stdout": redact_text(seen["stdout"])[:2000], "truncated": seen.get("truncated") is True or len(seen["stdout"]) > 2000,
+        "stdout_lost": seen.get("stdout_lost") is True, "attempt": seen.get("attempt") if isinstance(seen.get("attempt"), int) else None}}
 
 
 # -- the one active launch of this process ----------------------------------------------------------------------------------------------
