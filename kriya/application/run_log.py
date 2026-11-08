@@ -14,8 +14,9 @@ from __future__ import annotations
 import os
 import re
 import stat
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from kriya.config.environment import user_home
 from kriya.foundation.redaction import redact_text
 
 MAX_PAGE_BYTES = 128 * 1024
@@ -41,8 +42,43 @@ def parse_cursor(cursor: Optional[str]) -> int:
     return int(cursor[1:])
 
 
-def _clean(message: str) -> str:
-    return redact_text(_THINK_RE.sub("[model reasoning hidden]", message))[:MAX_MESSAGE_CHARS]
+HEADER_WORKSPACE_RE = re.compile(r"^# Kriya run \S+ workspace (?P<path>/[^\r\n]*)$")
+HEADER_READ_BYTES = 2048
+
+
+def workspace_from_header(first_line: bytes) -> Optional[str]:
+    """The workspace the logging owner named in the file's own first line (``# Kriya run <id> workspace <path>``), or None.
+    The projection learns the workspace from the log itself - never from a request - so a display rewrite can only ever
+    shorten a path the log already printed."""
+    match = HEADER_WORKSPACE_RE.match(first_line.split(b"\n", 1)[0].decode("utf-8", errors="replace").rstrip("\r"))
+    return match["path"] if match else None
+
+
+def _display_prefixes(workspace: Optional[str]) -> List[Tuple[str, str]]:
+    """(path prefix, display) pairs, longest first: the run's workspace becomes ``.`` and the home directory ``~`` (so
+    ``/Users/me/proj/a.py`` shows as ``./a.py`` and ``/Users/me/.kriya/x`` as ``~/.kriya/x``). Display only: the file is untouched."""
+    pairs: Dict[str, str] = {}
+    for candidate in (workspace, os.path.realpath(workspace) if workspace else None):
+        if candidate and candidate != "/":
+            pairs[candidate.rstrip("/")] = "."
+    home = user_home()
+    for candidate in (home, os.path.realpath(home)):
+        if candidate and candidate != "/":
+            pairs.setdefault(candidate.rstrip("/"), "~")
+    return sorted(pairs.items(), key=lambda pair: len(pair[0]), reverse=True)
+
+
+def display_paths(message: str, prefixes: Sequence[Tuple[str, str]]) -> str:
+    """Rewrite each prefix at PATH-SEGMENT boundaries only: not inside a longer path (``/x/Users/me``), not a longer
+    name (``/Users/me`` does not match ``/Users/meg``), and ``/Users/me/proj.bak`` is not the workspace ``/Users/me/proj``."""
+    for prefix, shown in prefixes:
+        message = re.sub(r"(?<![\w.~/-])" + re.escape(prefix) + r"(?![\w-]|\.\w)", shown, message)
+    return message
+
+
+def _clean(message: str, prefixes: Sequence[Tuple[str, str]] = ()) -> str:
+    """Hidden reasoning replaced, the message redacted, THEN paths shortened for display, then bounded."""
+    return display_paths(redact_text(_THINK_RE.sub("[model reasoning hidden]", message)), prefixes)[:MAX_MESSAGE_CHARS]
 
 
 def _unavailable(run_id: str, reason: str) -> Dict[str, Any]:
@@ -72,6 +108,7 @@ def read_run_log(log_directory: str, run_id: str, offset: int = 0, limit: int = 
         start = 0 if reset else offset
         os.lseek(descriptor, start, os.SEEK_SET)
         data = os.read(descriptor, MAX_PAGE_BYTES + 1)
+        workspace = workspace_from_header(os.pread(descriptor, HEADER_READ_BYTES, 0))
     except OSError:
         return _unavailable(run_id, RUN_LOG_UNREADABLE)
     finally:
@@ -96,8 +133,9 @@ def read_run_log(log_directory: str, run_id: str, offset: int = 0, limit: int = 
             records[-1]["message"] += "\n" + text               # a banner or continuation line belongs to the record before it
         position += len(raw)
         consumed = position
+    prefixes = _display_prefixes(workspace)
     for record in records:
-        record["message"] = _clean(record["message"])
+        record["message"] = _clean(record["message"], prefixes)
     next_offset = start + consumed
     at_end = len(data) <= MAX_PAGE_BYTES and not page_full         # the read reached the end of the file (a partial last line, still being written, waits for the next page)
     return {"run_id": run_id, "available": True, "reason": None, "records": records, "next_cursor": f"o{next_offset}", "at_end": at_end, "size_bytes": size, "reset": reset}

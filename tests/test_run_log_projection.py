@@ -170,3 +170,62 @@ def test_the_operation_takes_no_path_and_says_when_the_run_has_no_log(monkeypatc
     from kriya.kup import serve
 
     assert serve.ARGUMENTS["run.log"] == frozenset({"run_id", "cursor", "limit"})
+
+
+# ---------------------------------------------------------------------------------------------------------------- DISPLAY paths (owner sign-off 2026-11-08, section 11)
+def _log_with(tmp_path, lines, workspace="/Users/x/proj"):
+    directory = tmp_path / "paths"
+    (directory / "runs" / RUN).mkdir(parents=True)
+    body = f"# Kriya run {RUN} workspace {workspace}\n" + "".join(f"2026-11-07 18:27:01,511 INFO kriya.core.kernel: {line}\n" for line in lines)
+    path = directory / "runs" / RUN / "kriya.log"
+    path.write_text(body, encoding="utf-8")
+    return directory, path, body
+
+
+def _messages(directory):
+    return [r["message"] for r in read_run_log(str(directory), RUN, 0, 200)["records"]]
+
+
+def test_the_workspace_shows_as_dot_and_home_as_tilde_longest_prefix_first(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", "/Users/x")
+    directory, path, body = _log_with(tmp_path, [
+        "Developer: generating content for '/Users/x/proj/src/greet.py'", "Loaded skill 'a' from /Users/x/skills/a", "worktree /Users/x/proj", "cwd=/Users/x/proj, state=/Users/x/.kriya/state"])
+    assert _messages(directory) == [
+        "Developer: generating content for './src/greet.py'", "Loaded skill 'a' from ~/skills/a", "worktree .", "cwd=., state=~/.kriya/state"]
+    assert path.read_text(encoding="utf-8") == body                      # the underlying log is untouched
+
+
+def test_only_whole_path_segments_are_rewritten(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", "/Users/x")
+    directory, _, _ = _log_with(tmp_path, [
+        "/Users/xavier/proj/a.py", "/Users/x/project/a.py", "/mnt/Users/x/proj/a.py", "/Users/x/proj.bak/a.py", "see /Users/x/proj.", "keep /Users/x/proj-old"])
+    assert _messages(directory) == ["/Users/xavier/proj/a.py", "~/project/a.py", "/mnt/Users/x/proj/a.py", "~/proj.bak/a.py", "see ..", "keep ~/proj-old"]
+
+
+def test_redaction_still_happens_before_the_rewrite_and_the_cap_after_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", "/Users/x")
+    token = "ghp_" + "c" * 36
+    long_path = "/Users/x/proj/" + "d" * 1990
+    directory, _, _ = _log_with(tmp_path, [f"token {token} at /Users/x/proj/a.py", f"path {long_path}"])
+    first, second = _messages(directory)
+    assert token not in first and first.endswith("at ./a.py")
+    assert second.startswith("path ./d") and len(second) <= run_log.MAX_MESSAGE_CHARS
+
+
+def test_no_header_or_a_malformed_one_rewrites_only_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", "/Users/x")
+    directory = tmp_path / "nohdr"
+    (directory / "runs" / RUN).mkdir(parents=True)
+    (directory / "runs" / RUN / "kriya.log").write_text("# Kriya run x workspace relative/path\n2026-11-07 18:27:01,511 INFO a.b: /Users/x/proj/a.py\n", encoding="utf-8")
+    assert _messages(directory) == ["~/proj/a.py"]
+    assert run_log.workspace_from_header(b"# Kriya run r workspace /Users/x/proj\nrest") == "/Users/x/proj"
+    assert run_log.workspace_from_header(b"not a header\n") is None
+
+
+def test_cursor_offsets_are_raw_file_offsets_whatever_is_displayed(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", "/Users/x")
+    directory, _, _ = _log_with(tmp_path, [f"line {i} /Users/x/proj/a.py" for i in range(6)])
+    first = read_run_log(str(directory), RUN, 0, 2)
+    second = read_run_log(str(directory), RUN, parse_cursor(first["next_cursor"]), 2)
+    assert [r["message"] for r in first["records"] + second["records"]] == [f"line {i} ./a.py" for i in range(4)]
+    assert second["records"][0]["offset"] == first["records"][1]["offset"] + len("2026-11-07 18:27:01,511 INFO kriya.core.kernel: line 1 /Users/x/proj/a.py\n")
