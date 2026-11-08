@@ -9,8 +9,8 @@ export function RunCardView({ run }: { run: RunSummary }) {
   return (
     <>
       <div className="ck-runtitle" data-title-is-request={card.titleIsRequest}>{card.title}</div>
-      <div className="muted small ck-runmeta" data-status={card.status}>
-        {[`${MARK[card.status]} ${card.statusLabel}`, card.duration, card.filesChanged !== null ? `${card.filesChanged} file${card.filesChanged === 1 ? '' : 's'} changed` : null, card.when].filter((p): p is string => p !== null).join(' · ')}
+      <div className="muted small ck-runmeta" data-status={card.status} data-tone={card.tone}>
+        {[`${card.tone === 'ok' ? MARK[card.status] : '⚠'} ${card.statusLabel}`, card.duration, card.filesChanged !== null ? `${card.filesChanged} file${card.filesChanged === 1 ? '' : 's'} changed` : null, card.when].filter((p): p is string => p !== null).join(' · ')}
       </div>
     </>
   );

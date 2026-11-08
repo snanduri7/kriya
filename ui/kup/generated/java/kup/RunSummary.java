@@ -22,6 +22,7 @@ public class RunSummary {
     private String milestoneGroupid;
     private Long milestoneIndex;
     private Long milestoneTotal;
+    private RequirementTruth requirementTruth;
     private String runid;
     private String status;
     private String timestamp;
@@ -90,6 +91,17 @@ public class RunSummary {
     public Long getMilestoneTotal() { return milestoneTotal; }
     @JsonProperty("milestone_total")
     public void setMilestoneTotal(Long value) { this.milestoneTotal = value; }
+
+    /**
+     * The run's FINAL requirement truth, projected on listing from its own persisted
+     * requirement.truth events (the LAST one); absent when the run recorded none (recorded
+     * before the event existed): a host words that neutrally and never as verified. The event
+     * stays the only authority; this is a read-time projection, not a stored copy.
+     */
+    @JsonProperty("requirement_truth")
+    public RequirementTruth getRequirementTruth() { return requirementTruth; }
+    @JsonProperty("requirement_truth")
+    public void setRequirementTruth(RequirementTruth value) { this.requirementTruth = value; }
 
     @JsonProperty("run_id")
     public String getRunid() { return runid; }

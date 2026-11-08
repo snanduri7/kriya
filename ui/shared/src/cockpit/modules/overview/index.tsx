@@ -1,6 +1,6 @@
 import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, writeScopeOf, RunCapabilityStrip, RunMemoryLine, ReplayNotice, RequirementTruthBlock, requirementTruthFromEvents, requirementTruthWords, memoryRunIdOf, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
-const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
+const OUTCOME = { success: { mark: '✓', words: 'Completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
 /** The result of one recorded run, in meaning: what was asked, what happened, what changed, whether it works, what the application printed. Identifiers and mechanism sit under Technical status. */
 function Overview() {
@@ -31,7 +31,7 @@ function Overview() {
         return (
           <div style={{ display: 'grid', gap: 8 }}>
             <section className="ck-overview" aria-label="Run result" data-status={ctx.status ?? 'unknown'}>
-              <h3 className="ck-result-head"><span aria-hidden="true">{ctx.status ? (truthWords.tone === 'ok' ? outcome.mark : '⚠') : '•'}</span> {ctx.status ? (truthWords.tone === 'ok' ? outcome.words : truthWords.heading) : 'Outcome not recorded'}</h3>
+              <h3 className="ck-result-head"><span aria-hidden="true">{ctx.status ? (truthWords.tone === 'ok' ? outcome.mark : '⚠') : '•'}</span> {ctx.status ? (ctx.status === 'success' ? truthWords.heading : outcome.words) : 'Outcome not recorded'}</h3>
               <p className="ck-result-goal">{goalTitle(ctx.displayGoal)}</p>
               <ReplayNotice runId={ctx.runId} status={ctx.status} />
               {ctx.status === 'success' ? <p>{truthWords.applied ?? 'Your change was recorded as complete.'}</p> : null}

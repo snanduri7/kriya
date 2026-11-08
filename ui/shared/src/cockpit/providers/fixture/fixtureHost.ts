@@ -274,7 +274,16 @@ export class FixtureHost implements HostAdapter {
   private summary(s: Scenario): Json {
     const display = s.displayGoal === undefined ? s.goal : s.displayGoal;
     return { run_id: s.id, timestamp: s.timestamp, goal: s.goal, display_goal: display, display_goal_source: display === null ? 'unavailable' : s.displayGoal === undefined ? 'own' : 'enforce_row', duration_sec: s.durationSec, attempts: s.attempts, status: s.status, failure_category: s.failureCategory, files_modified: null,
-      milestone_group_id: s.milestone.groupId, milestone_index: s.milestone.index, milestone_total: s.milestone.total };
+      milestone_group_id: s.milestone.groupId, milestone_index: s.milestone.index, milestone_total: s.milestone.total,
+      ...this.truthProjection(s) };
+  }
+
+  /** Models the backend's read-time projection (kriya/application/history.py): the LAST `requirement.truth` event of the scenario's own events, reduced to status and the three counts; nothing when it recorded none. */
+  private truthProjection(s: Scenario): { requirement_truth?: Json } {
+    const last = [...(s.s1Events ?? [])].reverse().find((e) => e.kind === 'requirement.truth');
+    const d = last?.details as { status?: unknown; verified?: unknown; accepted?: unknown; total?: unknown } | undefined;
+    if (d === undefined || typeof d.status !== 'string') return {};
+    return { requirement_truth: { status: d.status, verified: d.verified as number, accepted: d.accepted as number, total: d.total as number } };
   }
 
   private detail(s: Scenario): Json {

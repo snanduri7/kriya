@@ -1,5 +1,6 @@
 import type { CapabilityRegistry } from './capability';
 import type { ProviderKind } from './provider';
+import type { RequirementTruth } from './presentation';
 
 /**
  * Authoritative UI-facing facts about the selected run, and nothing inferred. Greenfield and brownfield are not modes of the UI:
@@ -16,6 +17,8 @@ export interface RunContext {
   /** The ORIGINAL user request (the backend's display_goal, resolved from structured fields); null when none is recorded. This - never `goal` - is what a person is shown. */
   displayGoal: string | null;
   status: string | null;
+  /** The backend's requirement truth projected on the stored run (kriya/application/history.py, from its persisted `requirement.truth` event); null when the run recorded none - never "verified". */
+  requirementTruth: RequirementTruth | null;
   /** The trace row's stored failure_category, verbatim; null when none was stored. */
   failureCategory: string | null;
   /** The trace row's `attempts` column, verbatim. It is the workflow's RETRY counter (retries + best-of-N candidates), NOT the number of attempts made: a run that made one attempt and stopped at human approval stores 0. Shown only as stored, with that explanation; the attempt count is derived from the run's evidence. */

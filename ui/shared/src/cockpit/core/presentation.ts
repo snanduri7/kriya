@@ -34,6 +34,8 @@ export function formatDuration(seconds: number | null | undefined): string | nul
 export type CardStatus = 'success' | 'failure' | 'unfinished' | 'unknown';
 export interface RunCard {
   title: string;
+  /** How a completed run's card is marked: ok (ordinary), warn (applied, verification incomplete) or bad (a requirement is contradicted). Always ok for a run that did not succeed (the status words carry that). */
+  tone: 'ok' | 'warn' | 'bad';
   /** true when the title is the original request; false for the neutral fallback (the UI may then say where to look). */
   titleIsRequest: boolean;
   status: CardStatus;
@@ -45,13 +47,15 @@ export interface RunCard {
   when: string | null;
 }
 
-export function runCard(run: Pick<RunSummary, 'display_goal' | 'status' | 'duration_sec' | 'files_modified' | 'timestamp'>): RunCard {
+export function runCard(run: Pick<RunSummary, 'display_goal' | 'status' | 'duration_sec' | 'files_modified' | 'timestamp' | 'requirement_truth'>): RunCard {
   const status: CardStatus = run.status === 'success' ? 'success' : run.status === 'failure' ? 'failure' : run.status === 'in_progress' ? 'unfinished' : 'unknown';
   const files = typeof run.files_modified === 'string' ? run.files_modified.split(',').map((f) => f.trim()).filter(Boolean) : [];
   const title = goalTitle(run.display_goal);
+  // A completed run is worded by the backend's requirement truth projected on the list (kriya/application/history.py); a run that recorded none is neutral 'Completed', never 'verified'.
+  const completed = requirementTruthWords(parseRequirementTruth(run.requirement_truth));
   return {
-    title, titleIsRequest: title !== NEUTRAL_TITLE, status,
-    statusLabel: status === 'success' ? 'Succeeded' : status === 'failure' ? 'Failed' : status === 'unfinished' ? 'Unfinished' : 'Status not recorded',
+    title, titleIsRequest: title !== NEUTRAL_TITLE, status, tone: status === 'success' ? completed.tone : 'ok',
+    statusLabel: status === 'success' ? completed.heading : status === 'failure' ? 'Failed' : status === 'unfinished' ? 'Unfinished' : 'Status not recorded',
     duration: formatDuration(run.duration_sec), filesChanged: files.length === 0 ? null : files.length,
     when: typeof run.timestamp === 'string' && run.timestamp.trim() !== '' ? run.timestamp.slice(0, 16).replace('T', ' ') : null,
   };
@@ -242,7 +246,7 @@ export function humanTimeline(events: readonly RunEvent[], status: string | null
     }
   }
   const last = ordered[ordered.length - 1]!;
-  if (status === 'success') add(last, 'Run completed', 'ok');
+  if (status === 'success') { const closing = requirementTruthWords(requirementTruthFromEvents(events)); add(last, closing.heading, closing.tone === 'ok' ? 'ok' : 'info'); }
   else if (status === 'failure') add(last, 'Run failed', 'bad');
   return out;
 }
@@ -357,14 +361,19 @@ export function parseRequirementTruth(raw: unknown): RequirementTruth | null {
 export function requirementTruthOf(ended: unknown): RequirementTruth | null {
   return parseRequirementTruth(typeof ended === 'object' && ended !== null ? (ended as { requirement_truth?: unknown }).requirement_truth : undefined);
 }
+/** The run's FINAL requirement truth from its own events: the LAST `requirement.truth` event (the backend emits one at every closure; the last is final). null when the run recorded none (a run from before this event existed): never "verified". */
+export function requirementTruthFromEvents(events: readonly { kind: string; details?: unknown }[] | null): RequirementTruth | null {
+  const last = [...(events ?? [])].reverse().find((e) => e.kind === 'requirement.truth');
+  return last ? parseRequirementTruth(last.details) : null;
+}
 export interface RequirementTruthWords { heading: string; badge: string | null; summary: string | null; applied: string | null; tone: 'ok' | 'warn' | 'bad' }
-/** The words for a COMPLETED run's requirement truth. ALL_VERIFIED keeps the ordinary "Run completed"; the other two never show ordinary green (and never "Run succeeded": `badge` replaces that label). A completed run with NO
- * recorded truth keeps today's words (it is old, not verified). Accepted-by-an-operator requirements are counted apart from verified ones. */
+/** THE words for a COMPLETED run's requirement truth - the one table every surface reads (owner ruling 2026-11-08): ALL_VERIFIED 'Completed — verified'; OPEN_REQUIREMENTS 'Changes applied — verification incomplete' (apply truth and
+ * verification truth are separate authorities); no recorded truth 'Completed' (old, never 'verified'); CONTRADICTED keeps its own non-success words. Open and contradicted never show ordinary green (and never "Run succeeded": `badge` replaces that label). Accepted-by-an-operator requirements are counted apart from verified ones. */
 export function requirementTruthWords(truth: RequirementTruth | null): RequirementTruthWords {
-  if (truth === null) return { heading: 'Run completed', badge: null, summary: null, applied: null, tone: 'ok' };
+  if (truth === null) return { heading: 'Completed', badge: null, summary: null, applied: null, tone: 'ok' };
   const open = Math.max(0, truth.total - truth.verified - truth.accepted);
   const counts = `${truth.verified} of ${truth.total} requirements verified${truth.accepted > 0 ? ` · ${truth.accepted} accepted by you` : ''}`;
-  if (truth.status === 'ALL_VERIFIED') return { heading: 'Run completed', badge: null, summary: truth.total === 0 ? null : counts, applied: null, tone: 'ok' };
+  if (truth.status === 'ALL_VERIFIED') return { heading: 'Completed — verified', badge: null, summary: truth.total === 0 ? null : counts, applied: null, tone: 'ok' };
   if (truth.status === 'CONTRADICTED') return { heading: 'Changes applied — a requirement is contradicted', badge: 'a requirement is contradicted', summary: `${counts} · ${open} not verified, at least one contradicted by evidence`, applied: 'Your change was applied, but Kriya recorded evidence that contradicts a requirement. Review it before relying on it.', tone: 'bad' };
   return { heading: 'Changes applied — verification incomplete', badge: 'verification incomplete', summary: truth.total === 0 ? null : `${counts} · ${open} unverified`, applied: 'Your change was applied. Kriya could not independently verify every requirement, so review the result before relying on it.', tone: 'warn' };
 }

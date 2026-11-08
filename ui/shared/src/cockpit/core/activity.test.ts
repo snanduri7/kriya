@@ -19,7 +19,7 @@ describe('activity from recorded facts only', () => {
   it('invents nothing: no Planning, no Preparing runtime verification, no Running application without a record behind it', () => {
     const all = texts(activityEntries([rec(1, 'run.opened'), rec(2, 'unit.opened'), rec(3, 'model.request'), rec(4, 'model.response'), rec(5, 'attempt.closed')], launch()));
     expect(all).toEqual(['Run started']);
-    for (const claim of [/Planning/, /Preparing runtime/, /Running application/, /Run completed/]) expect(all.join('|')).not.toMatch(claim);
+    for (const claim of [/Planning/, /Preparing runtime/, /Running application/, /Completed/]) expect(all.join('|')).not.toMatch(claim);
   });
   it('a failed gate is a failure; zero test cases is "No tests ran", never a pass', () => {
     expect(texts(activityFromRecords([gate(1, 'compile', false)]))).toEqual(['Build failed', 'Attempt 1 rejected', 'The project did not build.']);
@@ -75,7 +75,7 @@ describe('review activity names the right subject', () => {
     const merged = activityEntries([rec(1, 'run.opened'), rec(3, 'attempt.opened')], launch({ pending_approval: runtimeReview('PENDING') }));
     expect(texts(merged)).toEqual(['Run started', 'Working on the change', 'Waiting for permission to run commands']);
     const done = activityEntries([rec(1, 'run.opened')], launch({ ended: { at: '2026-10-15T10:05:00Z', exit_code: 0 } }));
-    expect(texts(done)).toEqual(['Run started', 'Run completed']);
+    expect(texts(done)).toEqual(['Run started', 'Completed']);
     expect(texts(activityEntries([], launch({ ended: { at: '2026-10-15T10:05:00Z', exit_code: 1 } })))).toEqual(['Run started', 'Run stopped']);
   });
 });

@@ -29,16 +29,16 @@ describe('requirement truth on the completed result', () => {
   it('OPEN_REQUIREMENTS is "Changes applied — verification incomplete", lists the unresolved requirement and never shows ordinary green', async () => {
     const bar = await completed({ requirementTruth: OPEN });
     expect(within(bar).getByRole('heading', { level: 2 })).toHaveTextContent('Changes applied — verification incomplete');
-    expect(bar.textContent).not.toMatch(/Run completed|Your change was applied successfully|Application created successfully/);
+    expect(bar.textContent).not.toMatch(/Run completed|Completed|Your change was applied successfully|Application created successfully/);
     expect(within(bar).getByTestId('requirement-truth-summary')).toHaveTextContent('2 of 3 requirements verified · 1 unverified');
     expect(within(bar).getByTestId('requirement-truth')).toHaveAttribute('data-status', 'OPEN_REQUIREMENTS');
     expect(within(bar).getAllByTestId('requirement-unresolved').map((li) => li.textContent)).toEqual([expect.stringContaining('It prints hello world when executed.')]);
     expect(within(bar).getByTestId('applied-with-open-requirements')).toHaveTextContent('Your change was applied');
   });
 
-  it('ALL_VERIFIED keeps the ordinary "Run completed" and says every requirement was verified', async () => {
+  it('ALL_VERIFIED is "Completed — verified" and says every requirement was verified', async () => {
     const bar = await completed({ requirementTruth: { status: 'ALL_VERIFIED', verified: 3, total: 3 } });
-    expect(within(bar).getByRole('heading', { level: 2 })).toHaveTextContent('Run completed');
+    expect(within(bar).getByRole('heading', { level: 2 })).toHaveTextContent('Completed — verified');
     expect(within(bar).getByTestId('requirement-truth-summary')).toHaveTextContent('3 of 3 requirements verified');
     expect(within(bar).queryByTestId('requirement-unresolved')).toBeNull();
   });
@@ -51,7 +51,7 @@ describe('requirement truth on the completed result', () => {
 
   it('a run whose record carries no truth shows no requirement-truth block and claims nothing was verified', async () => {
     const bar = await completed({});
-    expect(within(bar).getByRole('heading', { level: 2 })).toHaveTextContent('Run completed');
+    expect(within(bar).getByRole('heading', { level: 2 })).toHaveTextContent(/^Completed$/);   // neutral: a run that recorded no truth is never "verified"
     expect(within(bar).queryByTestId('requirement-truth')).toBeNull();
   });
 });
@@ -65,15 +65,18 @@ describe('the same truth everywhere the result is worded', () => {
   it('ACCEPTED requirements are counted apart from verified ones, never called verified', async () => {
     const bar = await completed({ requirementTruth: { status: 'ALL_VERIFIED', verified: 1, accepted: 2, total: 3 } });
     expect(within(bar).getByTestId('requirement-truth-summary')).toHaveTextContent('1 of 3 requirements verified · 2 accepted by you');
-    expect(within(bar).getByRole('heading', { level: 2 })).toHaveTextContent('Run completed');
+    expect(within(bar).getByRole('heading', { level: 2 })).toHaveTextContent('Completed — verified');
   });
   it('the Activity closing line is qualified by the launch record\'s truth', () => {
     const status = { launch: { requested_at: '2026-11-08T10:00:00+00:00', ended: { at: '2026-11-08T10:05:00+00:00', exit_code: 0, requirement_truth: OPEN } } } as unknown as Parameters<typeof activityEntries>[1];
     const texts = activityEntries([], status).map((e) => e.text);
     expect(texts).toContain('Changes applied — verification incomplete');
     expect(texts).not.toContain('Run completed');
-    const ok = { launch: { ended: { at: '2026-11-08T10:05:00+00:00', exit_code: 0 } } } as unknown as Parameters<typeof activityEntries>[1];
-    expect(activityEntries([], ok).map((e) => e.text)).toContain('Run completed');
+    expect(texts).not.toContain('Completed');
+    const none = { launch: { ended: { at: '2026-11-08T10:05:00+00:00', exit_code: 0 } } } as unknown as Parameters<typeof activityEntries>[1];
+    expect(activityEntries([], none).map((e) => e.text)).toContain('Completed');   // no truth recorded: neutral
+    const verified = { launch: { ended: { at: '2026-11-08T10:05:00+00:00', exit_code: 0, requirement_truth: { status: 'ALL_VERIFIED', verified: 1, accepted: 0, total: 1 } } } } as unknown as Parameters<typeof activityEntries>[1];
+    expect(activityEntries([], verified).map((e) => e.text)).toContain('Completed — verified');
   });
   it('a stored run\'s truth is the LAST requirement.truth event; none recorded is null, malformed is null', () => {
     const event = (status: string, verified: number) => ({ kind: 'requirement.truth', details: { status, verified, accepted: 0, total: 2, unresolved: [] } });
@@ -114,9 +117,10 @@ describe('the projections validate the backend record and derive nothing', () =>
     expect(runtimeObservationOf({ runtime_observation: { command: '', stdout: 'x' } })).toBeNull();
     expect(runtimeObservationOf({ runtime_observation: { command: 'python3 x.py' } })).toBeNull();
   });
-  it('words: not recorded keeps today\'s words, open and contradicted never say "Run completed"', () => {
-    expect(requirementTruthWords(null)).toMatchObject({ heading: 'Run completed', tone: 'ok', summary: null });
+  it('words: the frozen table - verified, open (apply and verification are separate), none recorded; contradicted is never a success', () => {
+    expect(requirementTruthWords(null)).toMatchObject({ heading: 'Completed', tone: 'ok', summary: null });
+    expect(requirementTruthWords({ status: 'ALL_VERIFIED', verified: 1, accepted: 0, total: 1, unresolved: [] })).toMatchObject({ heading: 'Completed — verified', tone: 'ok' });
     expect(requirementTruthWords(requirementTruthOf({ requirement_truth: OPEN }))).toMatchObject({ heading: 'Changes applied — verification incomplete', tone: 'warn' });
-    expect(requirementTruthWords({ status: 'CONTRADICTED', verified: 0, accepted: 0, total: 1, unresolved: [] }).heading).not.toBe('Run completed');
+    expect(requirementTruthWords({ status: 'CONTRADICTED', verified: 0, accepted: 0, total: 1, unresolved: [] }).heading).not.toMatch(/^Completed/);
   });
 });

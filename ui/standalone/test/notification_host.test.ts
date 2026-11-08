@@ -29,8 +29,8 @@ describe('what is accepted', () => {
   });
   it('only for the launch this host started', () => {
     const { host, shown } = make({ launch: '20261011T101010-00000000' });
-    expect(host.notify({ kind: 'run_succeeded', launch_id: LID })).toEqual({ shown: false, reason: 'unknown_launch' });
-    expect(make({ launch: null }).host.notify({ kind: 'run_succeeded', launch_id: LID })).toEqual({ shown: false, reason: 'unknown_launch' });
+    expect(host.notify({ kind: 'run_completed', launch_id: LID })).toEqual({ shown: false, reason: 'unknown_launch' });
+    expect(make({ launch: null }).host.notify({ kind: 'run_completed', launch_id: LID })).toEqual({ shown: false, reason: 'unknown_launch' });
     expect(shown).toEqual([]);
   });
 });
@@ -50,8 +50,12 @@ describe('what is shown', () => {
     expect(folderLabel(null)).toBeNull();
     expect(notificationText('approval_required', null).body).not.toContain(' in ');
   });
-  it('the wording states what is recorded, never more: success says "success recorded by Kriya", failure says "without a success recorded"', () => {
-    expect(notificationText('run_succeeded', 'x').body).toContain('success recorded by Kriya');
+  it('the wording states what is recorded, never more: a completion says which requirement truth it is (the canonical words), failure says "without a success recorded"', () => {
+    expect(notificationText('run_completed_verified', 'x').body).toContain('Completed — verified');
+    expect(notificationText('run_completed_unverified', 'x').body).toContain('Changes applied — verification incomplete');
+    expect(notificationText('run_completed', 'x').body).toContain('completed');
+    for (const kind of NOTIFY_KINDS.filter((k) => k !== 'run_unsuccessful')) expect(notificationText(kind, 'x').body).not.toMatch(/success recorded|success was recorded/);   // no kind says "success" without saying which truth
+    expect(notificationText('run_completed_contradicted', 'x').body).toContain('contradicts a requirement');
     expect(notificationText('run_unsuccessful', 'x').body).toContain('without a success recorded by Kriya');
     expect(notificationText('approval_required', 'x').body).toContain('Nothing is applied until you decide');
   });
@@ -60,21 +64,21 @@ describe('what is shown', () => {
 describe('when it is shown', () => {
   it('not while the window is focused, and the event is consumed (a later blur does not replay it)', () => {
     const { host, shown, state } = make({ focused: true });
-    expect(host.notify({ kind: 'run_succeeded', launch_id: LID })).toEqual({ shown: false, reason: 'focused' });
+    expect(host.notify({ kind: 'run_completed', launch_id: LID })).toEqual({ shown: false, reason: 'focused' });
     state.focused = false;
-    expect(host.notify({ kind: 'run_succeeded', launch_id: LID })).toEqual({ shown: false, reason: 'duplicate' });
+    expect(host.notify({ kind: 'run_completed', launch_id: LID })).toEqual({ shown: false, reason: 'duplicate' });
     expect(shown).toEqual([]);
   });
   it('not when the OS does not support notifications (and nothing is attempted)', () => {
     const { host, shown } = make({ supported: false });
-    expect(host.notify({ kind: 'run_succeeded', launch_id: LID })).toEqual({ shown: false, reason: 'unsupported' });
+    expect(host.notify({ kind: 'run_completed', launch_id: LID })).toEqual({ shown: false, reason: 'unsupported' });
     expect(shown).toEqual([]);
   });
   it('a finished/unsuccessful notification is sent once per launch', () => {
     const { host, shown } = make();
     expect(host.notify({ kind: 'run_unsuccessful', launch_id: LID }).shown).toBe(true);
     expect(host.notify({ kind: 'run_unsuccessful', launch_id: LID })).toEqual({ shown: false, reason: 'duplicate' });
-    expect(host.notify({ kind: 'run_succeeded', launch_id: LID }).shown).toBe(true); // a different kind is a different event
+    expect(host.notify({ kind: 'run_completed', launch_id: LID }).shown).toBe(true); // a different kind is a different event
     expect(shown).toHaveLength(2);
   });
   it('approval notifications repeat for a retry (a quick second review is NOT dropped) up to the per-launch cap', () => {

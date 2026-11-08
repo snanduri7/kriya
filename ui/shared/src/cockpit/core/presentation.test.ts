@@ -31,7 +31,7 @@ describe('goalTitle: the title is the ORIGINAL request, never a prompt', () => {
 describe('runCard / formatDuration', () => {
   it('answers: what did I ask, did it work, how long, what changed, when', () => {
     const card = runCard({ display_goal: 'Fix soft-delete bug in DefaultDriverService', status: 'success', duration_sec: 275, files_modified: 'src/A.java', timestamp: '2026-10-14 22:32:40' } as RunSummary);
-    expect(card).toEqual({ title: 'Fix soft-delete bug in DefaultDriverService', titleIsRequest: true, status: 'success', statusLabel: 'Succeeded', duration: '4m 35s', filesChanged: 1, when: '2026-10-14 22:32' });
+    expect(card).toEqual({ title: 'Fix soft-delete bug in DefaultDriverService', titleIsRequest: true, status: 'success', tone: 'ok', statusLabel: 'Completed', duration: '4m 35s', filesChanged: 1, when: '2026-10-14 22:32' });
   });
   it('maps statuses honestly: an unknown status is "not recorded", never success', () => {
     for (const [status, label] of [['failure', 'Failed'], ['in_progress', 'Unfinished'], ['weird', 'Status not recorded'], [null, 'Status not recorded']] as const) expect(runCard({ status } as RunSummary).statusLabel).toBe(label);
@@ -145,7 +145,7 @@ describe('humanTimeline: a deterministic mapping from recorded run events; unkno
   ];
   it('tells the run in a handful of plain sentences, in time order', () => {
     expect(humanTimeline(events, 'success').map((e) => e.text)).toEqual([
-      'Run started', 'Started working on the change', 'Change prepared (1 file)', 'Checks passed on the proposed change', 'Change approved', 'Final verification passed', 'Change applied to your folder', 'Run completed',
+      'Run started', 'Started working on the change', 'Change prepared (1 file)', 'Checks passed on the proposed change', 'Change approved', 'Final verification passed', 'Change applied to your folder', 'Completed',
     ]);
   });
   it('shows no mechanism names and invents no "plan created" line', () => {

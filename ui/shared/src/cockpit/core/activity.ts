@@ -80,9 +80,9 @@ export function activityFromLaunch(status: LaunchStatus | null): ActivityEntry[]
  * duplicate "Run started"/"Run completed" dropped when the evidence already has them. */
 export function activityEntries(records: readonly EvidenceRecord[], status: LaunchStatus | null): ActivityEntry[] {
   const merged = mergedActivity(records, status);
-  // The backend's requirement truth qualifies the closing line: an open or contradicted run never ends on an ordinary green "Run completed".
+  // The closing line carries the canonical words of the backend's requirement truth (one table, presentation.ts): 'Completed — verified', 'Changes applied — verification incomplete', or neutral 'Completed'.
   const words = requirementTruthWords(requirementTruthOf(status?.launch.ended));
-  return words.tone === 'ok' ? merged : merged.map((e) => (e.text === 'Run completed' ? { ...e, text: words.heading, tone: 'info' as const } : e));
+  return merged.map((e) => (e.text === 'Run completed' ? { ...e, text: words.heading, tone: words.tone === 'ok' ? e.tone : 'info' as const } : e));
 }
 
 function mergedActivity(records: readonly EvidenceRecord[], status: LaunchStatus | null): ActivityEntry[] {

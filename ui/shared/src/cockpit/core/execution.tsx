@@ -11,7 +11,8 @@
  * the outcome is durable. When it is, the Runs/Timeline/Overview/... modules are refreshed through the ordinary snapshot path - they never see a special case.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { ExecutionHostPort } from '../../host/HostAdapter';
+import type { ExecutionHostPort, NotifyKind } from '../../host/HostAdapter';
+import { requirementTruthOf } from './presentation';
 import type { ApproveConfigurationResult, InitializeProjectResult, DecideApprovalResult, DecideRuntimeCommandResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
 import type { ProviderError, UIProvider } from './provider';
 import { useWorkspace } from './workspace';
@@ -189,13 +190,15 @@ export const UNREADABLE_POLLS = 4;
 const PAGE = 200;
 
 /** The notification a run state warrants, or null. Pure: a pending review (Kriya's record, the run live) is "approval_required"; a recorded success is
- * "run_succeeded"; any other recorded end except the person's own rejection is "run_unsuccessful". `key` makes each event ask once (a new review is a new event). */
-export function notificationFor(run: RunView): { kind: 'approval_required' | 'runtime_approval_required' | 'run_succeeded' | 'run_unsuccessful'; key: string } | null {
+ * one of the completion kinds, chosen by the backend's requirement truth on the launch record (the same authority every surface reads; never recomputed here); any other recorded end except the person's own rejection is "run_unsuccessful". `key` makes each event ask once (a new review is a new event). */
+export function notificationFor(run: RunView): { kind: NotifyKind; key: string } | null {
   if (run.stage !== 'finished' && run.review) return { kind: 'approval_required', key: `approval_required:${run.launchId}:${run.review.review_id}` };
   if (run.stage !== 'finished' && run.runtimeReview) return { kind: 'runtime_approval_required', key: `runtime_approval_required:${run.launchId}:${run.runtimeReview.review_id}` };
   if (run.stage === 'finished' && run.outcome) {
     if (run.outcome.kind === 'rejected') return null; // the person just decided this themselves
-    return { kind: run.outcome.kind === 'success' ? 'run_succeeded' : 'run_unsuccessful', key: `${run.outcome.kind === 'success' ? 'run_succeeded' : 'run_unsuccessful'}:${run.launchId}` };
+    const truth = run.outcome.kind === 'success' ? requirementTruthOf(run.status?.launch.ended)?.status ?? null : null;
+    const kind: NotifyKind = run.outcome.kind !== 'success' ? 'run_unsuccessful' : truth === 'ALL_VERIFIED' ? 'run_completed_verified' : truth === 'OPEN_REQUIREMENTS' ? 'run_completed_unverified' : truth === 'CONTRADICTED' ? 'run_completed_contradicted' : 'run_completed';
+    return { kind, key: `${kind}:${run.launchId}` };
   }
   return null;
 }

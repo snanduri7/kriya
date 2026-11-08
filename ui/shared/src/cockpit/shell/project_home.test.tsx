@@ -194,11 +194,11 @@ describe('E/F. Start Run turns the page into the run, with only supported states
 });
 
 describe('K. The outcome is understood without opening diagnostics', () => {
-  it('a success says "Run completed", lists what changed and the recorded verification, and offers View Changes / View Verification / New Goal', async () => {
+  it('a success says "Completed", lists what changed and the recorded verification, and offers View Changes / View Verification / New Goal', async () => {
     const { host, run } = await startRun({ outcome: 'success' });
     act(() => host.exec!.finish());
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
-    expect(within(run).getByRole('heading', { name: 'Run completed' })).toBeInTheDocument();
+    expect(within(run).getByRole('heading', { name: 'Completed' })).toBeInTheDocument();
     const changed = await within(run).findByRole('list', { name: 'Changed files' }, { timeout: 4000 });
     expect(within(changed).getAllByRole('listitem').length).toBeGreaterThan(0);
     expect(changed.textContent).toMatch(/\+\d+ −\d+/);
@@ -276,7 +276,7 @@ describe('B2. the terminal result appears in the same card, on the same page, wi
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', outcome));
     expect(page()).toBe('project');                                           // no navigation was needed
     expect(within(run).queryByTestId('current-activity')).toBeNull();
-    expect(within(run).getByRole('heading', { level: 2 })).toHaveTextContent(outcome === 'success' ? 'Run completed' : 'Run failed');
+    expect(within(run).getByRole('heading', { level: 2 })).toHaveTextContent(outcome === 'success' ? 'Completed' : 'Run failed');
   });
 });
 

@@ -98,7 +98,7 @@ describe('the review of a change: the EXACT change first, then why, verification
     expect(bar).toHaveAttribute('data-outcome', ''); // no outcome yet
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));
-    expect(within(bar).getByText('Run completed')).toBeInTheDocument();
+    expect(within(bar).getByText('Completed')).toBeInTheDocument();
     expect(within(bar).getByText(/You approved the change/)).toBeInTheDocument();
   });
 

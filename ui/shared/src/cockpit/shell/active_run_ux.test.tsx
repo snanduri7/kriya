@@ -28,7 +28,7 @@ describe('notificationFor (pure): only durable states notify', () => {
   const base = { launchId: LAUNCH_ID, workspace: '/w' } as unknown as RunView;
   const outcome = (kind: string) => ({ ...base, stage: 'finished', review: null, outcome: { kind } }) as unknown as RunView;
   it.each([
-    ['success', 'run_succeeded'], ['failure', 'run_unsuccessful'], ['needs_review', 'run_unsuccessful'], ['refused', 'run_unsuccessful'], ['interrupted', 'run_unsuccessful'],
+    ['success', 'run_completed'], ['failure', 'run_unsuccessful'], ['needs_review', 'run_unsuccessful'], ['refused', 'run_unsuccessful'], ['interrupted', 'run_unsuccessful'],
     ['not_recorded', 'run_unsuccessful'], ['approval_required', 'run_unsuccessful'], ['review_expired', 'run_unsuccessful'],
   ])('a recorded %s end asks for %s', (kind, expected) => expect(notificationFor(outcome(kind))?.kind).toBe(expected));
   it('the person\'s own rejection never notifies, and neither does a run that is merely running or starting', () => {
@@ -42,12 +42,12 @@ describe('notificationFor (pure): only durable states notify', () => {
     expect(notificationFor(live('ra-2'))!.key).not.toBe(notificationFor(live('ra-1'))!.key);
   });
   it('a finished run with a stale review object is the outcome, not an approval', () => {
-    expect(notificationFor({ ...base, stage: 'finished', review: { review_id: 'ra-1' }, outcome: { kind: 'success' } } as unknown as RunView)?.kind).toBe('run_succeeded');
+    expect(notificationFor({ ...base, stage: 'finished', review: { review_id: 'ra-1' }, outcome: { kind: 'success' } } as unknown as RunView)?.kind).toBe('run_completed');
   });
 });
 
 describe('notifications over a whole run', () => {
-  it('a review asks for exactly ONE approval notification (polling and re-rendering do not repeat it), then a success asks for one run_succeeded', async () => {
+  it('a review asks for exactly ONE approval notification (polling and re-rendering do not repeat it), then a success asks for one run_completed', async () => {
     const { host, bar } = await reachReview();
     await waitFor(() => expect(host.exec!.notifications).toEqual([{ kind: 'approval_required', launch_id: LAUNCH_ID }]));
     await new Promise((r) => setTimeout(r, 150));
@@ -56,7 +56,7 @@ describe('notifications over a whole run', () => {
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));
-    await waitFor(() => expect(host.exec!.notifications.map((n) => n.kind)).toEqual(['approval_required', 'run_succeeded']));
+    await waitFor(() => expect(host.exec!.notifications.map((n) => n.kind)).toEqual(['approval_required', 'run_completed']));
   });
   it('a failed run asks for run_unsuccessful; the person\'s own rejection asks for nothing further', async () => {
     const failed = await start({ outcome: 'failure' });
@@ -109,7 +109,7 @@ describe('the compact run strip: findable from every page, Return to Run, and th
   it('while a run is active, "Return to Run" selects the live run and returns to the Project page from any page or historical selection', async () => {
     const { host, store } = await start({ outcome: 'success' });
     goTo('Runs');
-    const history = await screen.findAllByRole('button', { name: /Succeeded|Failed/ });
+    const history = await screen.findAllByRole('button', { name: /Completed|Changes applied|Failed/ });
     fireEvent.click(history[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBeNull());
     expect(store.getState().liveLaunchId).toBeNull();
@@ -189,7 +189,7 @@ describe('the compact run strip: findable from every page, Return to Run, and th
     expect(within(bar).getByRole('button', { name: 'New Goal' })).toBeInTheDocument();
     goTo('Skills');
     const s = await strip();
-    expect(within(s).getByText('Run completed')).toBeInTheDocument();
+    expect(within(s).getByText('Completed')).toBeInTheDocument();
     expect(within(s).queryByRole('button', { name: 'Return to Run' })).toBeNull();
     fireEvent.click(within(s).getByRole('button', { name: 'Dismiss' }));
     await waitFor(() => expect(screen.queryByRole('status', { name: 'Active run' })).toBeNull());

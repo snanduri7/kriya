@@ -49,7 +49,8 @@ export interface WorkspaceChoice { chosen: boolean; path: string | null; /** RUN
 export interface ProjectParentChoice { chosen: boolean; token: string | null; parent: string | null; refused?: 'RUN_ACTIVE' | null }
 export interface ProjectCreateResult { created: boolean; path: string | null; code: string | null; message: string | null; reason: string | null }
 /** A native notification for one of three durable moments. The host builds the text; only the closed kind and the launch id cross. */
-export type NotifyKind = 'approval_required' | 'runtime_approval_required' | 'run_succeeded' | 'run_unsuccessful';
+/** A finished run's notification kind follows the backend's requirement truth (one table: presentation.ts requirementTruthWords): verified, applied with verification incomplete, applied with a contradicted requirement, or - for a run that recorded no truth - a neutral completion. There is no kind that says "success" without saying which. */
+export type NotifyKind = 'approval_required' | 'runtime_approval_required' | 'run_completed_verified' | 'run_completed_unverified' | 'run_completed_contradicted' | 'run_completed' | 'run_unsuccessful';
 export interface NotifyRequest { kind: NotifyKind; launch_id: string }
 export interface NotifyResult { shown: boolean; reason: string }
 export type MenuCommand = 'openFolder' | 'newProject' | 'showRun';

@@ -12,7 +12,7 @@
  */
 import { LAUNCH_ID_RE } from './ipc_contract';
 
-export const NOTIFY_KINDS = ['approval_required', 'runtime_approval_required', 'run_succeeded', 'run_unsuccessful'] as const;
+export const NOTIFY_KINDS = ['approval_required', 'runtime_approval_required', 'run_completed_verified', 'run_completed_unverified', 'run_completed_contradicted', 'run_completed', 'run_unsuccessful'] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 export interface NotifyRequest { kind: NotifyKind; launch_id: string }
 export type NotifyReason = 'shown' | 'invalid' | 'unknown_launch' | 'duplicate' | 'focused' | 'unsupported';
@@ -48,7 +48,10 @@ export function notificationText(kind: NotifyKind, folder: string | null): { tit
   switch (kind) {
     case 'runtime_approval_required': return { title: 'Kriya needs your permission', body: `Kriya wants to run verification commands${where}. Nothing further is run until you decide.` };
     case 'approval_required': return { title: 'Kriya needs your approval', body: `A proposed change${where} is waiting for your review. Nothing is applied until you decide.` };
-    case 'run_succeeded': return { title: 'Kriya run finished', body: `The run${where} ended with success recorded by Kriya. Open Kriya to see what changed.` };
+    case 'run_completed_verified': return { title: 'Kriya run finished', body: `Completed — verified${where}: every requirement was verified. Open Kriya to see what changed.` };
+    case 'run_completed_unverified': return { title: 'Kriya run finished', body: `Changes applied — verification incomplete${where}: some requirements could not be independently verified. Open Kriya to review the result.` };
+    case 'run_completed_contradicted': return { title: 'Kriya run finished', body: `Changes applied${where}, but evidence contradicts a requirement. Open Kriya to review the result.` };
+    case 'run_completed': return { title: 'Kriya run finished', body: `The run${where} completed. Open Kriya to see what changed.` };
     case 'run_unsuccessful': return { title: 'Kriya run did not finish successfully', body: `The run${where} ended without a success recorded by Kriya. Open Kriya for the details.` };
   }
 }

@@ -143,7 +143,7 @@ describe('the main pane shows ONE primary state', () => {
     expect(within(main).queryByRole('textbox', { name: 'Engineering goal' })).toBeNull();
     act(() => host.exec!.finish());
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
-    expect(within(run).getByRole('heading', { level: 2 })).toHaveTextContent('Run completed');
+    expect(within(run).getByRole('heading', { level: 2 })).toHaveTextContent('Completed');
     fireEvent.click(within(run).getByRole('button', { name: 'New Goal' }));
     expect(await within(main).findByRole('heading', { name: 'Enter a goal' })).toBeInTheDocument();
     expect(within(main).queryByRole('region', { name: 'Current run' })).toBeNull();
@@ -178,7 +178,7 @@ describe('the Activity dock', () => {
     fireEvent.click(within(dock).getByRole('button', { name: /ACTIVITY/ }));          // the person collapses it
     expect(dock).toHaveAttribute('data-open', 'false');
     act(() => host.exec!.finish());
-    await screen.findByRole('heading', { name: 'Run completed' });
+    await screen.findByRole('heading', { name: 'Completed' });
     expect(dock).toHaveAttribute('data-open', 'false');                               // an explicit choice is kept
   });
 });

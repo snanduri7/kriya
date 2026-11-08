@@ -195,6 +195,52 @@ def scoped_history_list(cfg, trace: TraceHistory, n: int, cursor: Optional[str],
                                 "truncated": truncated}}
 
 
+# ------------------------------------------------------------------ requirement truth of each listed run (a projection of the run's own events)
+
+# The closed truth vocabulary (kriya/workflow/requirements.py::REQUIREMENT_TRUTH_*; tests/test_run_list_requirement_truth.py pins this tuple equal to it:
+# the application layer does not import the workflow at module level).
+_TRUTH_STATUSES = ("ALL_VERIFIED", "OPEN_REQUIREMENTS", "CONTRADICTED")
+
+
+def _truth_of_events(events: Any) -> Optional[Dict[str, Any]]:
+    """The run's FINAL requirement truth from a parsed ``run_events`` list: the details of the LAST ``requirement.truth`` event, reduced to its closed, bounded
+    fields (status and the three counts). None when there is none (a run from before the event existed) or the event is malformed: a missing truth is never
+    turned into a verified one, and a malformed one is never guessed."""
+    details = None
+    for event in events if isinstance(events, list) else []:
+        if isinstance(event, dict) and event.get("kind") == "requirement.truth":
+            details = event.get("details")
+    if not isinstance(details, dict) or details.get("status") not in _TRUTH_STATUSES:
+        return None
+    counts = {key: details.get(key) for key in ("verified", "accepted", "total")}
+    if any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in counts.values()):
+        return None
+    return {"status": details["status"], **counts}
+
+
+def _last_requirement_truth(events_text: Optional[str]) -> Optional[Dict[str, Any]]:
+    """``_truth_of_events`` for one row's stored ``run_events`` text (None for no text or text that does not parse)."""
+    if events_text is None:
+        return None
+    try:
+        return _truth_of_events(json.loads(events_text))
+    except ValueError:
+        return None
+
+
+def attach_requirement_truth(trace: TraceHistory, runs: List[Dict[str, Any]]) -> None:
+    """Set ``requirement_truth`` on each listed run that recorded one, from the run's own persisted ``requirement.truth`` event: ONE batched read for the whole
+    page (no query per run), no stored copy, no second authority. A run with none carries no field (the host words it neutrally, never as verified)."""
+    if not runs:
+        return
+    with trace.events_reader() as events_by_run:
+        events = events_by_run([run["run_id"] for run in runs])
+    for run in runs:
+        truth = _last_requirement_truth(events.get(run["run_id"]))
+        if truth is not None:
+            run["requirement_truth"] = truth
+
+
 def _display_page(page: Dict[str, Any]) -> Dict[str, Any]:
     """A history page for display (S2b): each run's goal texts through the one redaction owner. Only the goal fields -
     the page also carries an opaque cursor whose bytes must not change."""
@@ -285,12 +331,18 @@ class HistoryService:
     def list(self, ctx: RequestContext, cfg, snapshot: Snapshot, *, limit: Optional[int], cursor: Optional[str]) -> Dict[str, Any]:
         """One page of runs, newest first (the snapshot reader validates ``limit`` and ``cursor``); goals redacted for display."""
         with store_refusals():
-            return _display_page(self.store.trace(snapshot).page(limit, cursor))
+            trace = self.store.trace(snapshot)
+            page = trace.page(limit, cursor)
+            attach_requirement_truth(trace, page["runs"])
+            return _display_page(page)
 
     def list_in_workspace(self, ctx: RequestContext, cfg, snapshot: Snapshot, *, limit: int, cursor: Optional[str], workspace: str) -> Dict[str, Any]:
         """One page of the runs whose evidence manifest records ``workspace`` (GUI M5); goals redacted for display."""
         with store_refusals():
-            return _display_page(scoped_history_list(cfg, self.store.trace(snapshot), limit, cursor, workspace))
+            trace = self.store.trace(snapshot)
+            page = scoped_history_list(cfg, trace, limit, cursor, workspace)
+            attach_requirement_truth(trace, page["runs"])
+            return _display_page(page)
 
     def detail(self, ctx: RequestContext, cfg, snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
         """The stored row of one run plus the derived ``application_outcome`` section of its recorded gate outcomes, as a
@@ -302,6 +354,11 @@ class HistoryService:
         gates = detail["gate_outcomes"]
         outcome = application_outcome(gates["data"] if gates["availability"] == "recorded" else None)
         detail["application_outcome"] = {"availability": "recorded", "provenance": APPLICATION_OUTCOME_PROVENANCE, "reason": None, "data": outcome}
+        # The same projection the list carries, from the same persisted event (the run header words a stored run exactly as its list card does).
+        events = detail["run_events"]
+        truth = _truth_of_events(events["data"]) if events["availability"] == "recorded" else None
+        if truth is not None:
+            detail["run"]["requirement_truth"] = truth
         return redact_value(detail)
 
     def prompt(self, ctx: RequestContext, cfg, snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
