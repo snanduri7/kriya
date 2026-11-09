@@ -350,6 +350,6 @@ Evidence: `~/kriya-evidence/product-72h-env/p1-ab-capture-2026-11-09/` (observat
 ## 12o. Scenario A Run 3 stopped at its first gate by the bind-source P2 (2026-11-09)
 
 - Run 3 (`20261109T195433-688a11a2`, HEAD `32db122`, budget 2400 s, frozen config `743968f4...`): the s1 `pom_validate` gate failed with the COMPLETE signature `bind source path does not exist: /host_mnt/.../state/gate-views/view-...061d000001`; Kriya classified VERIFICATION_INFRASTRUCTURE_FAILURE ("not a code failure"), attempted no repair and stopped at s1. No candidate observation exists. Per the owner's rule the run was NOT restarted; evidence is sealed in `~/kriya-evidence/product-72h-confidence/scenario-a-run3-2026-11-09/` (CLASSIFICATION.md).
-- `MAVEN-GATE-CACHE-BIND-SOURCE-MISSING-ON-UNIQUE-PATH-001`: second proven occurrence; promoted to P1 by the row's own trigger (quiet host); measurement first, no change made.
+- `MAVEN-GATE-CACHE-BIND-SOURCE-MISSING-ON-UNIQUE-PATH-001`: second proven occurrence; trigger for P1 met (quiet host) but left at P2 pending the owner (the registry test forbids a parked open P1: promotion means working it); measurement first, no change made.
 - Also this session: `DEMO-VERIFY-BUDGET-PIN-001` closed (32db122); the JDK 21/26 preflight warning classified informational (host preflight only; all contained gates Java 17).
 - Disposition of Run 3 (FAIL-environment vs INVALID with a replacement run) is the owner's decision.
