@@ -25,6 +25,11 @@ a dropped dependency - gets its own unit, units are kept until the outermost sco
 stored source is the only authority for what is mounted: ``<origin>/.kriya/venv`` is discarded at entry like before but is never consulted afterwards, so whatever a candidate plants
 there cannot reach a mount. A gate that executes in place has no view and no bind source; its venv stays inside the workspace mount.
 
+The empty working directory of the Maven tooling acquisition (``_acquire_maven_tooling``) is a unit of this module too (``create_ephemeral_cache(state, "tooling")``;
+MAVEN-TOOLING-SCRATCH-CLEANUP-001), not a ``TemporaryDirectory``: MEASURED on Docker Desktop (macOS), the host cannot delete a directory for 0.5-2.3 s after a container with
+read-only mask mounts under it exits, and a ``TemporaryDirectory`` exit raised that out of an acquisition that had succeeded. Removal after the last use is attempted and
+never changes the outcome; a failure is logged with the exact path (``remove_ephemeral_cache``) and the dead-owner sweep removes the residue later.
+
 The structural guard. ``is_ephemeral_cache`` is what the OCI backend consults (``containment_oci._require_ephemeral_writable_caches``) before any docker
 resource exists: a profile that mounts a dependency cache WRITABLE must name a directory this module created (a Kriya-owned marker in the unit directory
 above it, which is never mounted). Anything else is the typed refusal ``PERSISTENT_DEPENDENCY_CACHE_WRITABLE``; a gate that asks for a cache outside a
@@ -122,6 +127,9 @@ def remove_ephemeral_cache(path: str) -> None:
         _remove_tree(unit)
     except Exception as error:  # noqa: BLE001 - cleanup must not turn a verdict into an error; reported, not hidden
         logger.warning("Ephemeral dependency cache %s could not be removed (%s); it is left for the next sweep", unit, error)
+        return
+    if os.path.lexists(unit):  # ``_remove_tree`` ignores per-entry errors (Docker Desktop may hold a just-unmounted directory): the residue is reported with its exact path
+        logger.warning("Ephemeral dependency cache %s could not be fully removed; it is left for the next sweep (its owner process: %s)", unit, os.getpid())
 
 
 def is_ephemeral_cache(path: str) -> bool:

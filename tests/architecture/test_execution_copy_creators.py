@@ -28,7 +28,6 @@ SITES: Dict[Tuple[str, str], str] = {
     ("kriya/workflow/workflow.py", "exported"): KEEPS_GIT,                                          # the baseline-authority export keeps .git (ignore list below)
     ("kriya/workflow/worktree.py", "_create_scoped_snapshot_sandbox"): OWN_REPOSITORY,
     ("kriya/repository/bound_tree.py", "copy_bound_tree"): NOT_A_VALIDATOR_TREE,   # W3-3 U3: the listing wrapper over the one copy primitive (copy_bound_paths); every caller that creates a directory is classified itself
-    ("kriya/tools/validate.py", "_acquire_maven_tooling"): VALIDATOR_OWNED,
     ("kriya/tools/validate.py", "_stage_declared_directory"): VALIDATOR_OWNED,
     ("kriya/tools/validate.py", "check_java_toolchain"): NOT_A_VALIDATOR_TREE,
     ("kriya/core/model_qualification.py", "case_anchored_edit_protocol"): NOT_A_VALIDATOR_TREE,
@@ -41,7 +40,7 @@ SITES: Dict[Tuple[str, str], str] = {
     ("kriya/static_analysis/service.py", "_evaluate"): NOT_A_VALIDATOR_TREE,
     ("kriya/tools/containment_oci.py", "authority_state_mask_args"): NOT_A_VALIDATOR_TREE,
     ("kriya/tools/dependency_execution.py", "seed_gradle_distribution_from_host"): NOT_A_VALIDATOR_TREE,
-    ("kriya/tools/dependency_cache.py", "create_ephemeral_cache"): NOT_A_VALIDATOR_TREE,  # R3: a dependency directory mounted into a container, never a tree a project is executed in
+    ("kriya/tools/dependency_cache.py", "create_ephemeral_cache"): NOT_A_VALIDATOR_TREE,  # R3: a dependency directory mounted into a container, never a tree a project is executed in; MAVEN-TOOLING-SCRATCH-CLEANUP-001: also the empty working directory of the Maven tooling acquisition (``_acquire_maven_tooling`` registers it as an owned tree; no project runs in it)
     ("kriya/tools/git_metadata.py", "export_git_metadata"): NOT_A_VALIDATOR_TREE,
     ("kriya/skills/run_shadow.py", "create"): NOT_A_VALIDATOR_TREE,        # the run-local copy of the skills text under the state directory; nothing runs in it
     ("kriya/workflow/context_certification.py", "run_certification"): NOT_A_VALIDATOR_TREE,

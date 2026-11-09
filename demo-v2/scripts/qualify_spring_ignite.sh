@@ -98,8 +98,8 @@ if [ -n "$JAVA17_HOME" ]; then
   run_runtime_leg "java17" PATH="$JAVA17_HOME/bin:$APP_PATH" HOME="$HOME" JAVA_HOME="$JAVA17_HOME"
   RUNTIME_ARGS="--witness" run_runtime_leg "java17-witness" PATH="$JAVA17_HOME/bin:$APP_PATH" HOME="$HOME" JAVA_HOME="$JAVA17_HOME"
 else fail "no Java 17 installation found by java_home: the explicit Java 17 leg cannot run (the scenario targets Java 17)"; fi
-# ---- 5b. mutation self-check of the read-back proof: every way of discarding, replacing or bypassing cache.get must be KILLED (JUnit or the witness leg); the control must pass ----
-if env -i PATH="$APP_PATH" HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" mutants --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" >"$EVIDENCE/read-back-mutants.json" 2>"$EVIDENCE/read-back-mutants.err"; then
+# ---- 5b. (MAVEN_HOME is passed explicitly: the env -i child runs the mutants' `mvn test` with the pinned authority and refuses to start without it; QUALIFY-MUTANTS-MAVEN-HOME-001) mutation self-check of the read-back proof: every way of discarding, replacing or bypassing cache.get must be KILLED (JUnit or the witness leg); the control must pass ----
+if env -i PATH="$APP_PATH" HOME="$HOME" MAVEN_HOME="$MAVEN_HOME" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" mutants --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" >"$EVIDENCE/read-back-mutants.json" 2>"$EVIDENCE/read-back-mutants.err"; then
   pass "read-back mutation self-check: the unmutated reference passes and every cache.get mutant is killed (no surviving mutant): $("$KRIYA_PY" -I -c "import json; r=json.load(open('$EVIDENCE/read-back-mutants.json')); print(', '.join(n+' <- '+'+'.join(c['killed_by']) for n,c in r['cases'].items() if n!='unmutated_reference'))")"
 else fail "read-back mutation self-check FAILED: a mutant survived or the control did not pass (see $EVIDENCE/read-back-mutants.json)"; fi
 ! pgrep -f "com.example.Main" >/dev/null 2>&1 && pass "no application process is left running" || fail "an application process (com.example.Main) is still running"

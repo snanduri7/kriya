@@ -1941,21 +1941,26 @@ class PolymorphicValidator:
                 coordinates.append(coordinate)
         desc = f"mvn {' '.join(c + ':help' for c in coordinates)} (tooling only)"
         argv = ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", *(c + ":help" for c in coordinates)]
-        with tempfile.TemporaryDirectory(prefix="kriya-maven-tooling-") as empty:
-            empty = os.path.realpath(empty)
-            self._owned_trees.add(empty)  # Kriya created it and removes it below: a Git-metadata mount target may be prepared in it
-            try:
-                result = self._run_cmd_with_timeout(
-                    argv, cwd=empty, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
-                    dependency_cache_path=cache_dir, dependency_cache_writable=True, workspace_path=empty,
-                )
-            except ContainmentSetupError:
-                raise  # SEC-006: a setup failure is never an ordinary acquisition outcome
-            except Exception as e:
-                logger.warning(f"Maven tooling acquisition ({desc}) failed to invoke: {e}")
-                return acquisition_evidence(argv, None, reason=f"failed to invoke: {type(e).__name__}: {e}")
-            finally:
-                self._owned_trees.discard(empty)
+        # MAVEN-TOOLING-SCRATCH-CLEANUP-001: the empty working directory is an explicitly owned, unique scratch unit (the ephemeral-unit primitive: pid marker, under the
+        # state root, swept by a later scope once its owner process is dead), NOT a ``TemporaryDirectory``. Its removal happens after the last use and can never change the
+        # outcome: MEASURED on Docker Desktop (macOS), the host could not delete the directory for 0.5-2.3 s after a container with read-only mask mounts exited, and the
+        # ``TemporaryDirectory`` exit raised that PermissionError out of a successful acquisition. Only setup/use failures are semantic; a failed disposal is logged with the
+        # exact path (``remove_ephemeral_cache``) and the residue is left for the dead-owner sweep.
+        empty = create_ephemeral_cache(self._state_root(), "tooling")
+        self._owned_trees.add(empty)  # Kriya created it and removes it below: a Git-metadata mount target may be prepared in it
+        try:
+            result = self._run_cmd_with_timeout(
+                argv, cwd=empty, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+                dependency_cache_path=cache_dir, dependency_cache_writable=True, workspace_path=empty,
+            )
+        except ContainmentSetupError:
+            raise  # SEC-006: a setup failure is never an ordinary acquisition outcome
+        except Exception as e:
+            logger.warning(f"Maven tooling acquisition ({desc}) failed to invoke: {e}")
+            return acquisition_evidence(argv, None, reason=f"failed to invoke: {type(e).__name__}: {e}")
+        finally:
+            self._owned_trees.discard(empty)
+            remove_ephemeral_cache(empty)  # never raises and never changes the outcome decided above
         log_acquisition_outcome("maven", desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
         return acquisition_evidence(argv, result)
 
