@@ -319,7 +319,11 @@ def test_real_oci_two_gates_on_an_execution_copy_and_a_gate_in_a_view_never_put_
         result = in_view._run_cmd_with_timeout(["git", "rev-parse", "HEAD"], cwd=in_view.workspace_path)
         view = in_view.workspace_path
     assert (result["returncode"], result["stdout"].strip()) == (0, _head(origin)), result
-    assert not os.path.lexists(view) and _snapshot(origin) == origin_before
+    # The owner contract for a view's end (tests/_gate_view_contract.py): released, and any residue is the sweepable kind - not "physically gone at once", which Docker Desktop's file sharing
+    # does not allow right after the container exits (MEASURED, GATE-VIEW-REMOVAL-NOT-IMMEDIATE-ON-DOCKER-DESKTOP-001); waiting for it is forbidden.
+    from _gate_view_contract import assert_view_released
+    assert_view_released(view)
+    assert _snapshot(origin) == origin_before
 
 
 # ----------------------------------------------------------------- a disposable copy is removed on every path (success, failure, timeout, exception)

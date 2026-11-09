@@ -219,13 +219,17 @@ def test_under_oci_a_gate_cannot_modify_the_project_venv(tmp_path):
         assert before == after and not (venv / "lib" / "evil.pth").exists()
 
 
-def test_under_oci_the_view_is_removed_and_the_worktree_is_untouched_after_a_contained_gate(tmp_path):
+def test_under_oci_the_view_is_released_and_the_worktree_is_untouched_after_a_contained_gate(tmp_path):
+    """The owner contract for a view's end (tests/_gate_view_contract.py), not "physically gone at once": right after a container that mounted the view exits, Docker Desktop's file
+    sharing can hold the mount-point directories for a moment (MEASURED, GATE-VIEW-REMOVAL-NOT-IMMEDIATE-ON-DOCKER-DESKTOP-001), and waiting for it is forbidden. What must hold is that
+    ownership is released and any residue is the sweepable kind; the deterministic sweep proof is in test_gate_view_unique_bind_source_001."""
+    from _gate_view_contract import assert_views_released
     from test_oi142_gate_view import _views
 
     root = _repo(tmp_path, calc=CALC2)
     before = sorted(str(p.relative_to(root)) for p in Path(root).rglob("*") if ".git" not in p.parts)
     _gate(root)
-    assert not os.path.isdir(_views()) or os.listdir(_views()) == []  # the view was discarded
+    assert_views_released(_views())  # the view was released; whatever remains is residue the next claim sweeps
     after = sorted(str(p.relative_to(root)) for p in Path(root).rglob("*") if ".git" not in p.parts and ".kriya" not in p.parts
                    and "__pycache__" not in p.parts and ".pytest_cache" not in p.parts)
     assert [p for p in before if ".kriya" not in p] == after

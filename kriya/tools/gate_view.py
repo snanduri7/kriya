@@ -159,6 +159,10 @@ def _sweep_leftover_views(base: str) -> None:
             if pid != os.getpid() and _process_alive(pid):
                 continue
         _remove_tree(path)
+        if os.path.lexists(path):
+            # The same contract as ``GateView.close``: a removal that did not take effect is recorded, never hidden (a residue that stays would otherwise accumulate unseen). It stays
+            # eligible, so the next claim tries again - there is no wait or retry here.
+            logger.warning("Leftover gate view %s could not be removed by the sweep; it stays and the next view claim will try again", path)
 
 
 def views_directory(state_root: str) -> str:
