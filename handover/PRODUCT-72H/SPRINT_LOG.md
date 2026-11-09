@@ -353,3 +353,9 @@ Evidence: `~/kriya-evidence/product-72h-env/p1-ab-capture-2026-11-09/` (observat
 - `MAVEN-GATE-CACHE-BIND-SOURCE-MISSING-ON-UNIQUE-PATH-001`: second proven occurrence; trigger for P1 met (quiet host) but left at P2 pending the owner (the registry test forbids a parked open P1: promotion means working it); measurement first, no change made.
 - Also this session: `DEMO-VERIFY-BUDGET-PIN-001` closed (32db122); the JDK 21/26 preflight warning classified informational (host preflight only; all contained gates Java 17).
 - Disposition of Run 3 (FAIL-environment vs INVALID with a replacement run) is the owner's decision.
+
+## 13a. ACTIVE P1: MAVEN-GATE-CACHE-BIND-SOURCE-MISSING-ON-UNIQUE-PATH-001 (owner ruling 2026-11-09)
+
+- Run 3 `20261109T195433-688a11a2` = FAIL - VERIFICATION INFRASTRUCTURE / ENVIRONMENT (preserved as such) and, separately, NO CANDIDATE OBSERVATION / INVALID FOR IGNITE CANDIDATE CONFIDENCE (the failure was at s1 `pom_validate`, before any compile/test/runtime observed the candidate). Run 1 (900 s) and Run 2 (1500 s) remain scenario-calibration failures; the three results are not collapsed into one number. Scenario A NOT GREEN; Scenario B BLOCKED.
+- The incident is promoted to ACTIVE P1 and worked immediately. The registry row's priority column stays P2 only because the registry test forbids an open P1 row (history is not rewritten: `8dc253d` stands; this entry is the explicit owner-ruling update). It closes with the fix evidence.
+- Protocol: characterize before mitigation; observation-only instrumentation; pre-spawn and post-failure source/parent facts; idle-vs-immediate and gate-view-vs-gate-cache comparisons; serial Docker; no sleeps/retries/warm-ups as a fix. A replacement Scenario-A run under the same frozen 2400 s contract is authorized only after FIXED+VERIFIED.
