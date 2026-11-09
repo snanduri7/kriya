@@ -203,6 +203,9 @@ export function CurrentRun() {
   const completedWords = requirementTruthWords(requirementTruthOf(run.status?.launch.ended));   // ALL_VERIFIED / not recorded: 'Run completed'; open or contradicted: never ordinary green
   const heading = cancelHeading ?? (cancelling ? 'Cancelling…' : finished ? (phase.state === 'COMPLETED' ? completedWords.heading : phase.state === 'STOPPED' ? (byYou ? 'Stopped by you' : 'Run stopped') : 'Run failed') : finishing ? 'Finishing your change' : phase.label);
   const live = !finished && !cancelled;
+  // A finished, completed run whose requirement truth carries no extra badge already says everything in its heading ("Completed — verified", or plain "Completed"): a second green "Run succeeded"
+  // pill beside it is noise (owner ruling 2026-11-09). The process outcome stays in the details; every other state keeps its badge (open requirements, failure, cancelled, in progress, needs you).
+  const showOutcomeBadge = !(finished && !cancelled && !byYou && phase.state === 'COMPLETED' && completedWords.badge === null);
   const goalLine = ex.goal.trim() ? <div className="ck-goalline"><span className="muted">Goal</span><div>{ex.goal}</div></div> : null;
   const nowText = live ? activityText(phase.state, finishing, phase.verifyingApplication === true) : null;
   const recent = live ? entries.slice(-RECENT_ACTIVITY) : [];
@@ -214,7 +217,7 @@ export function CurrentRun() {
         <div role="status" aria-live="polite" className="ck-current-status">
           <span className={`ck-dot ${finished && phase.state === 'COMPLETED' && completedWords.tone !== 'ok' ? completedWords.tone : phase.tone}`} aria-hidden="true">{cancelled || byYou ? '■' : finished ? (phase.state === 'COMPLETED' ? (completedWords.tone === 'ok' ? '✓' : '⚠') : phase.state === 'STOPPED' ? '■' : '✕') : '●'}</span>
           <h2>{heading}</h2>
-          <Badge tone={cancelled || byYou ? 'warn' : finished && phase.state === 'COMPLETED' && completedWords.tone !== 'ok' ? completedWords.tone : TONE[phase.tone]}>{cancelled ? (ex.cancelState.phase === 'settled' && ex.cancelState.folder.kind === 'clean' ? 'cancelled by you' : 'cancelled by you - check the folder') : cancelling ? 'cancelling' : finished ? (phase.state === 'COMPLETED' && completedWords.badge !== null ? completedWords.badge : run.outcome!.label) : phase.state === 'WAITING_FOR_APPROVAL' ? 'needs you' : 'in progress'}</Badge>
+          {showOutcomeBadge ? <Badge tone={cancelled || byYou ? 'warn' : finished && phase.state === 'COMPLETED' && completedWords.tone !== 'ok' ? completedWords.tone : TONE[phase.tone]}>{cancelled ? (ex.cancelState.phase === 'settled' && ex.cancelState.folder.kind === 'clean' ? 'cancelled by you' : 'cancelled by you - check the folder') : cancelling ? 'cancelling' : finished ? (phase.state === 'COMPLETED' && completedWords.badge !== null ? completedWords.badge : run.outcome!.label) : phase.state === 'WAITING_FOR_APPROVAL' ? 'needs you' : 'in progress'}</Badge> : null}
         </div>
         {elapsed ? <span className="muted small" title="Local clock since the launch was recorded - presentation only">elapsed {elapsed}</span> : null}
         {ex.canCancel && live ? <button type="button" className="ck-cancel" onClick={() => void ex.cancelRun()}>Cancel Run</button> : null}

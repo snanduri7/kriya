@@ -173,7 +173,9 @@ describe('Start Run', () => {
     const bar = await banner();
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'finished'));
-    expect(within(bar).getByText('Run succeeded')).toBeInTheDocument();
+    // The heading carries the result; the green "Run succeeded" pill beside it is gone (owner ruling 2026-11-09), the process outcome stays in data-outcome and the details.
+    expect(within(bar).getByRole('heading', { level: 2 }).textContent).toMatch(/^Completed/);
+    expect(within(bar).queryByText('Run succeeded')).toBeNull();
     expect(within(bar).getByText(/Kriya RunRecord/)).toBeInTheDocument();
     expect(bar).toHaveAttribute('data-outcome', 'success');
     await waitFor(() => expect(store.getState().runId).toBe('fx-launched'));
@@ -294,7 +296,9 @@ describe('Start Run', () => {
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'finished'));
     expect(bar).toHaveAttribute('data-outcome', 'success');
-    expect(within(bar).getByText('Run succeeded')).toBeInTheDocument();
+    // The heading carries the result; the green "Run succeeded" pill beside it is gone (owner ruling 2026-11-09), the process outcome stays in data-outcome and the details.
+    expect(within(bar).getByRole('heading', { level: 2 }).textContent).toMatch(/^Completed/);
+    expect(within(bar).queryByText('Run succeeded')).toBeNull();
     expect(within(bar).queryByText(/Approval required/)).toBeNull();
     expect(within(bar).getByText(/Decisions declined, nothing approved.*skill_gap_decision: no verified skill for lib-x/)).toBeInTheDocument();
   });
