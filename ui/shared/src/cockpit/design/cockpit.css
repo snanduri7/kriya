@@ -322,7 +322,7 @@
 .ck-now { display: flex; flex-direction: column; gap: 2px; }
 .ck-now .ck-now-label { font-size: var(--ck-t-secondary, 13px); text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); }
 .ck-now p { margin: 0; font-size: 18px; font-weight: 600; }
-.ck-recent { flex: 1 1 auto; min-height: 120px; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--ck-line); padding-top: 10px; }
+.ck-recent { flex: 1 0 auto; min-height: 120px; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--ck-line); padding-top: 10px; }
 .ck-recent h3 { margin: 0 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); }
 .ck-recent ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 15px; }
 .ck-recent li[data-tone="bad"] { color: var(--ck-bad); } .ck-recent li[data-tone="ok"] { color: var(--ck-ok); } .ck-recent li[data-tone="wait"] { color: var(--ck-warn); }
