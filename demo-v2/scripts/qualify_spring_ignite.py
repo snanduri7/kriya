@@ -22,6 +22,7 @@ Subcommands print ONE JSON object on stdout and exit 0 only when every check ins
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -36,6 +37,33 @@ from typing import Any, Dict
 
 IGNITE_218_RELEASED = datetime(2026, 4, 23, tzinfo=timezone.utc)  # the ignite-core-2.18.0 jar's own build stamp: "ver. 2.18.0#20260423"
 PROTOCOL_CLASS = "com.example.protocol.Protocol"
+
+
+# QUALIFY-HELPER-SCRATCH-CLEANUP-001: the helper's working directories are explicitly owned, unique scratch paths (mkdtemp: this invocation's own, never a glob), not
+# ``TemporaryDirectory``. MEASURED (qualification at 50cd023): Docker Desktop (macOS) keeps a directory that carried read-only mask mounts undeletable for 0.5-2.3 s after the
+# container exits, and the ``TemporaryDirectory`` exit raised that PermissionError after the measurement and before the JSON report was printed - three legs produced no result.
+# The measurement is decided BEFORE disposal; disposal is attempted once, a filesystem failure is reported on stderr (never stdout: stdout is the JSON report) with the exact owned
+# path, and nothing else is caught: setup, use and measurement errors propagate as before, and so does any non-filesystem error raised inside the disposal.
+def _remove_scratch_tree(path: str) -> None:
+    shutil.rmtree(path)
+
+
+def _dispose_scratch(path: str) -> None:
+    try:
+        _remove_scratch_tree(path)
+    except FileNotFoundError:
+        return  # already gone: the aim of the disposal is met
+    except OSError as error:
+        print(f"qualify_spring_ignite: owned scratch {path} could not be removed ({type(error).__name__}: {error}); it is left in place (not retried)", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def _owned_scratch(prefix: str):
+    path = tempfile.mkdtemp(prefix=prefix)
+    try:
+        yield path
+    finally:
+        _dispose_scratch(path)
 
 
 def ignite_type_id(class_name: str) -> int:
@@ -75,7 +103,7 @@ def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
     if witness:
         files.append("cache-witness")
     report: Dict[str, Any] = {"mode": "contained" if args.contained else "host", "witness": witness, "checks": {}}
-    with tempfile.TemporaryDirectory(prefix="qualify04-") as tmp:
+    with _owned_scratch("qualify04-") as tmp:
         if args.contained:
             os.environ["KRIYA_STATE_DIR"] = os.path.join(tmp, "state")
         workspace = os.path.join(tmp, "ws")
@@ -173,7 +201,7 @@ def _mvn_test(project: str) -> Dict[str, bool]:
 def cmd_mutants(args: argparse.Namespace) -> Dict[str, Any]:
     fixture = Path(args.fixture)
     report: Dict[str, Any] = {"cases": {}}
-    with tempfile.TemporaryDirectory(prefix="qualify04-mutants-") as tmp:
+    with _owned_scratch("qualify04-mutants-") as tmp:
         for name, rel, pairs in (("unmutated_reference", None, ()), *MUTANTS):
             project = os.path.join(tmp, name)
             shutil.copytree(fixture, project)
@@ -211,7 +239,7 @@ def cmd_guard(args: argparse.Namespace) -> Dict[str, Any]:
     skill = Path(args.skill)
 
     def run(offline: bool, with_skill: bool, release_known: bool) -> Dict[str, Any]:
-        with tempfile.TemporaryDirectory(prefix="qualify04-guard-") as tmp:
+        with _owned_scratch("qualify04-guard-") as tmp:
             skills = os.path.join(tmp, "skills")
             os.makedirs(skills)
             if with_skill:
