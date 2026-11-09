@@ -33,6 +33,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
 KRIYA_BIN="$REPO/.venv/bin/kriya"
 HOME_DIR="${KRIYA_WALKTHROUGH_HOME:-$HOME/kriya-walkthrough}"
+if [ -n "${KRIYA_WALKTHROUGH_HOME:-}" ]; then HOME_SOURCE="from KRIYA_WALKTHROUGH_HOME"; else HOME_SOURCE="DEFAULT: KRIYA_WALKTHROUGH_HOME is not set in this script's environment"; fi
 case "$HOME_DIR" in /*kriya-walkthrough*) ;; *) die "KRIYA_WALKTHROUGH_HOME must be an absolute path containing 'kriya-walkthrough' (got $HOME_DIR)" ;; esac
 case "$HOME_DIR" in "$REPO"|"$REPO"/*) die "the walkthrough home must be outside the repository" ;; esac
 
@@ -83,7 +84,17 @@ cat > "$HOME_DIR/userdata/kriya-ui-settings.json" <<JSON
 }
 JSON
 
+echo "   walkthrough home: $HOME_DIR   ($HOME_SOURCE)"
+if [ -z "${KRIYA_WALKTHROUGH_HOME:-}" ]; then
+  others="$(ls -d "$HOME"/kriya-walkthrough*/ 2>/dev/null | grep -v "^$HOME_DIR/\$" | tr '\n' ' ' || true)"
+  if [ -n "$others" ]; then
+    echo "   WARNING: the DEFAULT home is in use although other walkthrough homes exist: $others"
+    echo "            To use another, put the variable directly before the command on ONE line:  KRIYA_WALKTHROUGH_HOME=<home> $0 ..."
+    echo "            (written on its own line it only sets a shell variable, which this script does not see)."
+  fi
+fi
 echo "   state:      $HOME_DIR/state"
+echo "   user data:  $HOME_DIR/userdata"
 echo "   new project parent folder:  $HOME_DIR/projects"
 echo "   existing repos:             $HOME_DIR/brownfield-python   $HOME_DIR/java-maven"
 printf '%s' "$HOME_DIR" | pbcopy 2>/dev/null && echo "   (the walkthrough home path is on your clipboard: in a folder dialog press Cmd+Shift+G and paste)"
@@ -93,6 +104,19 @@ printf '%s' "$HOME_DIR" | pbcopy 2>/dev/null && echo "   (the walkthrough home p
 # --- build and start the app
 cd "$REPO/ui/standalone"
 if [ "$BUILD" = 1 ]; then echo "== building the cockpit from this tree (npm run build:cockpit)"; npm run build:cockpit >"$HOME_DIR/build.log" 2>&1 || { tail -20 "$HOME_DIR/build.log"; die "cockpit build failed (log: $HOME_DIR/build.log)"; }; fi
+# --- which UI bundle is about to run. There is NO authoritative build stamp in the bundle, so this shows file facts and a HEURISTIC warning; it does not claim freshness.
+BUNDLE_INDEX="$REPO/ui/standalone/dist/renderer/index.html"
+if [ -f "$BUNDLE_INDEX" ]; then
+  bundle_epoch="$(stat -f %m "$BUNDLE_INDEX")"
+  src_line="$(git -C "$REPO" log -1 --format='%ct %h %cd' --date=format:'%Y-%m-%d %H:%M' -- ui/shared/src ui/standalone/src ui/standalone/vite.config.ts ui/standalone/package.json 2>/dev/null || true)"
+  src_epoch="${src_line%% *}"
+  echo "   UI bundle:  built $(date -r "$bundle_epoch" '+%Y-%m-%d %H:%M') (dist/renderer/index.html file time); source tree $(git -C "$REPO" rev-parse --short HEAD); newest commit touching the UI sources: ${src_line#* }"
+  if [ -n "$src_epoch" ] && [ "$bundle_epoch" -lt "$src_epoch" ]; then
+    echo "   WARNING: this bundle is OLDER than the newest UI-source commit, so the window may show wording or behaviour from before this tree. Quit (Cmd+Q) and run again WITHOUT --no-build. (Heuristic from file times, not a build identity.)"
+  fi
+else
+  die "no cockpit bundle at $BUNDLE_INDEX: run without --no-build"
+fi
 pgrep -f "Electron.*$REPO/ui/standalone" >/dev/null 2>&1 && die "a Kriya desktop app from this tree is already running: quit it (Cmd+Q) and run again, so it starts with this state"
 echo "== starting Kriya (quit with Cmd+Q). Follow handover/PRODUCT-72H/DEMO_RUNBOOK.md"
 export KRIYA_UI_ALLOW_REAL_KRIYA=1 KRIYA_STATE_DIR="$HOME_DIR/state"
