@@ -253,18 +253,22 @@ def test_a_view_is_bound_to_the_origins_identity_even_for_a_validator_built_with
     assert profile.git_metadata is not None and profile.git_metadata.base_revision == _head(origin)
 
 
-def test_the_origin_venv_is_mounted_into_the_view_read_only_and_writable_only_when_asked(tmp_path):
+def test_the_scopes_venv_source_is_mounted_into_the_view_read_only_and_writable_only_when_asked(tmp_path):
+    """PYTHON-VENV-SOURCE-REUSE-001 (superseding the origin-venv mount of OI-142): what is bound at `.kriya/venv` is the HOST source the verification scope allocated, whatever sits at
+    `<origin>/.kriya/venv` (a candidate may plant anything there)."""
     origin = _repo(tmp_path)
     validator = PolymorphicValidator(str(origin), original_workspace_path=str(origin), autonomy_cfg=_contained())
     with validator.verification_session("tests"):
-        (origin / ".kriya" / "venv").mkdir(parents=True)  # R3: the venv is built INSIDE the scope that uses it (one an earlier scope left is discarded on entry)
+        source = validator._allocate_venv_source()  # R3: the venv is built INSIDE the scope that uses it, from a source that scope owns
+        (origin / ".kriya" / "venv").mkdir(parents=True)  # planted at the origin entry mid-scope: no authority
         read_only, _b = validator.build_containment_profile_and_backend()
         writable, _b = validator.build_containment_profile_and_backend(venv_writable=True)
         view = validator.workspace_path
         assert os.path.isdir(os.path.join(view, ".kriya", "venv")), "the mount target in the view is made by Kriya"
-    host = os.path.realpath(origin / ".kriya" / "venv")
-    assert read_only.additional_mounts == (MountSpec(host_path=host, container_path=VENV_CONTAINER_PATH, writable=False),)
-    assert writable.additional_mounts == (MountSpec(host_path=host, container_path=VENV_CONTAINER_PATH, writable=True),)
+    assert source != os.path.realpath(origin / ".kriya" / "venv") and not str(source).startswith(str(origin))
+    assert read_only.additional_mounts == (MountSpec(host_path=source, container_path=VENV_CONTAINER_PATH, writable=False),)
+    assert writable.additional_mounts == (MountSpec(host_path=source, container_path=VENV_CONTAINER_PATH, writable=True),)
+    assert not os.path.lexists(source), "the unit goes with the scope"
 
 
 def test_no_venv_mount_without_a_venv_or_outside_a_view(tmp_path):

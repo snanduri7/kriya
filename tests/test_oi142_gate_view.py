@@ -704,20 +704,23 @@ def test_only_a_kriya_staging_directory_may_be_imported_into_a_view(tmp_path):
 # --- execution-environment inputs: the venv (owner O4) -------------------------------------------------------------------------------
 
 
-def test_the_venv_a_view_gate_uses_is_the_origin_trees_not_the_views(tmp_path, monkeypatch):
-    """Execution-environment input: the interpreter for a gate that runs in a view lives under the ORIGIN's `.kriya/venv`, so one install serves
-    every gate and the view does not carry (or lose) it."""
+def test_the_venv_a_view_gate_uses_is_the_scopes_own_ephemeral_source_not_the_views_or_the_origins(tmp_path, monkeypatch):
+    """Execution-environment input (PYTHON-VENV-SOURCE-REUSE-001, superseding the origin-tree venv of owner O4): the interpreter for a gate that runs in a view lives in a HOST source the
+    verification scope owns (an ephemeral unit), so one install serves every gate of the scope, the view does not carry (or lose) it, and no host pathname is recreated for the next scope."""
     root = _repo(tmp_path, extra={"requirements.txt": "left-pad-nonexistent==1\n"})
     validator = PolymorphicValidator(str(root), original_workspace_path=str(root))
-    created = []
+    created, sources = [], []
 
     def fake_run(cmd, cwd, timeout=300, **_kwargs):
         if cmd[1:3] == ["-m", "venv"]:
-            # S7: the contained command names the venv by its MOUNT-relative path; the mount of a gate view's `.kriya/venv` IS the origin's venv, so that is where it is created
+            # S7: the contained command names the venv by its MOUNT-relative path; the mount of a gate view's `.kriya/venv` IS the scope's source, so that is where it is created
             assert not os.path.isabs(cmd[3]), cmd
-            (root / cmd[3] / "bin").mkdir(parents=True)
-            (root / cmd[3] / "bin" / "python").write_text("#!/bin/sh\n")
+            source = validator._venv_source  # pylint: disable=protected-access
+            assert source is not None and not source.startswith(str(root)) and validator._venv_mounts(validator.workspace_path, writable=True)[0].host_path == source  # pylint: disable=protected-access
+            (Path(source) / "bin").mkdir(parents=True)
+            (Path(source) / "bin" / "python").write_text("#!/bin/sh\n")
             created.append(cmd[3])
+            sources.append(source)
         return {"returncode": 0, "stdout": "", "stderr": "", "timeout": False}
 
     monkeypatch.setattr(validator, "_run_cmd_with_timeout", fake_run)
@@ -735,10 +738,14 @@ def test_the_venv_a_view_gate_uses_is_the_origin_trees_not_the_views(tmp_path, m
     # R3: each outermost gate builds its OWN venv (the first gate's is discarded with its scope), so two gates create and install twice
     assert pythons == [os.path.join(".kriya", "venv", "bin", "python")] * 2 and created == [os.path.join(".kriya", "venv")] * 2
     assert validator.venv_install_attempts == 2
-    # ...and the venv a view gate runs is the ORIGIN's: the mount source is the origin's `.kriya/venv`, read-only, at the mount-relative path
-    for mount in mounts:
+    # ...the venv a view gate runs is the scope's source: the mount source, read-only, at the mount-relative path; never the origin's `.kriya/venv`, a different one per scope, gone with it
+    assert len(set(sources)) == 2
+    for mount, source in zip(mounts, sources, strict=True):
         [spec] = mount
-        assert spec.host_path == os.path.realpath(root / ".kriya" / "venv") and spec.writable is False
+        assert spec.host_path == source and spec.writable is False and spec.container_path == "/kriya/workspace/.kriya/venv"
+        assert spec.host_path != os.path.realpath(root / ".kriya" / "venv")
+        assert not os.path.lexists(source), "the scope's venv unit goes with the scope"
+    assert not os.path.lexists(root / ".kriya" / "venv")
 
 
 def test_the_dependency_layer_of_a_viewed_gate_is_outside_the_view_and_outside_the_origin(tmp_path):

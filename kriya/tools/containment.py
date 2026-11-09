@@ -88,13 +88,15 @@ class BackendUnavailableError(ContainmentSetupError):
 PERSISTENT_DEPENDENCY_CACHE_WRITABLE = "PERSISTENT_DEPENDENCY_CACHE_WRITABLE"
 DEPENDENCY_CACHE_SCOPE_REQUIRED = "DEPENDENCY_CACHE_SCOPE_REQUIRED"
 PROJECT_VENV_NOT_DISCARDED = "PROJECT_VENV_NOT_DISCARDED"
-DEPENDENCY_CACHE_REASON_CODES = frozenset({PERSISTENT_DEPENDENCY_CACHE_WRITABLE, DEPENDENCY_CACHE_SCOPE_REQUIRED, PROJECT_VENV_NOT_DISCARDED})
+PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED = "PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED"
+DEPENDENCY_CACHE_REASON_CODES = frozenset({PERSISTENT_DEPENDENCY_CACHE_WRITABLE, DEPENDENCY_CACHE_SCOPE_REQUIRED, PROJECT_VENV_NOT_DISCARDED, PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED})
 
 
 class DependencyCacheError(ContainmentSetupError):
     """R3 (kriya/tools/dependency_cache.py): a dependency cache could not be given to candidate-controlled execution on the terms R3 requires - a
     writable cache that is not a verification scope's ephemeral one (PERSISTENT_DEPENDENCY_CACHE_WRITABLE), or a cache asked for outside a scope
-    (DEPENDENCY_CACHE_SCOPE_REQUIRED), or a project venv an earlier scope left that cannot be removed (PROJECT_VENV_NOT_DISCARDED). The command is
+    (DEPENDENCY_CACHE_SCOPE_REQUIRED), or a project venv an earlier scope left that cannot be removed (PROJECT_VENV_NOT_DISCARDED), or a project venv bind
+    source that exists but is not the exact ephemeral unit the open scope allocated for it (PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED). The command is
     not run, never run with a persistent cache or venv instead. ``reason_code`` is one of
     DEPENDENCY_CACHE_REASON_CODES."""
 

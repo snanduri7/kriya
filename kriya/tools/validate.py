@@ -26,6 +26,7 @@ from kriya.tools import test_execution
 from kriya.tools.containment import (
     DEPENDENCY_CACHE_SCOPE_REQUIRED,
     PROJECT_VENV_NOT_DISCARDED,
+    PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED,
     ContainmentBackend,
     ContainmentProfile,
     ContainmentSetupError,
@@ -37,9 +38,15 @@ from kriya.tools.containment import (
     decide_external_execution,
 )
 from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, VENV_CONTAINER_PATH, finalize_registry_acquisition_result
-from kriya.tools.dependency_cache import create_ephemeral_cache, discard_project_venv, remove_ephemeral_cache
+from kriya.tools.dependency_cache import (
+    create_ephemeral_cache,
+    discard_project_venv,
+    is_ephemeral_cache,
+    remove_ephemeral_cache,
+)
 from kriya.tools.dependency_execution import (
     MAVEN_INVOCATION_FAILED,
+    PYTHON_ENVIRONMENT_UNAVAILABLE,
     OfflineFailureKind,
     classify_maven_offline_failure_text,
     classify_maven_validate_failure,
@@ -509,6 +516,11 @@ class PolymorphicValidator:
     # R3: the ephemeral dependency layers of the outermost verification scope now open (None: no scope is open, so no cache may be asked for).
     _cache_scope_depth: int = 0
     _gate_caches: Optional[Dict[str, str]] = None
+    # PYTHON-VENV-SOURCE-REUSE-001: the project venv of a view-backed scope is bind-mounted from a HOST source the scope owns - an ephemeral unit (kriya/tools/dependency_cache.py), never
+    # a pathname that is removed and recreated. ``_venv_source`` is the one source of truth for what is bound (None: the scope has no venv yet); ``_venv_units`` are every unit the
+    # scope allocated (the retry's and a rebuild's earlier ones included), all kept until the outermost scope ends so no allocated pathname can be handed out again within it.
+    _venv_source: Optional[str] = None
+    _venv_units: Tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -716,6 +728,7 @@ class PolymorphicValidator:
         if outermost:
             self._discard_project_venv(required=True)
             self._gate_caches = {}
+            self._venv_source, self._venv_units = None, ()
         self._cache_scope_depth += 1
         try:
             yield
@@ -724,6 +737,9 @@ class PolymorphicValidator:
             if outermost:
                 caches, self._gate_caches = self._gate_caches or {}, None
                 for path in caches.values():
+                    remove_ephemeral_cache(path)
+                units, self._venv_source, self._venv_units = self._venv_units, None, ()
+                for path in units:
                     remove_ephemeral_cache(path)
                 self._discard_project_venv(required=False)
 
@@ -929,8 +945,14 @@ class PolymorphicValidator:
         # the host, the OCI backend's own fixed container workdir when
         # contained - exactly the same mechanism `cwd=self.workspace_path`
         # already relies on for every other command this class runs).
-        venv_dir_host = os.path.join(self._origin_root(), ".kriya", "venv")  # OI-142: an environment input of the origin tree, outside any gate view
-        venv_python_host = os.path.join(venv_dir_host, "bin", "python")
+        # PYTHON-VENV-SOURCE-REUSE-001 (view-backed execution): the venv is built into, marked in and read from the HOST source this scope owns (``_venv_source``, allocated below for every
+        # creation attempt), never from ``<origin>/.kriya/venv``: removing and recreating one host pathname that is bind-mounted into containers within moments is what MEASURED as transient
+        # creation failures under load. A gate that executes in place has no view and no bind source: its venv stays inside the workspace mount, unchanged.
+        view_backed = self._gate_view is not None
+        if view_backed and self._venv_source is not None:
+            self._require_scope_owned_venv_source(self._venv_source)  # a source that vanished or was swapped is a typed failure, never silently rebuilt after approval
+        venv_dir_host = self._venv_source if view_backed else os.path.join(self._origin_root(), ".kriya", "venv")
+        venv_python_host = os.path.join(venv_dir_host, "bin", "python") if venv_dir_host else None
         venv_relative = os.path.join(".kriya", "venv")
         venv_python_relative = PROJECT_PYTHON_INTERPRETER
         create_interpreter = "python3"
@@ -944,7 +966,8 @@ class PolymorphicValidator:
         # install /usr/local/bin/python3, and on a Linux host every contained
         # venv was judged "failed" and silently replaced by an interpreter
         # without the project's dependencies.
-        venv_present = os.path.lexists
+        def venv_present(path: Optional[str]) -> bool:
+            return path is not None and os.path.lexists(path)
 
         # VENV-ADDITIVE-REUSE-001 (BACKEND-READINESS-004, CONFIRMED by a real pip
         # measurement): the venv persists across attempts and `pip install`
@@ -954,7 +977,7 @@ class PolymorphicValidator:
         # installed are recorded beside the venv (host-visible marker); when the
         # new declaration drops any of them the venv is recreated from nothing.
         declared = _declared_specifiers(self.workspace_path, install_args)
-        previous = _installed_specifiers(venv_dir_host)
+        previous = _installed_specifiers(venv_dir_host) if venv_dir_host else None
         if venv_present(venv_python_host) and (previous is None or not set(previous) <= set(declared)):
             # Review F5: a venv whose installed set is unknown (no marker: created
             # before this mechanism, or its marker could not be written) is never
@@ -964,7 +987,10 @@ class PolymorphicValidator:
             else:
                 logger.info("Project venv recreated: the declared dependency set dropped %s",
                             sorted(set(previous) - set(declared)))
-            shutil.rmtree(venv_dir_host, ignore_errors=True)
+            if view_backed:
+                self._venv_source = venv_dir_host = venv_python_host = None  # released, not removed: the unit stays owned until the scope ends, and the rebuild below gets a NEW one
+            else:
+                shutil.rmtree(venv_dir_host, ignore_errors=True)
             self.venv_recreations += 1
 
         if not venv_present(venv_python_host):
@@ -975,11 +1001,13 @@ class PolymorphicValidator:
             # still fails closed, with BOTH attempts' errors, when the second attempt fails too. Nothing about WHAT is verified changes: a venv that exists is used as before.
             errors: List[str] = []
             for attempt in range(1, VENV_CREATION_ATTEMPTS + 1):
-                if attempt > 1:
-                    shutil.rmtree(venv_dir_host, ignore_errors=True)
-                if self._gate_view is not None:
-                    os.makedirs(venv_dir_host, exist_ok=True)  # the mount target of the origin venv (see _venv_mounts); Kriya-owned, inside the origin's .kriya
                 try:
+                    if view_backed:
+                        # EVERY attempt (the first, the retry, a rebuild) is given a source no container has ever been bound to: the earlier unit is kept, not removed and recreated.
+                        venv_dir_host = self._allocate_venv_source()
+                        venv_python_host = os.path.join(venv_dir_host, "bin", "python")
+                    elif attempt > 1:
+                        shutil.rmtree(venv_dir_host, ignore_errors=True)
                     create_res = self._run_cmd_with_timeout(
                         [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60, venv_writable=True,
                     )
@@ -991,6 +1019,8 @@ class PolymorphicValidator:
                 logger.warning(f"Failed to create project-local venv at {venv_dir_host} (attempt {attempt} of {VENV_CREATION_ATTEMPTS}): {errors[-1]}")
             else:
                 self._venv_creation_error = " | ".join(f"attempt {n}: {e}" for n, e in enumerate(errors, 1)) if len(errors) > 1 else errors[0]
+                if view_backed:
+                    self._venv_source = None  # no venv exists for this scope: nothing is bound to the failed unit (it stays owned until the scope ends)
                 return None, None
         self._venv_creation_error = None
 
@@ -1415,17 +1445,37 @@ class PolymorphicValidator:
         self._prepare_mount_directory(mounted_workspace, ".git")
 
     def _venv_mounts(self, mounted_workspace: str, *, writable: bool) -> Tuple[MountSpec, ...]:
-        """OI-142 under containment: the project venv lives in the ORIGIN tree (so it persists across gates, and a venv created in a view would die
-        with it) while the gate's workspace mount is the view, which holds no `.kriya/venv`. The origin venv directory is bind-mounted at the
-        mount-relative path every contained command already uses (`.kriya/venv`): READ-ONLY for every gate, writable only for the two steps that
-        create and populate it. Nothing when the mounted workspace is not the open view (the venv is then inside it) or no venv directory exists yet."""
+        """OI-142 under containment: the project venv outlives a gate's view (a venv created in a view would die with it) while the gate's workspace mount is the view, which holds no
+        `.kriya/venv`. The venv's HOST source is the ephemeral unit the open verification scope allocated (``_venv_source``; PYTHON-VENV-SOURCE-REUSE-001) - never ``<origin>/.kriya/venv``, which
+        no mount consults and a candidate may plant anything at. It is bound at the mount-relative path every contained command already uses (`.kriya/venv`): READ-ONLY for every gate, writable
+        only for the two steps that create and populate it. Nothing when the mounted workspace is not the open view (the venv is then inside it) or the scope has built no venv yet; a source
+        the scope holds that is missing or is not its own unit is a typed refusal, never an empty mount."""
         if not self._is_gate_view_root(mounted_workspace):
             return ()
-        origin_venv = os.path.join(self._origin_root(), KRIYA_DIRECTORY_NAME, "venv")
-        if not os.path.isdir(origin_venv):
-            return ()
+        source = self._venv_source
+        if source is None:
+            return ()  # the scope has built no venv yet
+        self._require_scope_owned_venv_source(source)
         self._prepare_mount_directory(self._gate_view.root, f"{KRIYA_DIRECTORY_NAME}/venv")
-        return (MountSpec(host_path=os.path.realpath(origin_venv), container_path=VENV_CONTAINER_PATH, writable=writable),)
+        return (MountSpec(host_path=source, container_path=VENV_CONTAINER_PATH, writable=writable),)
+
+    def _allocate_venv_source(self) -> str:
+        """A new host source for the project venv of this scope: an ephemeral unit that stays owned (and so its pathname taken) until the outermost scope ends. An ``OSError`` is the
+        caller's (venv creation reports it as that attempt's error)."""
+        source = create_ephemeral_cache(self._state_root(), "venv")
+        self._venv_units += (source,)
+        self._venv_source = source
+        return source
+
+    def _require_scope_owned_venv_source(self, source: str) -> None:
+        """What is bound as the project venv is exactly the unit this scope allocated: missing is the environment's failure (PYTHON_ENVIRONMENT_UNAVAILABLE), anything that is there
+        but is not that scope-owned ephemeral unit (a link, a file, another scope's unit) is the authority refusal PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED. Never an empty mount."""
+        if not os.path.lexists(source):
+            raise ContainmentSetupError(
+                f"{PYTHON_ENVIRONMENT_UNAVAILABLE}: the project venv source {source} of this verification scope no longer exists; nothing was executed, and no venv is recreated after the command was approved")
+        if source not in self._venv_units or not is_ephemeral_cache(source):  # (is_ephemeral_cache is False for a link)
+            raise DependencyCacheError(
+                PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED, f"{source} is not the ephemeral venv unit this verification scope allocated; it is never bound as the project venv")
 
     def _bound_git_metadata(self, mounted_workspace: str) -> Optional[Any]:
         """OD-1 (BACKEND-FINAL-CLOSURE-005): the sanitized Git metadata export

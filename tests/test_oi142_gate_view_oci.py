@@ -181,24 +181,28 @@ def test_under_oci_the_test_execution_report_and_the_declared_outputs_still_work
     assert not (root / ".kriya" / "test-reports").exists()  # the report died with the view; it never reached the worktree
 
 
-def test_under_oci_the_project_venv_lives_in_the_origin_for_its_scope_and_is_gone_after_it(tmp_path):
-    """R3: the venv is hoisted OUT of the view (it lives in the origin, so the gates of one scope share it) but it has the lifetime of the verification scope that
-    built it: gates inside one session share it, and nothing of it outlives the session (a later attempt builds its own)."""
+def test_under_oci_the_project_venv_lives_in_the_scopes_own_source_for_its_scope_and_is_gone_after_it(tmp_path):
+    """R3 + PYTHON-VENV-SOURCE-REUSE-001: the venv is hoisted OUT of the view and lives in a HOST source the verification scope owns (an ephemeral unit, never `<origin>/.kriya/venv`),
+    so the gates of one scope share it; it has the lifetime of the scope that built it: gates inside one session share it, and nothing of it outlives the session (a later attempt
+    is given a different source)."""
     root = _repo(tmp_path, calc=CALC2, extra={"requirements.txt": ""})
     validator = _validator(root)
-    venv_python = root / ".kriya" / "venv" / "bin" / "python"
     with validator.verification_session("tests"):
         assert _gate(root, validator=validator)[0] is True
-        assert os.path.lexists(venv_python), "the venv must be created in the ORIGIN tree, not inside the throwaway view"
+        source = validator._venv_source  # pylint: disable=protected-access
+        assert source is not None and os.path.lexists(os.path.join(source, "bin", "python")), "the venv must be created in the scope's source, not inside the throwaway view"
+        assert not source.startswith(str(root)) and not os.path.lexists(root / ".kriya" / "venv"), "...and nothing is created at the origin entry"
         first_attempts = validator.venv_install_attempts
         assert _gate(root, validator=validator, bound=False)[0] is True
         assert validator.venv_install_attempts == first_attempts  # reused inside the scope (the install cache), not rebuilt per view
-    assert not os.path.lexists(root / ".kriya" / "venv"), "the venv outlived the scope that built it"
+        assert validator._venv_source == source  # pylint: disable=protected-access
+    assert not os.path.lexists(source), "the venv outlived the scope that built it"
+    assert not os.path.lexists(root / ".kriya" / "venv")
 
 
 def test_under_oci_a_gate_cannot_modify_the_project_venv(tmp_path):
     """The venv is mounted READ-ONLY for every gate: candidate code that tries to plant something in it (a ``.pth`` that runs on every interpreter
-    start) fails, and the origin venv is byte-identical afterwards. (R3: both gates run inside one session, so the venv the first gate built is the one the second
+    start) fails, and the scope's venv source is byte-identical afterwards. (R3: both gates run inside one session, so the venv the first gate built is the one the second
     gate's candidate code tries to poison - without it the before/after comparison would be of two empty listings.)"""
     plant = (
         "import os\n\ndef test_try_to_poison_the_venv():\n"
@@ -208,9 +212,9 @@ def test_under_oci_a_gate_cannot_modify_the_project_venv(tmp_path):
     )
     root = _repo(tmp_path, calc=CALC2, extra={"requirements.txt": "", "tests/test_poison.py": plant})
     validator = _validator(root)
-    venv = root / ".kriya" / "venv"
     with validator.verification_session("tests"):
         _gate(root, validator=validator)  # creates and populates the venv
+        venv = Path(validator._venv_source)  # pylint: disable=protected-access
         before = sorted(str(p.relative_to(venv)) for p in venv.rglob("*") if "__pycache__" not in p.parts)
         assert before, "premise: the venv exists and is populated while the scope is open"
         success, _v, result = _gate(root, target="tests/test_poison.py", validator=validator, bound=False)

@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 from _containment_standin import MountAwareStandIn
+from _gate_view_contract import assert_views_released
 from test_oi142_gate_view import _git, _views
 from test_runtime_verification import JUDGE_SERVICE
 from test_s3_execution_views import _contained, _docker_reachable
@@ -315,7 +316,7 @@ def test_real_oci_an_ignored_module_cannot_make_a_broken_contained_service_pass_
     assert _outcome(run.go()) == ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY.value
     leftovers = subprocess.run(["docker", "ps", "-a", "--filter", "name=kriya-oci-", "--format", "{{.Names}}"], capture_output=True, text=True, check=True).stdout
     assert leftovers.strip() == "", "no container outlives the run"
-    assert not os.listdir(_views()) if os.path.isdir(_views()) else True
+    assert_views_released(_views())  # the owner contract for a view's end: released and sweepable, not physically gone at once (GATE-VIEW-REMOVAL-NOT-IMMEDIATE-ON-DOCKER-DESKTOP-001)
 
 
 @docker

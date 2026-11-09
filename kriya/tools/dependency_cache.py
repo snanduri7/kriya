@@ -18,6 +18,13 @@ venv WRITABLE, and the venv used to be reused across attempts. MEASURED at ebd02
 honest failing test pass. The venv now has the lifetime of the verification scope that builds it: ``discard_project_venv`` removes it when the
 outermost scope opens (anything an earlier run or scope left is unprovenanced) and when it closes.
 
+Where a gate executes in a view (the Git-work-tree case), the venv is bind-mounted into the view from a HOST source, and that source is an ephemeral unit of this module too
+(``create_ephemeral_cache(state, "venv")``; PYTHON-VENV-SOURCE-REUSE-001). MEASURED (v2 A/B, SPRINT_LOG 12h): removing and recreating one host pathname that is bound into containers
+moments later fails transiently under load (13/60 creations, ENOENT on the first write), a never-used pathname 0/60. So every creation attempt - the first, the bounded retry, a rebuild after
+a dropped dependency - gets its own unit, units are kept until the outermost scope ends (so no allocated pathname can be handed out again inside it) and are then removed. The scope's
+stored source is the only authority for what is mounted: ``<origin>/.kriya/venv`` is discarded at entry like before but is never consulted afterwards, so whatever a candidate plants
+there cannot reach a mount. A gate that executes in place has no view and no bind source; its venv stays inside the workspace mount.
+
 The structural guard. ``is_ephemeral_cache`` is what the OCI backend consults (``containment_oci._require_ephemeral_writable_caches``) before any docker
 resource exists: a profile that mounts a dependency cache WRITABLE must name a directory this module created (a Kriya-owned marker in the unit directory
 above it, which is never mounted). Anything else is the typed refusal ``PERSISTENT_DEPENDENCY_CACHE_WRITABLE``; a gate that asks for a cache outside a
@@ -82,10 +89,10 @@ def _sweep_dead_units(base: str) -> None:
 
 
 def discard_project_venv(workspace_path: str) -> bool:
-    """Remove the project venv of ``workspace_path`` (never its target when it is a link: the link itself goes). True when nothing is left there."""
+    """Remove the project venv entry of ``workspace_path`` (never its target when it is a link: the link itself goes; a plain file is unlinked too). True when nothing is left there."""
     venv = os.path.join(workspace_path, *PROJECT_VENV)
-    if os.path.islink(venv):
-        os.unlink(venv)
+    if os.path.islink(venv) or (os.path.lexists(venv) and not os.path.isdir(venv)):
+        os.unlink(venv)  # a link or a plain file is unlinked as itself: never followed, and ``shutil.rmtree`` would leave a file in place
     elif os.path.lexists(venv):
         _remove_tree(venv)
     return not os.path.lexists(venv)
