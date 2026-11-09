@@ -773,11 +773,13 @@ def test_a_verification_session_shares_one_view_between_a_build_step_and_the_run
     validator = PolymorphicValidator(str(root), original_workspace_path=str(root))
     with validator.verification_session(RUNTIME_VERIFICATION_GATE):
         Path(validator.workspace_path, "app.txt").write_text("built in the session")
-        result = validator.run_app_sequence([[sys.executable, "-c", "print(open('app.txt').read())"]], timeout=30)
+        # Non-launcher commands: since 0a188e9 an interpreter launcher (sys.executable / python3) that was not resolved to its effective argv is a typed EFFECTIVE_ARGV_NOT_RESOLVED refusal with
+        # nothing spawned. This test pins the view (build product visible to the run in the same view, absent afterwards), which no interpreter is needed to observe.
+        result = validator.run_app_sequence([["cat", "app.txt"]], timeout=30)
     assert "built in the session" in result["output"]
     assert not (root / "app.txt").exists() and validator.workspace_path == str(root)
-    after = validator.run_app_sequence([[sys.executable, "-c", "import os; print(os.path.exists('app.txt'))"]], timeout=30)
-    assert "False" in after["output"]  # a later gate does not see it
+    after = validator.run_app_sequence([["sh", "-c", "if [ -e app.txt ]; then echo present; else echo absent; fi"]], timeout=30)
+    assert "absent" in after["output"]  # a later gate does not see it
 
 
 def test_a_session_nested_in_a_gate_or_a_gate_nested_in_a_session_does_not_open_a_second_view(tmp_path):
@@ -980,8 +982,9 @@ def test_each_python_gate_entry_executes_in_a_view_and_never_in_the_worktree(tmp
     entries = {
         "compile": lambda: validator.run_compile_check(["calc.py"]),
         "tests": lambda: validator.run_tests(),
-        "run_app": lambda: validator.run_app([sys.executable, "-c", "pass"]),
-        "run_app_sequence": lambda: validator.run_app_sequence([[sys.executable, "-c", "pass"]]),
+        # non-launcher commands (0a188e9 refuses an interpreter launcher that was not resolved to its effective argv before anything spawns; only WHERE the entry runs matters here)
+        "run_app": lambda: validator.run_app(["echo", "pass"]),
+        "run_app_sequence": lambda: validator.run_app_sequence([["echo", "pass"]]),
     }
     for name, enter in entries.items():
         before = len(cwds)

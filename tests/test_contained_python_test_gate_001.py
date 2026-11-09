@@ -16,7 +16,7 @@ import pytest
 from _dependency_scope import hold_dependency_scope
 
 from kriya.config.config import AutonomyConfig
-from kriya.tools.validate import PolymorphicValidator
+from kriya.tools.validate import VENV_CREATION_ATTEMPTS, PolymorphicValidator
 
 CONTAINER_ONLY_INTERPRETER = "/kriya-test-nonexistent/usr/local/bin/python3"
 
@@ -89,7 +89,9 @@ def test_a_failed_venv_creation_keeps_the_fail_closed_bare_interpreter(tmp_path)
         return {"returncode": 1, "stdout": "", "stderr": "no venv module", "timeout": False}
     validator._run_cmd_with_timeout = run
     assert validator._resolve_python_interpreter() == ("python3", None)
-    assert [cmd[1:3] for cmd in calls] == [["-m", "venv"]]
+    # Creation gets ONE bounded retry from nothing since ffcbeba (WAVE8-PY-RUNTIME-ONLY-VENV-BOOTSTRAP-001; tests/test_py_venv_bootstrap.py pins the bound itself): both attempts fail here, so the venv
+    # is attempted VENV_CREATION_ATTEMPTS times and pip never runs - the fail-closed bare interpreter this test is about is unchanged.
+    assert [cmd[1:3] for cmd in calls] == [["-m", "venv"]] * VENV_CREATION_ATTEMPTS
 
 
 def _bootstrap_roots(cmd):
