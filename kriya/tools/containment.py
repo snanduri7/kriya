@@ -23,6 +23,10 @@ selected by production config resolution.
 from __future__ import annotations
 
 import logging
+import os
+import re
+import stat
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
@@ -712,6 +716,73 @@ def decide_external_execution(autonomy: object, *, subject: str) -> ExternalExec
     return ExternalExecutionDecision(
         subject=subject, contained=_containment_is_mandatory(autonomy, subject),
         backend_name=str(getattr(autonomy, "containment_backend", "none")), reason_code=CONTAINMENT_REQUIRED)
+
+
+# ---- BIND-SOURCE-MISSING DIAGNOSTIC (DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001; owner-approved, OBSERVATION ONLY) ----
+# MEASURED (Scenario-A Run 3, and a 988-trial reproduction): a container backend can refuse to start a container with `bind source path does not exist: <path>` although the directory exists on the host. The
+# runtime fact Kriya records is generic: the BACKEND reported a bind source missing, and the HOST either has it or does not. Which of the two it was decides who to look at first (a source that was present
+# means the backend's own view of the host file system disagreed with the host; a source that was absent means a Kriya source-lifecycle suspect). The facts are captured at the moment the backend returns,
+# before any Kriya cleanup (the gate view / cache unit is removed later by its owner). This is evidence only: nothing is retried, no path is substituted, no wait is added, and the outcome stays the
+# fail-closed verification-infrastructure failure it already was. The cause of such a disagreement is campaign diagnosis, deliberately NOT asserted here.
+BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST = "BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST"
+BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST = "BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST"
+INFRASTRUCTURE_DIAGNOSTIC_CODES = frozenset({BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST, BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST})
+_BIND_SOURCE_MISSING = re.compile(r"bind source path does not exist: (\S+?)\.?(?=\s|$)")
+_VM_HOST_PREFIX = "/host_mnt"  # the spelling a VM-based runtime gives a host path it reports; the host spelling is tried as well
+
+
+def _path_facts(path: str) -> Dict[str, Any]:
+    facts: Dict[str, Any] = {"path": path}
+    try:
+        info = os.lstat(path)
+        facts.update(exists=True, kind=stat.filemode(info.st_mode), inode=info.st_ino, device=info.st_dev, is_symlink=stat.S_ISLNK(info.st_mode))
+    except FileNotFoundError:
+        facts["exists"] = False
+    except OSError as error:
+        facts.update(exists=None, error=repr(error))
+    try:
+        facts["listed_in_parent"] = os.path.basename(path) in os.listdir(os.path.dirname(path))
+    except OSError:
+        facts["listed_in_parent"] = None
+    return facts
+
+
+def diagnose_bind_source_missing(stderr: str, *, backend: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The typed infrastructure diagnostic for a container backend that reported a bind source missing, or None when ``stderr`` does not carry that report. Pure observation of the host file system."""
+    match = _BIND_SOURCE_MISSING.search(stderr or "")
+    if match is None:
+        return None
+    reported = match.group(1)
+    spellings = [reported] + ([reported[len(_VM_HOST_PREFIX):]] if reported.startswith(_VM_HOST_PREFIX + "/") else [])
+    host_path = next((candidate for candidate in spellings if os.path.lexists(candidate)), spellings[-1])
+    source = _path_facts(host_path)
+    parent = _path_facts(os.path.dirname(host_path))
+    present = source.get("exists") is True
+    code = BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST if present else BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST
+    return {
+        "reason_code": code, "backend": backend, "reported_source": reported, "host_source": host_path,
+        "meaning": ("the container backend reported this bind source missing while it exists on the host" if present
+                    else "the container backend reported this bind source missing and it is also absent on the host"),
+        "host_source_facts": source, "host_parent_facts": parent, "host_grandparent_facts": _path_facts(os.path.dirname(os.path.dirname(host_path))),
+        "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+
+
+def infrastructure_diagnostic_for(stderr: str, *, target_started: bool, timed_out: bool, backend: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The diagnostic of one finished contained run: only a run whose target never started (and did not time out) can carry a backend's start refusal."""
+    if target_started or timed_out:
+        return None
+    diagnostic = diagnose_bind_source_missing(stderr, backend=backend)
+    if diagnostic is not None:
+        logger.warning("%s: %s (reported %s; host source %s; host facts captured before cleanup)", diagnostic["reason_code"], diagnostic["meaning"], diagnostic["reported_source"], diagnostic["host_source"])
+    return diagnostic
+
+
+def infrastructure_diagnostic_line(diagnostic: Optional[Dict[str, Any]]) -> str:
+    """One typed line for a gate's failure text (empty when there is no diagnostic)."""
+    if not diagnostic:
+        return ""
+    return f"{diagnostic['reason_code']}: {diagnostic['meaning']} (reported source {diagnostic['reported_source']}; backend {diagnostic.get('backend') or 'unknown'})"
 
 
 # Annotation-only modules (PRD-001), imported at runtime so

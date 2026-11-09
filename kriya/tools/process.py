@@ -33,6 +33,7 @@ from kriya.tools.containment import (
     FiniteLaunchStage,
     NetworkAuthority,
     PreparedContainment,
+    infrastructure_diagnostic_for,
 )
 
 
@@ -58,6 +59,9 @@ class ProcessResult:
     # REPLAY-CONTAINED-NOT-STARTED-001: False only when the containment backend reports that the requested target process never started (the exec of the target failed,
     # kriya.tools.containment.FiniteLaunchStage). ``returncode`` is then the launcher's own exit status and is not evidence of anything.
     target_started: bool = True
+    # DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001: the typed, observation-only diagnostic of a container backend's `bind source path does not exist` start refusal (kriya/tools/containment.py::
+    # diagnose_bind_source_missing): host existence/lstat facts captured when the backend returned. None for every other result. It changes no outcome.
+    infrastructure_diagnostic: Optional[Dict[str, object]] = None
 
     def to_dict(self) -> Dict[str, object]:
         result = {
@@ -79,6 +83,8 @@ class ProcessResult:
             result["resources"] = self.resources
         if not self.target_started:
             result["target_started"] = False
+        if self.infrastructure_diagnostic is not None:
+            result["infrastructure_diagnostic"] = self.infrastructure_diagnostic
         return result
 
 
@@ -316,6 +322,7 @@ class _ResolvedExecution:
     egress: Optional[Dict[str, object]] = None
     resources: Optional[Dict[str, object]] = None
     finite_launch: Optional[FiniteLaunchStage] = None
+    backend_name: Optional[str] = None                      # the prepared containment's backend identity (evidence only)
     owner_death_cleanup: Tuple[Tuple[str, ...], ...] = ()   # W3-8: argv lists the owner-death watchdog runs after it kills the tree (the backend's authoritative teardown)
 
 
@@ -364,7 +371,7 @@ def _prepare_env_and_preexec(
         exec_target=prepared.exec_target,
         toolchain_identity=(prepared.toolchain_identity.to_dict() if prepared.toolchain_identity else None),
         egress=egress_evidence_for(containment_profile, containment_backend),
-        resources=prepared.resources, finite_launch=launch, owner_death_cleanup=prepared.owner_death_cleanup,
+        resources=prepared.resources, finite_launch=launch, backend_name=prepared.backend_name, owner_death_cleanup=prepared.owner_death_cleanup,
     )
 
 
@@ -491,6 +498,7 @@ class ProcessController:
         target_started = True
         if resolved.finite_launch is not None and not timed_out:
             stderr, target_started = resolved.finite_launch.read(stderr or "")
+        diagnostic = infrastructure_diagnostic_for(stderr or "", target_started=target_started, timed_out=timed_out, backend=resolved.backend_name)   # BEFORE any cleanup by the caller
         stdout, stdout_lost = _bounded_tail_counted(stdout or "", self.max_output_chars)
         stderr, stderr_lost = _bounded_tail_counted(stderr or "", self.max_output_chars)
         if timed_out:
@@ -507,7 +515,7 @@ class ProcessController:
             stdout_lost_chars=stdout_lost,
             stderr_lost_chars=stderr_lost,
             toolchain_identity=resolved.toolchain_identity,
-            egress=resolved.egress, resources=resolved.resources, target_started=target_started,
+            egress=resolved.egress, resources=resolved.resources, target_started=target_started, infrastructure_diagnostic=diagnostic,
         )
 
     async def run_async(
@@ -574,6 +582,7 @@ class ProcessController:
         target_started = True
         if resolved.finite_launch is not None and not timed_out:
             stderr, target_started = resolved.finite_launch.read(stderr)
+        diagnostic = infrastructure_diagnostic_for(stderr, target_started=target_started, timed_out=timed_out, backend=resolved.backend_name)   # BEFORE any cleanup by the caller
         stdout, stdout_lost = _bounded_tail_counted(stdout, self.max_output_chars)
         stderr, stderr_lost = _bounded_tail_counted(stderr, self.max_output_chars)
         if timed_out:
@@ -590,7 +599,7 @@ class ProcessController:
             stdout_lost_chars=stdout_lost,
             stderr_lost_chars=stderr_lost,
             toolchain_identity=resolved.toolchain_identity,
-            egress=resolved.egress, resources=resolved.resources, target_started=target_started,
+            egress=resolved.egress, resources=resolved.resources, target_started=target_started, infrastructure_diagnostic=diagnostic,
         )
 
     def start_managed(

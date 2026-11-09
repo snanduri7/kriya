@@ -36,6 +36,7 @@ from kriya.tools.containment import (
     NetworkAuthority,
     TrustClass,
     decide_external_execution,
+    infrastructure_diagnostic_line,
 )
 from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, VENV_CONTAINER_PATH, finalize_registry_acquisition_result
 from kriya.tools.dependency_cache import (
@@ -306,6 +307,8 @@ _EXECUTION_EVIDENCE_KEYS = (
     # D6: untracked files the application created while it ran (paths only),
     # recorded and discarded - never candidate bytes.
     "runtime_artifacts",
+    # DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001: a container backend's `bind source path does not exist` start refusal with the host facts captured when it returned (observation only).
+    "infrastructure_diagnostic",
 )
 
 
@@ -1665,8 +1668,9 @@ class PolymorphicValidator:
             return marked
 
         def _never_started(result: Dict[str, Any]) -> Dict[str, Any]:
+            note = infrastructure_diagnostic_line(result.get("infrastructure_diagnostic"))
             return _environment(result, GRADLE_INVOCATION_FAILED,
-                                f"the contained {gradle_cmd} did not start - the verification tool never ran, nothing about the candidate was observed")
+                                f"the contained {gradle_cmd} did not start - the verification tool never ran, nothing about the candidate was observed" + (f" ({note})" if note else ""))
 
         first = _offline_attempt()
         if first["returncode"] == 0:
@@ -2040,8 +2044,15 @@ class PolymorphicValidator:
             res = self._run_maven_cmd(["validate"], cwd=self.workspace_path, timeout=120)
             if res.get("target_started") is False:
                 # The containment backend reports that `mvn` itself never started (missing / not executable / a directory): the same toolchain problem as the host spawn failure below.
-                return {"success": False, "environment_reason_code": MAVEN_INVOCATION_FAILED,
-                        "output": f"Failed to invoke mvn validate: the contained mvn did not start:\n{res.get('stderr', '')}".rstrip()}
+                # The verdict is unchanged and stays fail-closed (an environment outcome, never a POM defect, no retry). A backend's bind-source refusal additionally carries the typed diagnostic with the
+                # host facts captured when the backend returned (DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001).
+                diagnostic = res.get("infrastructure_diagnostic")
+                note = infrastructure_diagnostic_line(diagnostic)
+                outcome = {"success": False, "environment_reason_code": MAVEN_INVOCATION_FAILED,
+                           "output": f"Failed to invoke mvn validate: the contained mvn did not start:\n{res.get('stderr', '')}".rstrip() + (f"\n{note}" if note else "")}
+                if diagnostic:
+                    outcome["infrastructure_diagnostic"] = diagnostic
+                return outcome
             if res["returncode"] == 0:
                 return {"success": True, "output": "Maven POM validation succeeded."}
             captured = f"{res.get('stdout', '')}\n{res.get('stderr', '')}"
@@ -2865,7 +2876,8 @@ class PolymorphicValidator:
             if res.get("target_started") is False:
                 # REPLAY-CONTAINED-NOT-STARTED-001: the containment backend reports that the target never started (its exec failed). The host spawn failure above is the same fact and
                 # has the same representation: no exit code, not timed out, and the sequence stops - a status the launcher itself answered is not the command's.
-                never_started = f"Failed to execute: the contained command did not start\n{res['stderr']}".rstrip()
+                note = infrastructure_diagnostic_line(res.get("infrastructure_diagnostic"))
+                never_started = f"Failed to execute: the contained command did not start\n{res['stderr']}".rstrip() + (f"\n{note}" if note else "")
                 output_parts.append(f"{step_label}\n{never_started}")
                 steps.append({
                     "command": list(command), "exit_code": None, "stdout": res["stdout"],
