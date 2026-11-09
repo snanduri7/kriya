@@ -60,7 +60,8 @@ if [ "$SCENARIO" = "02" ]; then
 else
   TEMPLATE="$SC_DIR/config/kriya.template.yaml"   # 03 and 04 render their own template; 04 also has its skills in $WORK/skills (reset_demo.sh)
 fi
-sed -e "s#@WORK@#$WORK#g" -e "s#@STUB_PORT@#$STUB_PORT#g" "$TEMPLATE" > "$WORK/config/kriya.yaml"
+# paths.state is the scenario's ACTIVE state root (state_root_active, _common.sh), never a fixed <work>/state: the template line `@WORK@/state` is rendered with it BEFORE @WORK@ is replaced.
+sed -e "s#@WORK@/state#$(scenario_state "$SCENARIO")#g" -e "s#@WORK@#$WORK#g" -e "s#@STUB_PORT@#$STUB_PORT#g" "$TEMPLATE" > "$WORK/config/kriya.yaml"
 echo "rendered config: $WORK/config/kriya.yaml (sha256 $(sha256_of "$WORK/config/kriya.yaml"))"
 
 if [ "$CHECK_BUILD" = 1 ] && [ "$SCENARIO" = "01" ]; then

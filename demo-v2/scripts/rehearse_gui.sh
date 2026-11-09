@@ -32,11 +32,12 @@ printf '{"kriyaExecutable": "%s", "editor": "vscode"}\n' "$REPO_ROOT/.venv/bin/k
 if [ "$SCENARIO" = "01" ]; then echo "=== LIVE GUI rehearsal: scenario 01 (real model; this takes minutes) ==="; else echo "=== GUI rehearsal: scenario 03 (CONTROLLED / SCRIPTED stub, no model) ==="; fi
 echo "app:        $APP"
 echo "workspace:  $WS"
-echo "state:      $WORK/state"
+STATE_ROOT="$(scenario_state "$SCENARIO")"   # the active state root (the one authority, _common.sh)
+echo "state:      $STATE_ROOT"
 echo "screenshots and results.json: $GUI/captures"
 START="$(date +%s)"
 set +e
-HOME="$HOME" KRIYA_UI_ALLOW_REAL_KRIYA=1 KRIYA_STATE_DIR="$WORK/state" KRIYA_UI_CAPTURE="$GUI/captures" KRIYA_UI_CAPTURE_STEPS="$GUI/capture.json" \
+HOME="$HOME" KRIYA_UI_ALLOW_REAL_KRIYA=1 KRIYA_STATE_DIR="$STATE_ROOT" KRIYA_UI_CAPTURE="$GUI/captures" KRIYA_UI_CAPTURE_STEPS="$GUI/capture.json" \
   KRIYA_UI_CAPTURE_CHOOSE="[\"$WS\"]" "$APP/Contents/MacOS/Kriya" --user-data-dir="$GUI/userdata" >"$GUI/app.stdout.log" 2>"$GUI/app.stderr.log"
 STATUS=$?
 set -e

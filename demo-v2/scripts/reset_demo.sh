@@ -86,9 +86,12 @@ else
   echo "authority:   $KRIYA_BIN not found; any earlier approval was NOT revoked"
 fi
 
-# Kriya's own state and memory for this scenario (never inside the target repository).
-rm -rf "$WORK/state" "$WORK/memory" "$WORK/evidence" "$WORK/gui" "$WS/.kriya"
-mkdir -p "$WORK/state" "$WORK/memory" "$WORK/evidence" "$WORK/skills-empty"
+# Kriya's own state and memory for this scenario (never inside the target repository). The STATE ROOT is never removed and recreated at the same pathname (Docker Desktop's file sharing then cannot see
+# new bind sources below it: DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001): a brand-new root is allocated and published first, the old one is retired best-effort afterwards.
+STATE_ROOT="$(state_root_allocate "$WORK")"
+rm -rf "$WORK/memory" "$WORK/evidence" "$WORK/gui" "$WS/.kriya"
+mkdir -p "$WORK/memory" "$WORK/evidence" "$WORK/skills-empty"
+echo "state:       $STATE_ROOT (a brand-new state root; the previous one is retired)"
 
 if [ "$SCENARIO" = "02" ]; then
   # The skills directory is a fresh COPY of the preserved snapshot, never the snapshot itself: the one thing a run writes there (the skill-gap acknowledgement flag in each skill.yaml)

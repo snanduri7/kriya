@@ -65,6 +65,7 @@ fi
 check "product tracked tree is clean (evidence binds to an exact revision)" test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
 
 case "$SCENARIO" in 00|01|02|03|04) ;; *) die "unknown scenario $SCENARIO" ;; esac
+STATE_ROOT="$(scenario_state "$SCENARIO")"   # the scenario's ACTIVE state root, resolved once through the one authority (_common.sh); an unprepared scenario stops here with a message, never a silent pass
 
 # ---- scenario 00: GREENFIELD HELLO WORLD (an empty folder; everything else is created by the run) ----
 if [ "$SCENARIO" = "00" ]; then
@@ -75,7 +76,7 @@ if [ "$SCENARIO" = "00" ]; then
   check "workspace folder exists" test -d "$S00"
   if [ "$PHASE" = idle ]; then
     [ "$(find "$S00" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" = 0 ] && pass "the project folder is EMPTY (no file, no git repository, no kriya.yaml, no .kriya)" || fail "the project folder is not empty: $(ls -A "$S00" | tr '\n' ' ')"
-    [ -z "$(ls -A "$W00/state" 2>/dev/null)" ] && pass "no Kriya state from an earlier run" || fail "Kriya state from an earlier run is present in $W00/state"
+    [ -z "$(ls -A "$STATE_ROOT" 2>/dev/null)" ] && pass "no Kriya state from an earlier run" || fail "Kriya state from an earlier run is present in $STATE_ROOT"
     BL="$(PYTHONDONTWRITEBYTECODE=1 "$K_BIN" traces --json --execution-preflight "$S00" 2>/dev/null | "$K_PY" -I -c 'import sys,json; e=json.load(sys.stdin); d=e.get("data"); print("NO_PREFLIGHT_DATA" if not d else ",".join(b["code"] for b in d.get("blockers",[]) if b["code"]!="STATE_DIRECTORY_NOT_OBSERVABLE"))' 2>/dev/null || echo PREFLIGHT_UNREADABLE)"
     [ -z "$BL" ] && pass "Kriya reports the new folder runnable on its defaults (no blockers); Project Setup is a recommendation, not a prerequisite" || fail "Kriya's preflight reports blockers for the empty folder: $BL"
     OUT="$( cd "$S00" && PYTHONDONTWRITEBYTECODE=1 "$K_BIN" authority inspect 2>&1 || true )"
@@ -100,7 +101,7 @@ if [ "$SCENARIO" = "00" ]; then
       RUNOUT="$( cd "$S00" && java -cp target/classes "$FQN" 2>&1 || true )"
       case "$RUNOUT" in *"Hello from Kriya"*) pass "the built application prints 'Hello from Kriya' (java -cp target/classes $FQN)" ;; *) fail "the built application does not print 'Hello from Kriya': $RUNOUT" ;; esac
     fi
-    check "Kriya recorded state for the run" test -n "$(ls -A "$W00/state" 2>/dev/null)"
+    check "Kriya recorded state for the run" test -n "$(ls -A "$STATE_ROOT" 2>/dev/null)"
   fi
   finish
 fi
@@ -173,7 +174,7 @@ assert c['llm']['model'] == 'qwen3-coder:30b' and 'localhost:11434' in c['llm'][
   if [ "$PHASE" = idle ]; then
     LISTING="$(cd "$S04" 2>/dev/null && ls -A | tr '\n' ' ' || true)"
     [ "$LISTING" = "kriya.yaml " ] && pass "the project folder holds ONLY kriya.yaml: no source, no pom.xml, no test, no git repository, no generated file" || fail "the project folder is not 'kriya.yaml' only: $LISTING"
-    [ -z "$(ls -A "$W04/state" 2>/dev/null)" ] && pass "no Kriya state from an earlier run" || fail "Kriya state from an earlier run is present in $W04/state"
+    [ -z "$(ls -A "$STATE_ROOT" 2>/dev/null)" ] && pass "no Kriya state from an earlier run" || fail "Kriya state from an earlier run is present in $STATE_ROOT"
     preflight_absent_check_04() {
       local blockers
       blockers="$(PYTHONDONTWRITEBYTECODE=1 "$K_BIN" traces --json --execution-preflight "$S04" 2>/dev/null | "$K_PY" -I -c 'import sys,json; e=json.load(sys.stdin); d=e.get("data"); print("NO_PREFLIGHT_DATA" if not d else ",".join(b["code"] for b in d.get("blockers",[])))' 2>/dev/null || echo PREFLIGHT_UNREADABLE)"
@@ -226,7 +227,7 @@ assert c['llm']['model'] == 'qwen3-coder:30b' and 'localhost:11434' in c['llm'][
       else fail "the application did not run and exit 0 through 'mvn -o compile exec:exec -Dexec.mainClass=$FQN' (see $W04/evidence/post-run.log)"; fi
     else fail "no class with public static void main under src/main/java"; fi
     rm -rf "$CHECK"
-    check "Kriya recorded state for the run" test -n "$(ls -A "$W04/state" 2>/dev/null)"
+    check "Kriya recorded state for the run" test -n "$(ls -A "$STATE_ROOT" 2>/dev/null)"
   fi
   finish
 fi
@@ -348,5 +349,5 @@ PY
   esac
   grep -q "wrong candidate" "$DEMO_V2_DIR/scenarios/03-controlled-repair/script/controlled_script.json" && pass "(static) the committed script labels its first Developer answer as the scripted wrong candidate" || fail "the committed script does not label the wrong candidate"
 fi
-check "Kriya recorded state for the run" test -n "$(ls -A "$WORK/state" 2>/dev/null)"
+check "Kriya recorded state for the run" test -n "$(ls -A "$STATE_ROOT" 2>/dev/null)"
 finish

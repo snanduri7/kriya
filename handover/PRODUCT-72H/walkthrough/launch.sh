@@ -3,12 +3,12 @@
 #
 #   handover/PRODUCT-72H/walkthrough/launch.sh [--reset] [--prepare-only] [--no-build]
 #
-#   --reset         wipe and recreate the walkthrough home (state, user data, demo repos): Project Memory starts empty, so "learned -> reused -> stale" can be shown from zero.
+#   --reset         empty the walkthrough home (user data, demo repos) and give it a BRAND-NEW state root (never the same pathname again): Project Memory starts empty, so "learned -> reused -> stale" can be shown from zero.
 #   --prepare-only  do everything except start the app (preflight, repos, settings); used to check the kit.
 #   --no-build      skip `npm run build:cockpit` (only when the bundle is already built from this tree).
 #
 # Everything lives OUTSIDE the repository, under $KRIYA_WALKTHROUGH_HOME (default ~/kriya-walkthrough):
-#   state/       the ONE state directory the app reads AND every run writes (mode 0700). Never your real ~/.kriya state.
+#   state-<id>/  the ONE state directory the app reads AND every run writes (mode 0700; the active one is named in state.active). Never your real ~/.kriya state.
 #   userdata/    the app's own settings (points kriyaExecutable at this tree's .venv/bin/kriya).
 #   projects/    an empty folder to choose as the parent in "New Project" (the greenfield demo).
 #   brownfield-python/  a tiny calculator repo (git, one commit) for the existing-repository demo.
@@ -55,12 +55,25 @@ if pgrep -f "bin/pytest|-m pytest" >/dev/null 2>&1; then echo "   WARN a pytest 
 [ "$FAIL" = 0 ] || { [ "$PREPARE_ONLY" = 1 ] && echo "   (preflight failures reported; continuing because --prepare-only)" || die "preflight failed: fix the lines marked FAIL, then run again"; }
 
 # --- home, state, user data
-if [ "$RESET" = 1 ] && [ -d "$HOME_DIR" ]; then
-  [ -f "$HOME_DIR/.kriya-walkthrough" ] || die "$HOME_DIR exists but was not created by this kit (no .kriya-walkthrough marker): refusing to delete it"
-  rm -rf "$HOME_DIR"; echo "   reset: removed $HOME_DIR"
+# DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001: neither the home directory nor the state pathname is ever removed and recreated (they are ancestors of every bind source; Docker Desktop's file sharing then cannot
+# see new paths below a recreated pathname). A reset empties everything else, allocates a BRAND-NEW state root through the one authority (demo-v2/scripts/_common.sh) and retires the old one best-effort.
+# shellcheck source=/dev/null
+source "$REPO/demo-v2/scripts/_common.sh"
+mkdir -p "$HOME_DIR"
+if [ "$RESET" = 1 ] && [ -e "$HOME_DIR/.kriya-walkthrough" ]; then
+  find "$HOME_DIR" -mindepth 1 -maxdepth 1 ! -name '.kriya-walkthrough' ! -name 'state' ! -name 'state-*' ! -name 'state.active' ! -name 'state.history' -exec rm -rf {} +
+  echo "   reset: emptied $HOME_DIR (the home directory itself is kept; the state root is replaced by a brand-new one)"
+elif [ "$RESET" = 1 ] && [ -n "$(ls -A "$HOME_DIR" 2>/dev/null)" ]; then
+  die "$HOME_DIR exists but was not created by this kit (no .kriya-walkthrough marker): refusing to delete it"
 fi
-mkdir -p "$HOME_DIR/state" "$HOME_DIR/userdata" "$HOME_DIR/projects"
-chmod 700 "$HOME_DIR/state"; touch "$HOME_DIR/.kriya-walkthrough"
+mkdir -p "$HOME_DIR/userdata" "$HOME_DIR/projects"; touch "$HOME_DIR/.kriya-walkthrough"
+if [ "$RESET" = 1 ] || { [ ! -s "$HOME_DIR/state.active" ] && [ ! -e "$HOME_DIR/state" ]; }; then
+  STATE_ROOT="$(state_root_allocate "$HOME_DIR")"
+elif [ -s "$HOME_DIR/state.active" ]; then
+  STATE_ROOT="$(state_root_active "$HOME_DIR")"
+else
+  die "$HOME_DIR was made before the unique state root: run with --reset once (it empties the kit's data and allocates a brand-new state root; nothing is deleted without --reset)"
+fi
 
 seed_repo() {  # seed_repo <name> : a git repo with one commit from walkthrough/seeds/<name>, created only when absent
   local name="$1" dest="$HOME_DIR/$1"
@@ -93,7 +106,7 @@ if [ -z "${KRIYA_WALKTHROUGH_HOME:-}" ]; then
     echo "            (written on its own line it only sets a shell variable, which this script does not see)."
   fi
 fi
-echo "   state:      $HOME_DIR/state"
+echo "   state:      $STATE_ROOT"
 echo "   user data:  $HOME_DIR/userdata"
 echo "   new project parent folder:  $HOME_DIR/projects"
 echo "   existing repos:             $HOME_DIR/brownfield-python   $HOME_DIR/java-maven"
@@ -119,5 +132,5 @@ else
 fi
 pgrep -f "Electron.*$REPO/ui/standalone" >/dev/null 2>&1 && die "a Kriya desktop app from this tree is already running: quit it (Cmd+Q) and run again, so it starts with this state"
 echo "== starting Kriya (quit with Cmd+Q). Follow handover/PRODUCT-72H/DEMO_RUNBOOK.md"
-export KRIYA_UI_ALLOW_REAL_KRIYA=1 KRIYA_STATE_DIR="$HOME_DIR/state"
+export KRIYA_UI_ALLOW_REAL_KRIYA=1 KRIYA_STATE_DIR="$STATE_ROOT"
 exec npx electron . --user-data-dir="$HOME_DIR/userdata"

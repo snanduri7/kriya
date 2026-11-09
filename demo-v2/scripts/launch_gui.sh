@@ -31,7 +31,7 @@ APP_TIME="$(stat -f %m "$APP")"
 [ "$APP_TIME" -ge "$UI_COMMIT_TIME" ] || die "$APP is older than the newest UI change in this checkout: rebuild it (cd ui/standalone && npm run package:mac)"
 pgrep -f "$APP/Contents/MacOS/Kriya" >/dev/null 2>&1 && die "a Kriya desktop app from this build is already running: quit it (Cmd+Q) and launch again, so it starts with this scenario's state"
 
-STATE="${STATE_OVERRIDE:-$WORK/state}"
+STATE="${STATE_OVERRIDE:-$(scenario_state "$SCENARIO")}"   # the active state root (the one authority, _common.sh), never a fixed <work>/state
 case "$STATE" in /*) ;; *) die "--state must be an absolute directory" ;; esac
 if [ -n "$STATE_OVERRIDE" ]; then
   [ -d "$STATE" ] || die "--state $STATE does not exist (a typo would silently give an empty history)"

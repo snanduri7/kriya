@@ -40,7 +40,7 @@ def _config_check_block() -> str:
 
 
 def _render(tmp_path: Path, work: Path, budget_line: str | None = None) -> None:
-    text = TEMPLATE.read_text(encoding="utf-8").replace("@WORK@", str(work))
+    text = TEMPLATE.read_text(encoding="utf-8").replace("@WORK@/state", str(work / "state-20260101T000000Z-abcdef")).replace("@WORK@", str(work))
     if budget_line is not None:
         text = re.sub(r"generation_time_budget_seconds: \d+", budget_line, text)
     (work / "config").mkdir(parents=True, exist_ok=True)

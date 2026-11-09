@@ -45,13 +45,25 @@ def _run(script: str, work: Path, *args: str, timeout: int = 300) -> subprocess.
     return subprocess.run(["bash", str(SCRIPTS / script), *args], capture_output=True, text=True, check=False, timeout=timeout, env=_env(work))
 
 
+_STATE_ROOT_NAME = re.compile(r"^state-\d{8}T\d{6}Z-[A-Za-z0-9]{6}$")
+
+
+def _active_state(work: Path, scenario: str) -> Path:
+    """The scenario's ACTIVE state root, read the way every script reads it (state.active, the one authority)."""
+    return Path((work / f"scenario-{scenario}" / "state.active").read_text(encoding="utf-8").strip())
+
+
 def _fingerprint(work: Path) -> dict:
-    """Content, not time: every file under the work area (the workspace's .git excluded) with its sha256, the workspaces' tree hashes and their `git status`."""
+    """Content, not time: every file under the work area (the workspace's .git excluded) with its sha256, the workspaces' tree hashes and their `git status`.
+    DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001: a reset allocates a brand-new, uniquely named state root each time (that is the point), so the state root's name and the pointer/history files that
+    name it are not part of the start state's CONTENT; a state root is compared as `state`."""
     files = {}
     for path in sorted(work.rglob("*")):
         rel = path.relative_to(work)
+        if rel.name in ("state.active", "state.history") or (len(rel.parts) > 1 and rel.name.startswith("state.active.")):
+            continue
         if path.is_file() and ".git" not in rel.parts and rel.parts[:1] != ("scenario-01",):  # scenario 01 is a full clone: its tree hash below stands for it
-            files[str(rel)] = hashlib.sha256(path.read_bytes()).hexdigest()
+            files["/".join("state" if _STATE_ROOT_NAME.match(part) else part for part in rel.parts)] = hashlib.sha256(path.read_bytes()).hexdigest()
     trees = {}
     for workspace in sorted(work.glob("scenario-*/workspace")):
         if not (workspace / ".git").exists():
@@ -85,10 +97,12 @@ def test_reset_really_discards_what_a_run_left_behind(tmp_path: Path) -> None:
     (work / "scenario-02" / "workspace" / "outline.py").write_text("print('a candidate from a previous run')\n")
     skill_yaml = next((work / "scenario-02" / "skills").glob("*/skill.yaml"))
     skill_yaml.write_text(skill_yaml.read_text() + "verification_gap_acknowledged: true\n")
-    (work / "scenario-02" / "state" / "left-over").write_text("x")
+    old_state = _active_state(work, "02")
+    (old_state / "left-over").write_text("x")
     assert _fingerprint(work) != clean
     assert _run("reset_demo.sh", work, "--scenario", "02").returncode == 0
     assert _fingerprint(work) == clean
+    assert _active_state(work, "02") != old_state and not old_state.exists()  # the state a run left behind is not reused: it is retired and a brand-new root is active
 
 
 @pytest.mark.external_private_fixture("PRD034-F9B-SCENARIO01")  # the fixture may not be hosted: a hosted skip is EXTERNAL_PRIVATE_FIXTURE_REQUIRED, discharged by scripts/certification_private_gate.py

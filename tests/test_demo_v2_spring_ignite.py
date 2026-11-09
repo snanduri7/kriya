@@ -60,7 +60,8 @@ def _rendered_config(tmp_path: Path) -> Path:
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
     target = work / "kriya.yaml"
-    target.write_text((SCENARIO / "config" / "kriya.template.yaml").read_text(encoding="utf-8").replace("@WORK@", str(work)), encoding="utf-8")
+    # prepare_demo.sh renders `@WORK@/state` with the scenario's ACTIVE state root before `@WORK@` (DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001)
+    target.write_text((SCENARIO / "config" / "kriya.template.yaml").read_text(encoding="utf-8").replace("@WORK@/state", str(work / "state-20260101T000000Z-abcdef")).replace("@WORK@", str(work)), encoding="utf-8")
     return target
 
 
@@ -322,12 +323,13 @@ def test_reset_is_idempotent_and_restores_a_dirtied_workspace_and_skill_copy(tmp
     scenario = work / "scenario-04"
     (scenario / "workspace" / "leftover.txt").write_text("from an earlier run")
     (scenario / "skills" / "ignite-java17" / "skill.yaml").write_text("verification_gap_acknowledged: true\n")
-    (scenario / "state").mkdir(exist_ok=True)
-    (scenario / "state" / "old.db").write_text("x")
+    old_state = Path((scenario / "state.active").read_text(encoding="utf-8").strip())
+    (old_state / "old.db").write_text("x")
     assert _run_reset(work).returncode == 0
     assert list((scenario / "workspace").iterdir()) == []
     assert _dir_digest(scenario / "skills" / "ignite-java17") == _env(FIXTURE / "fixture.env")["SKILL_DIGEST"]
-    assert list((scenario / "state").iterdir()) == []
+    new_state = Path((scenario / "state.active").read_text(encoding="utf-8").strip())
+    assert new_state != old_state and not old_state.exists() and list(new_state.iterdir()) == []  # a brand-new, empty state root; the old one (with the run's leftovers) is retired
 
 
 def test_reset_refuses_when_the_skill_in_the_repository_was_edited(tmp_path: Path) -> None:
@@ -423,8 +425,9 @@ def _project(tmp_path: Path) -> Path:
     workspace = work / "scenario-04" / "workspace"
     shutil.copytree(REFERENCE, workspace, dirs_exist_ok=True)
     (work / "scenario-04" / "config").mkdir(exist_ok=True)
-    (work / "scenario-04" / "config" / "kriya.yaml").write_text((SCENARIO / "config" / "kriya.template.yaml").read_text(encoding="utf-8").replace("@WORK@", str(work / "scenario-04")), encoding="utf-8")
-    (work / "scenario-04" / "state" / "run.marker").write_text("x")
+    active_state = Path((work / "scenario-04" / "state.active").read_text(encoding="utf-8").strip())
+    (work / "scenario-04" / "config" / "kriya.yaml").write_text((SCENARIO / "config" / "kriya.template.yaml").read_text(encoding="utf-8").replace("@WORK@/state", str(active_state)).replace("@WORK@", str(work / "scenario-04")), encoding="utf-8")
+    (active_state / "run.marker").write_text("x")
     return work
 
 

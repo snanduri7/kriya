@@ -59,6 +59,45 @@ stop_demo_listeners() {
 # The scenario's materialised work area. Always under DEMO_V2_WORK, never inside the repository.
 scenario_work() { echo "$DEMO_V2_WORK/scenario-$1"; }
 
+# ---- the ACTIVE STATE ROOT (DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001) ----
+# MEASURED (~/kriya-evidence/product-72h-confidence/p1-bind-source-2026-11-09/: 988 trials, 295 failures, every one the exact `bind source path does not exist` signature with the directory present on the
+# host): once a pathname that is an ANCESTOR of a bind source has been removed and recreated, Docker Desktop's file sharing cannot see any new path below it, persistently and at any ancestor level.
+# A scenario's state root holds every bind source of a gate (views, dependency caches, the Git-metadata export), so a reset must NEVER remove and recreate the active state pathname.
+# A reset allocates a BRAND-NEW state root, publishes it in <base>/state.active (the one authority: every consumer resolves the state path through state_root_active / scenario_state), and only then
+# retires the old root best-effort (a root that cannot be deleted is left behind: it is never reused). <base>/state.history lists every root ever allocated; a listed root, and the legacy fixed
+# <base>/state, can never be published again.
+state_root_active() {
+  local base="$1" pointer="$1/state.active" root
+  [ -s "$pointer" ] || die "no active state root for $base: run demo-v2/scripts/prepare_demo.sh (or reset_demo.sh) for the scenario first"
+  root="$(cat "$pointer")"
+  [ "$root" != "$base/state" ] || die "$pointer names the retired fixed state pathname $base/state"
+  case "$root" in "$base"/state-?*) ;; *) die "$pointer names $root, which is not a state root allocated under $base" ;; esac
+  [ "$(tail -n 1 "$base/state.history" 2>/dev/null)" = "$root" ] || die "$pointer names $root, which is not the newest allocated state root: an earlier root is never active again"
+  [ -d "$root" ] || die "the active state root $root does not exist: run the reset again"
+  echo "$root"
+}
+
+state_root_allocate() {
+  local base="$1" history="$1/state.history" pointer="$1/state.active" root tmp stale
+  [ -d "$base" ] || die "state_root_allocate: $base does not exist"
+  root="$(mktemp -d "$base/state-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")" || die "cannot allocate a state root under $base"
+  if [ -f "$history" ] && grep -Fxq -- "$root" "$history"; then rmdir "$root"; die "state root $root was allocated before: it is never reused"; fi
+  chmod 700 "$root"
+  printf '%s\n' "$root" >> "$history"                                            # recorded BEFORE it is published: from now on it can never be allocated again
+  tmp="$(mktemp "$base/state.active.XXXXXX")" && printf '%s\n' "$root" > "$tmp" && mv -f "$tmp" "$pointer" || die "cannot publish $root as the active state root"
+  # RETIRE (after the new root is the published authority): the legacy fixed <base>/state and every EARLIER root this tooling allocated (the history), best-effort. A failed deletion changes nothing: the pointer
+  # names the new root and a retired root is never published again. Only paths this tooling created are ever touched.
+  while IFS= read -r stale; do
+    [ "$stale" = "$root" ] && continue
+    [ -e "$stale" ] || [ -L "$stale" ] || continue
+    rm -rf -- "$stale" 2>/dev/null || echo "note: the retired state root $stale could not be deleted now; it is never reused" >&2
+  done < <(cat "$history"; echo "$base/state")
+  echo "$root"
+}
+
+# The active state root of a scenario's work area (the single authority for every demo script).
+scenario_state() { state_root_active "$(scenario_work "$1")"; }
+
 # Resolves PATH physically (symlinks followed) even when its tail does not exist yet: the nearest existing ancestor is resolved with `cd -P`, the rest is appended.
 physical_path() {
   local path="$1" tail="" parent
