@@ -165,7 +165,7 @@ AppConfig.model_validate(yaml.safe_load(open('$W04/config/kriya.yaml')))\""
 import yaml
 c = yaml.safe_load(open('$W04/config/kriya.yaml'))
 assert c['autonomy']['web_lookup_enabled'] is False and c['autonomy']['web_lookup_auto_approve'] is False and c['search']['base_url'] == ''
-assert c['autonomy']['mode'] == 'human-in-the-loop' and c['autonomy']['generation_time_budget_seconds'] == 900
+assert c['autonomy']['mode'] == 'human-in-the-loop' and c['autonomy']['generation_time_budget_seconds'] == $EXPECTED_GENERATION_BUDGET_SECONDS
 assert c['knowledge']['offline_mode'] is True and c['knowledge'].get('check_enabled', True) is True
 assert c['paths']['skills'] == '$W04/skills' and c['skills']['load_global'] is False and c['skills']['load_cwd'] is False
 assert c['workflow_controller'] == {'enabled': True, 'mode': 'enforce'}

@@ -99,7 +99,7 @@ def test_scenario_configuration_validates_and_keeps_every_approval_boundary(tmp_
     assert config.autonomy.web_lookup_enabled is False and config.autonomy.web_lookup_auto_approve is False
     assert config.search.base_url == ""
     assert config.workflow_controller.enabled is True and config.workflow_controller.mode == "enforce"
-    assert config.autonomy.generation_time_budget_seconds == 900  # not enlarged: no measurement justifies it
+    assert config.autonomy.generation_time_budget_seconds == int(_env(DEMO_V2 / "fixtures" / "spring-ignite-protocol" / "fixture.env")["EXPECTED_GENERATION_BUDGET_SECONDS"])  # the scenario's one expected budget (fixture.env), not a literal here
     assert config.autonomy.contained_execution_required is True and config.runtime_profile is None  # the standard development-profile Demo V2 scenario (S7: containment is the packaged default for every profile), not a security downgrade
     assert config.llm.model == "qwen3-coder:30b"
     assert config.skills.load_global is False and config.skills.load_cwd is False

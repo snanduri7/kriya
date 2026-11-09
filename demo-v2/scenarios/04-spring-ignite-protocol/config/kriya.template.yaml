@@ -11,8 +11,9 @@ autonomy:
   web_lookup_auto_approve: false
   run_verification_enabled: true
   self_correction_loop_enabled: false
-  # Unchanged from the other scenarios. The one historical Ignite run (three units) took 356 s; no measurement justifies a larger budget.
-  generation_time_budget_seconds: 900
+  # Calibrated for this scenario's contained, multi-unit run: the historical host-profile run (three units) took 356 s, but 900 s (Run 1) and 1500 s (Run 2) both ended on the budget; the owner's final value is 2400 s.
+  # The expected value lives in fixtures/spring-ignite-protocol/fixture.env (EXPECTED_GENERATION_BUDGET_SECONDS); a test requires this line to equal it.
+  generation_time_budget_seconds: 2400
 
 search:
   base_url: ""
