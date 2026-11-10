@@ -74,13 +74,47 @@ class RecoveryAction(str, Enum):
     never `RECOVERY_NO_PROGRESS` for an untouched VERIFY participant, since
     nothing was ever asked to change in the first place.
 
-    Deliberately two values, not four (`MAY_CHANGE`/`CONTEXT_ONLY` were
-    considered and explicitly deferred) - matching this codebase's own
-    "add only when a live incident demonstrates the need" discipline; nothing
-    in the PRV-11 incident needed a third state."""
+    MAY_CHANGE (RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001,
+    owner ruling 2026-11-10 - the live incident the deferral waited for): the
+    failure manifested in an artifact that takes part in a recorded
+    cross-subtask DECISION (an `IntegrationRelationship` with `alternatives`
+    and a `selected_alternative`). Decision-carrying IntegrationRelationships
+    identify the authoritative selection and participating artifacts/subtasks
+    but do not currently encode sole-deviator responsibility. Recovery
+    therefore treats structurally eligible participants as ambiguous unless
+    existing ownership evidence independently resolves responsibility: each
+    eligible participant's owner is reopened with the failure evidence and the
+    selected alternative and MAY legitimately return its artifact unchanged.
+    An unchanged MAY_CHANGE owner is neither progress nor a failure of the
+    recovery - the next group still runs; only when NO group changed a
+    recovery target does the cycle stop typed
+    (`RECOVERY_MAY_CHANGE_ALL_UNCHANGED`), never as success. It never
+    promotes to MUST_CHANGE on recurrence, never runs the self-correction
+    loop (raw failure text without the selected decision must not mutate it)
+    and never creates a MUST-FIX cross-owner obligation. Group precedence:
+    MUST_CHANGE > MAY_CHANGE > VERIFY. `CONTEXT_ONLY` stays deferred."""
 
     MUST_CHANGE = "must_change"
+    MAY_CHANGE = "may_change"
     VERIFY = "verify"
+
+
+# The typed stop of a recovery cycle in which every reopened owner was MAY_CHANGE and none changed a recovery target
+# (enforce_loop.py logs it and records it on each owner's plan_recovery_event; never a success).
+RECOVERY_MAY_CHANGE_ALL_UNCHANGED = "RECOVERY_MAY_CHANGE_ALL_UNCHANGED"
+
+# The key under which the enforce loop hands a MAY_CHANGE context request to owner_recovery._build_owner_recovery_
+# context on a COPY of the scope conflict ({"plan": EngineeringPlan, "participants": [RecoveryParticipant, ...]}).
+# The loop reaches owner_recovery only through that function's existing forwarder; the conflict itself never carries it.
+MAY_CHANGE_RECOVERY_REQUEST = "may_change_recovery_request"
+
+# `RecoveryParticipant.owner_resolution_basis` values of an in-scope artifact of an applicable decision relationship
+# that is NOT a reopen target (role READ_ONLY_CONTEXT - visible in the plan's participants, in no group):
+# - its canonical plan owner is the failing subtask itself: its execution path is the existing consumer retry;
+# - its canonical plan owner is a participant that has not completed: not a target while the artifact has no
+#   current bytes (the enforce loop, which owns the plan worktree, refuses the whole recovery when it has).
+RELATIONSHIP_ARTIFACT_HANDLED_BY_CONSUMER_RETRY = "relationship_participant_consumer_retry"
+RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED = "relationship_participant_not_completed"
 
 
 @dataclass(frozen=True)

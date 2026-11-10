@@ -46,6 +46,11 @@ from kriya.tools.tool import ToolEffectBoundary
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.outcome import workspace_commit_failure_fields
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
+from kriya.workflow.recovery_plan import (
+    MAY_CHANGE_RECOVERY_REQUEST,
+    RECOVERY_MAY_CHANGE_ALL_UNCHANGED,
+    RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED,
+)
 from kriya.workflow.resume_support import (
     TOOL_ATTEMPT_ABANDONED,
     TOOL_ATTEMPT_FAILED_TERMINAL,
@@ -1821,7 +1826,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 ),
                 strict_spec_compliance=True,
                 execution_scope=f"subtask={target.id} role={execution_role}",
-                reopened_owner=execution_role == "verification_owner_recovery",
+                # The two reopens the controller accepts only on a byte change of the owner's files: an identical
+                # regeneration is then the unit's ONE-attempt typed stop (VERIFICATION_RETRY_NO_CHANGE_POSSIBLE),
+                # never repair retries on the same answer. For a MAY_CHANGE owner (RECOVERY-SHARED-DECISION-
+                # PARTICIPANTS-CANNOT-MAY-CHANGE-001) that stop is the characterized "legitimately unchanged" signal.
+                reopened_owner=execution_role in ("verification_owner_recovery", "may_change_owner_recovery"),
                 grounding_goal=goal,
                 migration_resolution=migration_resolution,
                 strict_dependency_index=bool(
@@ -2634,12 +2643,76 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # pass) logs nothing, matching the original single-owner
                     # behavior exactly.
                     break
+                # RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001 (class 4): an in-scope artifact of an
+                # applicable decision relationship whose canonical owner has not completed is no recovery target
+                # only while it has no current bytes. An artifact that already exists in the plan worktree (a
+                # brownfield file, residue) can take part in the failure and no completed participant answers for
+                # it: the recovery is refused, exactly like an unresolved owner - never ignored because "unrun".
+                materialized_unowned = sorted(
+                    p.artifact for p in exec_plan.participants
+                    if p.owner_resolution_basis == RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED
+                    and os.path.lexists(os.path.join(plan_workspace_path, p.artifact))
+                )
+                if materialized_unowned:
+                    deps.logger.warning(
+                        "RECOVERY_RELATIONSHIP_ARTIFACT_REFUSED subtask=%s "
+                        "reason=RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED_BUT_MATERIALIZED artifacts=%s - the "
+                        "artifact has current bytes and its relationship participant has not completed; failing "
+                        "closed, no owner will be guessed.",
+                        subtask.id, materialized_unowned,
+                    )
+                    break
                 deps.logger.info(
                     "RECOVERY_EXECUTION_PLAN_STARTED plan_id=%s groups=%s",
                     exec_plan.id, list(exec_plan.group_order),
                 )
                 invoked_group_records: List[Dict[str, Any]] = []
                 plan_locally_accepted = True
+                # MAY_CHANGE bookkeeping of this cycle: groups whose owner was legitimately unchanged, and groups
+                # that count as recovery progress (an accepted MUST_CHANGE / changed MAY_CHANGE owner, or a VERIFY
+                # carry-forward, whose arbiter stays the consumer retry as before).
+                may_change_unchanged_groups: List[str] = []
+                progressed_groups: List[str] = []
+
+                def _fold_recovered_owner_forward(
+                    folded_owner_id: str, folded_position: int, folded_result: Dict[str, Any],
+                    current_plan: EngineeringPlan = plan,
+                ) -> None:
+                    # Group locally accepted - fold its real, on-disk output
+                    # forward before the NEXT group runs. This is what gives
+                    # a later group free candidate visibility into an
+                    # earlier group's fix: _invoke_bounded_subtask already
+                    # writes into plan_workspace_path, the ONE persistent
+                    # git worktree shared by every subtask in this whole
+                    # enforce run (unlike MA9's own in-memory candidate_view,
+                    # which exists only because a single subtask's OWN
+                    # Developer calls don't hit disk until that whole
+                    # attempt's Quality Gates pass - not the situation here,
+                    # see the implementation spec's §2).
+                    for path in folded_result.get("files") or []:
+                        try:
+                            with open(
+                                os.path.join(plan_workspace_path, path), "r",
+                                encoding="utf-8", errors="replace",
+                            ) as fh:
+                                owner_content = fh.read()
+                        except OSError:
+                            continue
+                        projection = deps.project_implementation_source(
+                            owner_content, path,
+                            deps._ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+                            reason="recovered_upstream_subtask",
+                        )
+                        established_file_context[path] = projection.content
+                        established_provenance.record(path, folded_owner_id)
+                    # Correctness Continuity Part C: the reopened owner may
+                    # itself be a relationship's consumer (not just its
+                    # producer) - no-op when it isn't.
+                    deps._evaluate_integration_obligations(
+                        current_plan, obligation_ledger, folded_owner_id, established_file_context, folded_position,
+                        provenance=established_provenance,
+                    )
+
                 for group_id in exec_plan.group_order:
                     group = next(g for g in exec_plan.groups if g.group_id == group_id)
                     exec_plan.active_group_id = group_id
@@ -2651,8 +2724,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         break
                     generation_key = (subtask.id, owner_id, tuple(sorted(required_owner_files)))
                     generation = recovery_generation_by_key.get(generation_key, 0)
+                    # MAY_CHANGE (RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001): the group's
+                    # material-change requirement, its MUST-FIX obligation, its self-correction scope and its
+                    # no-progress fingerprint cover only the files that are NOT MAY_CHANGE. Without a MAY_CHANGE
+                    # participant this is the whole group, exactly as before.
+                    may_change_participants = [
+                        p for p in group.participants if p.recovery_action is deps.RecoveryAction.MAY_CHANGE
+                    ]
+                    must_change_files = [
+                        p.artifact for p in group.participants
+                        if p.recovery_action is not deps.RecoveryAction.MAY_CHANGE
+                    ]
                     candidate_requirement_id = deps._cross_owner_obligation_id(
-                        subtask.id, owner_id, required_owner_files,
+                        subtask.id, owner_id, must_change_files or required_owner_files,
                         scope_conflict.get("failure_type") or "unknown", generation,
                     )
                     # PRV-11 (2026-08-30): MUST_CHANGE vs VERIFY - see
@@ -2661,9 +2745,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # if ANY of its participants is (the group is only as
                     # conservative as its most demanding participant) -
                     # everything below this point branches on it.
+                    # Precedence: MUST_CHANGE > MAY_CHANGE > VERIFY.
                     group_disposition = (
                         deps.RecoveryAction.MUST_CHANGE
                         if any(p.recovery_action is deps.RecoveryAction.MUST_CHANGE for p in group.participants)
+                        else deps.RecoveryAction.MAY_CHANGE if may_change_participants
                         else deps.RecoveryAction.VERIFY
                     )
                     if group_disposition is deps.RecoveryAction.VERIFY:
@@ -2697,6 +2783,146 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "cross_owner_obligation": None,
                             "owner_result": owner_result,
                         })
+                        exec_plan.completed_group_ids = exec_plan.completed_group_ids + (group_id,)
+                        progressed_groups.append(group_id)
+                        continue
+                    if group_disposition is deps.RecoveryAction.MAY_CHANGE:
+                        # Every participant of this group takes part in a recorded integration decision and the
+                        # plan does not say which participant deviates from it (RecoveryAction.MAY_CHANGE). The
+                        # owner is reopened with the failure evidence and the selected alternative, WITHOUT the
+                        # self-correction loop (raw failure text alone must not mutate it) and WITHOUT a MUST-FIX
+                        # obligation, and may legitimately come back unchanged.
+                        invalidated = deps.transitive_subtask_dependents(plan, owner_id)
+                        # Snapshot, then invalidate BEFORE the owner runs (as every reopen does): a crash in between
+                        # leaves the dependents pending - re-executed on resume, never completed over changed bytes.
+                        prior_stage_states = {i: approved_stage_states.get(i) for i in invalidated}
+                        prior_control_states = {i: control_state.subtask_states.get(i) for i in invalidated}
+                        for invalidated_id in invalidated:
+                            approved_stage_states[invalidated_id] = "pending"
+                        approved_stage_states[owner_id] = "in_progress"
+                        control_state = control_state.with_updates(
+                            subtask_states={
+                                **control_state.subtask_states,
+                                **{invalidated_id: "pending" for invalidated_id in invalidated},
+                                owner_id: "in_progress",
+                            },
+                        )
+                        deps.save_approved_plan(
+                            workspace_path, plan.plan_id,
+                            deps.build_approved_plan_document(
+                                plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                                stage_states=approved_stage_states, lifecycle_state="recovering",
+                            ),
+                        )
+                        control_state = _persist_control_state(control_state)
+                        owner_position = order.index(owner_id) + 1
+                        recovery_context = deps._build_owner_recovery_context(
+                            owner_id=owner_id, failed_subtask_id=subtask.id,
+                            required_owner_files=required_owner_files, cross_owner_obligation=None,
+                            scope_conflict={**scope_conflict, MAY_CHANGE_RECOVERY_REQUEST: {
+                                "plan": plan, "participants": may_change_participants,
+                            }},
+                        )
+                        deps.logger.info(
+                            "RECOVERY_GROUP_STARTED plan_id=%s group_id=%s owner=%s",
+                            exec_plan.id, group_id, owner_id,
+                        )
+                        deps.logger.info(
+                            "RECOVERY_MAY_CHANGE_STARTED requirement_id=%s owner=%s generation=%d targets=%s decisions=%s",
+                            candidate_requirement_id, owner_id, generation, sorted(required_owner_files),
+                            sorted({e for p in may_change_participants for e in p.evidence_ids}),
+                        )
+                        # Progress is judged on the DERIVED RECOVERY TARGETS of this group only; the owner's other
+                        # planned files are read as well, solely to know whether any byte it owns was retained.
+                        target_files = sorted(required_owner_files)
+                        owner_files = sorted(
+                            {pf.path for pf in owner.planned_files} | set(required_owner_files)
+                        )
+
+                        def _revisions(paths: List[str]) -> Tuple[str, ...]:
+                            return tuple(
+                                deps.read_file_revision(os.path.join(plan_workspace_path, path)) for path in paths
+                            )
+
+                        targets_before, owner_before = _revisions(target_files), _revisions(owner_files)
+                        owner_result = await _invoke_bounded_subtask(
+                            owner, owner_position, recovery_context=recovery_context,
+                            execution_role="may_change_owner_recovery",
+                        )
+                        targets_after, owner_after = _revisions(target_files), _revisions(owner_files)
+                        owner_undeclared = sorted(
+                            set(owner_result.get("files") or []) - {pf.path for pf in owner.planned_files}
+                        )
+                        target_changed = targets_after != targets_before
+                        # retained-byte truth: what is in the plan worktree and what the unit committed, never a label
+                        bytes_retained = owner_after != owner_before or bool(committed_files(owner_result))
+                        may_change_changed = (
+                            bool(owner_result.get("quality_gates_passed"))
+                            and not owner_undeclared
+                            and target_changed
+                        )
+                        # "Legitimately unchanged" is ONLY the characterized form (tests/test_recovery_may_change_
+                        # characterization.py K1): the unit's one-attempt typed stop for an identical regeneration,
+                        # with every target fingerprint equal and no byte of the owner retained or committed.
+                        may_change_unchanged = (
+                            owner_result.get("no_progress_reason") == deps.VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
+                            and not owner_result.get("quality_gates_passed")
+                            and not target_changed
+                            and not bytes_retained
+                            and not owner_undeclared
+                        )
+                        if not may_change_changed and not bytes_retained:
+                            # Nothing of this owner changed in the candidate: the dependents' earlier evidence still
+                            # describes the bytes they ran against. (A retained off-target write keeps them pending.)
+                            for invalidated_id in invalidated:
+                                approved_stage_states[invalidated_id] = prior_stage_states[invalidated_id]
+                            control_state = control_state.with_updates(
+                                subtask_states={
+                                    **control_state.subtask_states,
+                                    **{i: state for i, state in prior_control_states.items() if state is not None},
+                                },
+                            )
+                            deps.save_approved_plan(
+                                workspace_path, plan.plan_id,
+                                deps.build_approved_plan_document(
+                                    plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                                    stage_states=approved_stage_states, lifecycle_state="recovering",
+                                ),
+                            )
+                            control_state = _persist_control_state(control_state)
+                            invalidated = []
+                        outcome = (
+                            "changed" if may_change_changed else "unchanged" if may_change_unchanged else "failed"
+                        )
+                        deps.logger.info(
+                            "RECOVERY_MAY_CHANGE_%s requirement_id=%s owner=%s generation=%d target_changed=%s "
+                            "gates=%s bytes_retained=%s undeclared=%s dependents_invalidated=%s",
+                            outcome.upper(), candidate_requirement_id, owner_id, generation, target_changed,
+                            bool(owner_result.get("quality_gates_passed")), bytes_retained, owner_undeclared,
+                            list(invalidated),
+                        )
+                        recovery_generation_by_key[generation_key] = generation + 1
+                        invoked_group_records.append({
+                            "owner_id": owner_id,
+                            "required_owner_files": required_owner_files,
+                            "invalidated": invalidated,
+                            "candidate_requirement_id": candidate_requirement_id,
+                            "generation": generation,
+                            "cross_owner_obligation": None,
+                            "owner_result": owner_result,
+                            "may_change_outcome": outcome,
+                        })
+                        if outcome == "failed":
+                            # an off-target write, a gate failure, an undeclared write or any result that is not
+                            # one of the two characterized forms: a group failure, as for any reopened owner
+                            plan_locally_accepted = False
+                            break
+                        if outcome == "changed":
+                            _fold_recovered_owner_forward(owner_id, owner_position, owner_result)
+                            progressed_groups.append(group_id)
+                        else:
+                            # not progress, not a failure of the recovery: the next group still runs
+                            may_change_unchanged_groups.append(group_id)
                         exec_plan.completed_group_ids = exec_plan.completed_group_ids + (group_id,)
                         continue
                     prior_attempts = (
@@ -2748,7 +2974,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         obligation_ledger,
                         originating_subtask_id=subtask.id,
                         owner_subtask_id=owner_id,
-                        required_files=required_owner_files,
+                        required_files=must_change_files,
                         scope_conflict=scope_conflict,
                         generation=generation,
                         revision=len(plan_recovery_events),
@@ -2756,13 +2982,24 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     recovery_context = deps._build_owner_recovery_context(
                         owner_id=owner_id,
                         failed_subtask_id=subtask.id,
-                        required_owner_files=required_owner_files,
+                        required_owner_files=must_change_files,
                         cross_owner_obligation=cross_owner_obligation,
                         scope_conflict=scope_conflict,
                     )
+                    if may_change_participants:
+                        # A mixed group: the MUST-FIX above names only the MUST_CHANGE files; the owner's MAY_CHANGE
+                        # artifacts get their own, change-not-presumed section.
+                        recovery_context = recovery_context + "\n\n" + deps._build_owner_recovery_context(
+                            owner_id=owner_id, failed_subtask_id=subtask.id,
+                            required_owner_files=[p.artifact for p in may_change_participants],
+                            cross_owner_obligation=None,
+                            scope_conflict={**scope_conflict, MAY_CHANGE_RECOVERY_REQUEST: {
+                                "plan": plan, "participants": may_change_participants,
+                            }},
+                        )
                     deps.logger.info(
                         "CROSS_OWNER_RECOVERY_SCHEDULED requirement_id=%s artifact=%s owner_subtask_id=%s",
-                        candidate_requirement_id, sorted(required_owner_files), owner_id,
+                        candidate_requirement_id, sorted(must_change_files), owner_id,
                     )
                     deps.logger.info(
                         "RECOVERY_GROUP_STARTED plan_id=%s group_id=%s owner=%s",
@@ -2794,7 +3031,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     if fingerprint_key not in recovery_candidate_fingerprints:
                         recovery_candidate_fingerprints[fingerprint_key] = tuple(
                             deps.read_file_revision(os.path.join(plan_workspace_path, path))
-                            for path in sorted(required_owner_files)
+                            for path in sorted(must_change_files)
                         )
                     owner_result = None
                     _self_correction_kernel = getattr(deps.workflow_engine, "kernel", None)
@@ -2805,7 +3042,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             plan_workspace_path=plan_workspace_path,
                             workspace_path=workspace_path,
                             owner=owner,
-                            required_owner_files=required_owner_files,
+                            # never a MAY_CHANGE artifact: raw failure text without the selected decision must
+                            # not mutate it (the whole group here when it has none)
+                            required_owner_files=must_change_files,
                             scope_conflict=scope_conflict,
                         )
                     if owner_result is None:
@@ -2834,7 +3073,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # before the SAME unresolved defect surfaced again.
                     candidate_fingerprint = tuple(
                         deps.read_file_revision(os.path.join(plan_workspace_path, path))
-                        for path in sorted(required_owner_files)
+                        for path in sorted(must_change_files)
                     )
                     recovery_no_progress = (
                         bool(owner_result.get("quality_gates_passed"))
@@ -2844,7 +3083,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     owner_local_accepted = (
                         bool(owner_result.get("quality_gates_passed"))
                         and not owner_undeclared
-                        and set(required_owner_files).issubset(owner_written)
+                        and set(must_change_files).issubset(owner_written)
                         and not recovery_no_progress
                     )
                     if recovery_no_progress:
@@ -2879,39 +3118,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         plan_locally_accepted = False
                         break
                     # Group locally accepted - fold its real, on-disk output
-                    # forward before the NEXT group runs. This is what gives
-                    # a later group free candidate visibility into an
-                    # earlier group's fix: _invoke_bounded_subtask already
-                    # writes into plan_workspace_path, the ONE persistent
-                    # git worktree shared by every subtask in this whole
-                    # enforce run (unlike MA9's own in-memory candidate_view,
-                    # which exists only because a single subtask's OWN
-                    # Developer calls don't hit disk until that whole
-                    # attempt's Quality Gates pass - not the situation here,
-                    # see the implementation spec's §2).
-                    for path in owner_result.get("files") or []:
-                        try:
-                            with open(
-                                os.path.join(plan_workspace_path, path), "r",
-                                encoding="utf-8", errors="replace",
-                            ) as fh:
-                                owner_content = fh.read()
-                        except OSError:
-                            continue
-                        projection = deps.project_implementation_source(
-                            owner_content, path,
-                            deps._ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
-                            reason="recovered_upstream_subtask",
-                        )
-                        established_file_context[path] = projection.content
-                        established_provenance.record(path, owner_id)
-                    # Correctness Continuity Part C: the reopened owner may
-                    # itself be a relationship's consumer (not just its
-                    # producer) - no-op when it isn't.
-                    deps._evaluate_integration_obligations(
-                        plan, obligation_ledger, owner_id, established_file_context, owner_position,
-                        provenance=established_provenance,
-                    )
+                    # forward before the NEXT group runs (the body is
+                    # _fold_recovered_owner_forward above, shared with an
+                    # accepted MAY_CHANGE owner).
+                    _fold_recovered_owner_forward(owner_id, owner_position, owner_result)
+                    progressed_groups.append(group_id)
                     exec_plan.completed_group_ids = exec_plan.completed_group_ids + (group_id,)
 
                 # Recovery Execution Contract Invariant 3, generalized
@@ -2936,7 +3147,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 acceptance_precheck: Optional[bool] = None
                 consumer_invoked_this_cycle = False
                 plan_recovery_accepted: Optional[bool] = None
-                if plan_locally_accepted:
+                # Every reopened owner was MAY_CHANGE and none changed a recovery target: nothing new exists for
+                # the consumer to be retried against, and the original failure stands. A typed stop - never a
+                # success, and never a consumer retry without new information.
+                may_change_all_unchanged = bool(
+                    plan_locally_accepted and may_change_unchanged_groups and not progressed_groups
+                )
+                if may_change_all_unchanged:
+                    deps.logger.warning(
+                        "%s plan_id=%s subtask=%s owners=%s - every participant of the recorded integration "
+                        "decision returned its artifact unchanged; no recovery progress, the originating failure "
+                        "stands and the consumer is not retried.",
+                        RECOVERY_MAY_CHANGE_ALL_UNCHANGED, exec_plan.id, subtask.id,
+                        [record["owner_id"] for record in invoked_group_records],
+                    )
+                    plan_recovery_accepted = False
+                elif plan_locally_accepted:
                     all_required_files = sorted(
                         p.artifact for g in exec_plan.groups for p in g.participants
                     )
@@ -3061,6 +3287,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "owner_recovery_passed": bool(plan_recovery_accepted),
                         "requirement_id": candidate_requirement_id,
                         "generation": generation,
+                        # only on a MAY_CHANGE owner's event (every other event is unchanged): what the owner did,
+                        # and the typed stop when no participant changed anything
+                        **({} if record.get("may_change_outcome") is None else {
+                            "recovery_action": deps.RecoveryAction.MAY_CHANGE.value,
+                            "may_change_outcome": record["may_change_outcome"],
+                            "reason_codes": [RECOVERY_MAY_CHANGE_ALL_UNCHANGED] if may_change_all_unchanged else [],
+                        }),
                     })
                     approved_stage_states[owner_id] = "completed" if plan_recovery_accepted else "needs_review"
                     control_state = record_committed_effects(control_state.with_updates(
@@ -3105,8 +3338,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                     subtask_id=owner_id,
                                     status=deps.SubtaskStatus.NEEDS_REVIEW,
                                     execution_method=deps.ExecutionMethod.MODEL.value,
-                                    error="upstream owner failed bounded plan recovery verification",
-                                    reason_codes=("PLAN_RECOVERY_OWNER_FAILED",),
+                                    error=(
+                                        "no participant of the recorded integration decision changed its artifact; "
+                                        "the originating failure stands" if may_change_all_unchanged
+                                        else "upstream owner failed bounded plan recovery verification"
+                                    ),
+                                    reason_codes=(
+                                        (RECOVERY_MAY_CHANGE_ALL_UNCHANGED,) if may_change_all_unchanged
+                                        else ("PLAN_RECOVERY_OWNER_FAILED",)
+                                    ),
                                 )
                                 break
 

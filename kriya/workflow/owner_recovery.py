@@ -53,8 +53,11 @@ from kriya.workflow.obligations import (
     ObligationStatus,
 )
 from kriya.workflow.plan_revision import _plan_scope_conflict_files, _transitive_upstream_ids
-from kriya.workflow.plan_schema import EngineeringPlan, Subtask
+from kriya.workflow.plan_schema import EngineeringPlan, FileAction, Subtask
 from kriya.workflow.recovery_plan import (
+    MAY_CHANGE_RECOVERY_REQUEST,
+    RELATIONSHIP_ARTIFACT_HANDLED_BY_CONSUMER_RETRY,
+    RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED,
     RecoveryAction,
     RecoveryExecutionPlan,
     RecoveryOwnerGroup,
@@ -540,7 +543,21 @@ def _build_owner_recovery_context(
     ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT's own docstring for the
     live incident this closes). Falls back to the original, plainer
     framing only when no ledger was available to record an obligation into
-    (a caller outside structured/enforce execution)."""
+    (a caller outside structured/enforce execution).
+
+    MAY_CHANGE (RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001):
+    the enforce loop reaches this module only through this function's
+    forwarder, so a MAY_CHANGE request arrives as ``scope_conflict
+    [MAY_CHANGE_RECOVERY_REQUEST] = {"plan": ..., "participants": ...}`` on a
+    COPY of the conflict, with no obligation - and is answered by
+    _build_may_change_recovery_context (no MUST FIX, a change is not
+    presumed)."""
+    may_change_request = scope_conflict.get(MAY_CHANGE_RECOVERY_REQUEST)
+    if may_change_request is not None and cross_owner_obligation is None:
+        return _build_may_change_recovery_context(
+            may_change_request["plan"], owner_id=owner_id, failed_subtask_id=failed_subtask_id,
+            participants=may_change_request["participants"], scope_conflict=scope_conflict,
+        )
     if cross_owner_obligation is not None:
         ev = cross_owner_obligation.evidence
         return (
@@ -752,16 +769,26 @@ def derive_recovery_participants(
     cycle already gave it the benefit of the doubt is no longer treated as
     merely "implicated." Otherwise VERIFY. `recovery_generation_by_key`
     defaults to None (treated as empty - generation 0 for everything),
-    matching every other optional-dependency default in this module."""
+    matching every other optional-dependency default in this module.
+
+    MAY_CHANGE (RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001,
+    2026-11-10): a GROUNDED conflict whose located artifact belongs to a
+    participant of a decision-carrying relationship is widened over that
+    relationship's artifacts by _apply_decision_relationships - the located
+    artifact and its co-participants become MAY_CHANGE (never promoted by the
+    generation counter above), and in-scope artifacts that are not reopen
+    targets are returned as READ_ONLY_CONTEXT participants that say why."""
     required_files = _plan_scope_conflict_files(scope_conflict)
     mutation_reason = scope_conflict.get("reason") or ""
     grounded = _participant_evidence_is_grounded(scope_conflict)
     generation_by_key = recovery_generation_by_key or {}
     participants: List[RecoveryParticipant] = []
+    resolutions: Dict[str, OwnerResolution] = {}
     for path in required_files:
         resolution = resolve_effective_artifact_owner(
             plan, path, failed_subtask, order=order, control_state=control_state,
         )
+        resolutions[path] = resolution
         if resolution.owner_subtask_id is None:
             participants.append(RecoveryParticipant(
                 artifact=path, role=RecoveryParticipantRole.READ_ONLY_CONTEXT,
@@ -783,7 +810,231 @@ def derive_recovery_participants(
             mutation_reason=mutation_reason,
             recovery_action=recovery_action,
         ))
-    return tuple(participants)
+    if not grounded:
+        return tuple(participants)
+    return _apply_decision_relationships(
+        plan, tuple(participants), resolutions, failed_subtask,
+        order=order, control_state=control_state, mutation_reason=mutation_reason,
+    )
+
+
+# RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001 (owner rulings 2026-11-10). The reasons an in-scope
+# artifact of an applicable decision relationship refuses the whole recovery (carried in the unresolved participant's
+# ``mutation_reason`` and logged by build_recovery_execution_plan beside SCOPE_RECOVERY_OWNER_UNRESOLVED).
+RELATIONSHIP_ARTIFACT_OWNER_NOT_PARTICIPANT = "RELATIONSHIP_ARTIFACT_OWNER_NOT_PARTICIPANT"
+RELATIONSHIP_ARTIFACT_OWNER_UNRECONCILED = "RELATIONSHIP_ARTIFACT_OWNER_UNRECONCILED"
+
+_TARGET, _NOT_A_TARGET, _REFUSED = "target", "not_a_target", "refused"
+
+
+def _decision_relationships(plan: EngineeringPlan) -> List[Any]:
+    """The plan's relationships that record a cross-subtask DECISION (a declared menu and its one selection -
+    SHARED-DECISION-AUTHORITY-001), in id order. An ordinary producer/consumer relationship, and every plan written
+    before that authority existed, has neither field and is never one of these."""
+    return sorted(
+        (rel for rel in (getattr(plan, "integration_relationships", None) or [])
+         if list(rel.alternatives) and (rel.selected_alternative or "").strip()),
+        key=lambda rel: rel.id,
+    )
+
+
+def _relationship_members(rel: Any) -> Tuple[str, ...]:
+    return tuple(sorted(set(rel.producer_subtask_ids) | set(rel.consumer_subtask_ids)))
+
+
+def _relationship_artifact_scope(plan: EngineeringPlan, rel: Any) -> Tuple[str, ...]:
+    """The artifacts one decision relationship covers: its declared ``participating_artifacts`` when it has any
+    (widening never leaves that scope), otherwise the files its participating subtasks plan to leave in the tree."""
+    if rel.participating_artifacts:
+        return tuple(sorted(set(rel.participating_artifacts)))
+    members = set(_relationship_members(rel))
+    return tuple(sorted({
+        pf.path for st in plan.subtasks if st.id in members
+        for pf in st.planned_files if pf.action != FileAction.DELETE
+    }))
+
+
+def _classify_relationship_artifact(
+    plan: EngineeringPlan, rel: Any, path: str, resolution: OwnerResolution, failed_subtask: Subtask,
+    control_state: Optional[Any],
+) -> Tuple[str, str, str]:
+    """(outcome, basis-or-reason, detail) for ONE in-scope artifact of ONE applicable decision relationship. Every
+    artifact lands in exactly one class; an unresolved effective owner is not by itself an inconsistency:
+
+    1. effective owner is a participant            -> a MAY_CHANGE recovery target;
+    2. effective owner is NOT a participant        -> refused (that owner was never handed the selected decision);
+    3. unresolved, canonical plan owner is the failing subtask (a participant)
+                                                   -> not a target: the existing consumer retry is its path;
+    4. unresolved, canonical plan owner is a participant that has not completed
+                                                   -> not a target HERE; the enforce loop refuses the recovery when
+                                                      the artifact already has bytes in the plan worktree (a
+                                                      brownfield file is never exempt because its owner is unrun);
+    5. anything else unresolved (a completed participant that cannot be reconciled, several canonical owners, no
+       canonical owner, a canonical owner outside the relationship, no execution state to consult) -> refused.
+
+    The canonical plan owner is ``EngineeringPlan.file_owner`` (unique declared owner or none) - never a filename,
+    prose or failure text."""
+    members = _relationship_members(rel)
+    owner_id = resolution.owner_subtask_id
+    if owner_id is not None:
+        if owner_id in members:
+            return _TARGET, resolution.resolution_basis.value, owner_id
+        return (_REFUSED, RELATIONSHIP_ARTIFACT_OWNER_NOT_PARTICIPANT,
+                f"relationship={rel.id} artifact={path} effective_owner={owner_id} participants={list(members)}")
+    canonical = plan.file_owner(path)
+    if canonical is not None and canonical.id in members:
+        if canonical.id == failed_subtask.id:
+            return (_NOT_A_TARGET, RELATIONSHIP_ARTIFACT_HANDLED_BY_CONSUMER_RETRY,
+                    f"relationship={rel.id} artifact={path} owner={canonical.id}: an authoritative relationship "
+                    "participant handled by the consumer retry, not an ownership inconsistency")
+        owner_state = None if control_state is None else control_state.subtask_states.get(canonical.id)
+        if control_state is not None and owner_state != SubtaskStatus.COMPLETED.value:
+            return (_NOT_A_TARGET, RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED,
+                    f"relationship={rel.id} artifact={path} owner={canonical.id} owner_state={owner_state}")
+    return (_REFUSED, RELATIONSHIP_ARTIFACT_OWNER_UNRECONCILED,
+            f"relationship={rel.id} artifact={path} canonical_owner={getattr(canonical, 'id', None)} "
+            f"participants={list(members)}")
+
+
+def _apply_decision_relationships(
+    plan: EngineeringPlan,
+    participants: Tuple[RecoveryParticipant, ...],
+    resolutions: Dict[str, OwnerResolution],
+    failed_subtask: Subtask,
+    *,
+    order: Optional[List[str]],
+    control_state: Optional[Any],
+    mutation_reason: str,
+) -> Tuple[RecoveryParticipant, ...]:
+    """Widen a GROUNDED recovery over the participants of every applicable decision relationship (see
+    RecoveryAction.MAY_CHANGE). A relationship applies only when a located artifact's effective owner is one of its
+    participants and, where it declares ``participating_artifacts``, that artifact is one of them; several applicable
+    relationships contribute independently, in id order (a deterministic union). No applicable relationship: the
+    participants are returned untouched - today's behaviour, for every plan without a recorded decision.
+
+    Each in-scope artifact is classified once per applicable relationship (_classify_relationship_artifact); a
+    refusal by any relationship wins, then a target, then a non-target. Nothing in scope is dropped: a target is a
+    REQUIRED_MUTATION participant with ``recovery_action=MAY_CHANGE`` and the relationship obligation ids in
+    ``evidence_ids``; a non-target is a READ_ONLY_CONTEXT participant whose ``owner_resolution_basis`` says why; a
+    refusal is an ``unresolved`` participant, which build_recovery_execution_plan already fails closed on."""
+    located = [p for p in participants if p.role is RecoveryParticipantRole.REQUIRED_MUTATION]
+    targets: Dict[str, List[str]] = {}
+    target_owner: Dict[str, Tuple[str, str]] = {}
+    non_targets: Dict[str, Tuple[str, str]] = {}
+    refusals: Dict[str, Tuple[str, str]] = {}
+    for rel in _decision_relationships(plan):
+        members = set(_relationship_members(rel))
+        declared_scope = set(rel.participating_artifacts)
+        if not any(
+            p.effective_owner_subtask_id in members and (not declared_scope or p.artifact in declared_scope)
+            for p in located
+        ):
+            continue
+        for path in _relationship_artifact_scope(plan, rel):
+            if path not in resolutions:
+                resolutions[path] = resolve_effective_artifact_owner(
+                    plan, path, failed_subtask, order=order, control_state=control_state,
+                )
+            outcome, basis, detail = _classify_relationship_artifact(
+                plan, rel, path, resolutions[path], failed_subtask, control_state,
+            )
+            if outcome == _TARGET:
+                targets.setdefault(path, []).append(f"plan.integration.{rel.id}")
+                target_owner[path] = (detail, basis)
+            elif outcome == _REFUSED:
+                refusals.setdefault(path, (basis, detail))
+            else:
+                non_targets.setdefault(path, (basis, detail))
+    if not (targets or non_targets or refusals):
+        return participants
+
+    def _participant(path: str, existing: Optional[RecoveryParticipant]) -> RecoveryParticipant:
+        if path in refusals:
+            reason, detail = refusals[path]
+            return RecoveryParticipant(
+                artifact=path, role=RecoveryParticipantRole.READ_ONLY_CONTEXT,
+                effective_owner_subtask_id=None, owner_resolution_basis="unresolved",
+                mutation_reason=f"{reason}: {detail}",
+            )
+        if path in targets:
+            owner_id, basis = target_owner[path]
+            return RecoveryParticipant(
+                artifact=path, role=RecoveryParticipantRole.REQUIRED_MUTATION,
+                effective_owner_subtask_id=owner_id, owner_resolution_basis=basis,
+                mutation_reason=mutation_reason, evidence_ids=tuple(targets[path]),
+                recovery_action=RecoveryAction.MAY_CHANGE,
+            )
+        if existing is not None:
+            return existing
+        basis, detail = non_targets[path]
+        return RecoveryParticipant(
+            artifact=path, role=RecoveryParticipantRole.READ_ONLY_CONTEXT,
+            effective_owner_subtask_id=None, owner_resolution_basis=basis, mutation_reason=detail,
+        )
+
+    named = {p.artifact for p in participants}
+    widened = [_participant(p.artifact, p) for p in participants]
+    widened.extend(
+        _participant(path, None)
+        for path in sorted((set(targets) | set(non_targets) | set(refusals)) - named)
+    )
+    return tuple(widened)
+
+
+def _build_may_change_recovery_context(
+    plan: EngineeringPlan,
+    *,
+    owner_id: str,
+    failed_subtask_id: str,
+    participants: Sequence[RecoveryParticipant],
+    scope_conflict: Dict[str, Any],
+) -> str:
+    """The Developer-facing recovery text for the MAY_CHANGE artifacts of one reopened owner. It keeps the actual
+    failure evidence (the decision constrains the repair, it does not replace the failure), names the authoritative
+    selected alternative of every relationship that made the artifact eligible, and states the two truthful
+    dispositions: the artifact the failure manifested in, and an additional co-participant. It asserts no MUST FIX
+    and creates no obligation - an artifact that already conforms is returned unchanged."""
+    located = set(_plan_scope_conflict_files(scope_conflict))
+    relationships = {f"plan.integration.{rel.id}": rel for rel in _decision_relationships(plan)}
+    decision_ids = sorted({evidence_id for p in participants for evidence_id in p.evidence_ids})
+    decisions = []
+    for evidence_id in decision_ids:
+        rel = relationships.get(evidence_id)
+        if rel is None:
+            continue
+        decisions.append(
+            f"- decision {rel.id}: SELECTED {json.dumps(rel.selected_alternative)} "
+            f"(alternatives considered: {json.dumps(list(rel.alternatives))}). {rel.relationship_statement}"
+        )
+    artifacts = []
+    for participant in sorted(participants, key=lambda p: p.artifact):
+        if participant.artifact in located:
+            artifacts.append(
+                f"- {participant.artifact}: The failure manifested in this owner's scope. Repair it if the failure "
+                "evidence requires a change, while preserving the authoritative selected integration alternative. "
+                "If the relevant artifact already satisfies both the failure evidence and the selected alternative, "
+                "return it unchanged."
+            )
+        else:
+            artifacts.append(
+                f"- {participant.artifact}: This artifact participates in the authoritative selected integration "
+                "alternative. Inspect whether it contributes to the failure; change it only if necessary to restore "
+                "conformance. If it already conforms and does not require repair, return it unchanged."
+            )
+    return (
+        "--- INTEGRATION-DECISION RECOVERY (a change is NOT presumed) ---\n"
+        f"Reopened owner: {owner_id}\n"
+        f"Originating failure: subtask {failed_subtask_id}\n"
+        f"Failure type: {scope_conflict.get('failure_type') or 'unavailable'}\n"
+        f"Grounded failure diagnosis: {scope_conflict.get('reason') or 'unavailable'}\n"
+        f"FAILURE EVIDENCE: {scope_conflict.get('raw_evidence') or 'unavailable'}\n\n"
+        "AUTHORITATIVE SELECTED INTEGRATION ALTERNATIVE (decided once by the plan; do not choose again):\n"
+        + ("\n".join(decisions) or "- unavailable") + "\n\n"
+        "ARTIFACTS OF THIS OWNER UNDER REVIEW:\n"
+        + "\n".join(artifacts) + "\n\n"
+        "The plan does not say which participant of the decision deviates from it, so this owner may be correct "
+        "already. Returning an artifact unchanged means writing its complete current content back exactly as it is."
+    )
 
 
 def _order_recovery_groups(
@@ -901,7 +1152,19 @@ def build_recovery_execution_plan(
             failed_subtask.id, sorted(p.artifact for p in participants),
             sorted(p.artifact for p in unresolved), resolved_owners,
         )
+        for p in unresolved:
+            if p.mutation_reason:
+                # an in-scope artifact of an applicable decision relationship whose ownership is inconsistent with
+                # the relationship's participants (_classify_relationship_artifact, classes 2 and 5)
+                deps.logger.warning("RECOVERY_RELATIONSHIP_ARTIFACT_REFUSED subtask=%s %s",
+                                    failed_subtask.id, p.mutation_reason)
         return None
+    for p in participants:
+        if p.owner_resolution_basis in (
+            RELATIONSHIP_ARTIFACT_HANDLED_BY_CONSUMER_RETRY, RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED,
+        ):
+            deps.logger.info("RECOVERY_RELATIONSHIP_ARTIFACT_NOT_A_TARGET subtask=%s basis=%s %s",
+                             failed_subtask.id, p.owner_resolution_basis, p.mutation_reason)
     groups = _order_recovery_groups(plan, participants)
     if groups is None:
         deps.logger.warning(

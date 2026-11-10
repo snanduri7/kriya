@@ -160,7 +160,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
-    (W, 'WorkflowEngine.run_generation_workflow'): P(20, W, None, ()),
+    (W, 'WorkflowEngine.run_generation_workflow'): P(21, W, None, ()),
     (W, '_direct_terminal_writes'): P(1, W, ((W, 4),), ()),
     (W, '_ensure_repository_indexed'): P(2, W, ((W, 1),), ()),
     (W, '_gate_outcome_proven'): P(1, W, ((W, 2),), ()),
@@ -245,12 +245,12 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # PlanningDeps.assess_planned_edit (one load in workflow_controller._planning_deps); the sites above are the dynamic proof.
     (C, 'assess_planned_edit'): P(3, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
     (C, 'blocking_requirements'): P(1, 'kriya.workflow.requirements', ((C, 1),), ()),
-    (C, 'build_engineering_plan_from_planner_output'): P(71, 'kriya.workflow.plan_schema', ((C, 2),), ()),
+    (C, 'build_engineering_plan_from_planner_output'): P(75, 'kriya.workflow.plan_schema', ((C, 2),), ()),
     (C, 'build_planning_structural_evidence'): P(3, C, (('kriya.workflow.ownership_findings', 1), (C, 1)), ()),
     (C, 'canonicalize_planned_file_actions'): P(1, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     # E11 characterization: +1 site (tests/test_e11_owner_modules.py: one unit grounding per unit, through this name).
     (C, 'collect_unit_grounding'): P(9, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
-    (C, 'create_git_worktree'): P(30, 'kriya.workflow.worktree', ((C, 1),), ()),
+    (C, 'create_git_worktree'): P(33, 'kriya.workflow.worktree', ((C, 1),), ()),
     (C, 'enforce_preserved_reference_terminal_integrity'): P(3, 'kriya.workflow.terminal_gate_service', ((C, 1),), ()),
     (C, 'evaluate_plan_edit_feasibility'): P(5, C, ((C, 1),), ()),
     (C, 'find_migration_incomplete'): P(2, 'kriya.workflow.migration', ((C, 1),), ()),
@@ -261,7 +261,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS'): P(1, C, ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py).
     (C, 'model_capacities'): P(13, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
-    (C, 'parse_planner_structured_output'): P(76, 'kriya.agents.contracts', ((C, 2),), ()),
+    (C, 'parse_planner_structured_output'): P(80, 'kriya.agents.contracts', ((C, 2),), ()),
     (C, 'record_plan_created'): P(1, 'kriya.workflow.subtask_telemetry', ((C, 2),), ()),
     (C, 'remove_git_worktree'): P(10, 'kriya.workflow.worktree', ((C, 1),), ()),
     (C, 'resolve_migration_resolution'): P(4, 'kriya.workflow.migration', ((C, 1),), ()),
@@ -281,7 +281,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E12: 5 -> 2 lookups: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
     # workflow_controller._enforce_deps); the shadow run's load is _shadow_deps' (E12 1/2); the patch sites above
     # are the dynamic proof.
-    (C, 'validate_plan'): P(55, 'kriya.workflow.plan_validation', ((C, 2),), ()),
+    (C, 'validate_plan'): P(58, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     (C, 'validate_stack_contract_artifacts'): P(1, 'kriya.workflow.static_checks', ((C, 1),), ()),
     # E12 characterization: 37 new rows (tests/test_e12_enforce_characterization.py pins the enforce loop's and the shadow
     # run's decisions through these controller names; E12 moves the bodies and reads each through EnforceDeps/ShadowDeps).
@@ -450,7 +450,13 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
     # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
     # Step 6 (artifact registry): +1 C site (commit_verified_candidate: tests/test_artifact_registry_strict_read.py, the registry corrupted right after the source commit)
-    assert totals == {A: 113, W: 101, C: 389}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    # RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001 (tests/test_recovery_may_change_001.py and
+    # tests/test_recovery_may_change_characterization.py - the documented enforce seams, like the shared enforce harnesses; no
+    # new row): +1 W (run_generation_workflow) and +10 C (build_engineering_plan_from_planner_output +3,
+    # parse_planner_structured_output +3, create_git_worktree +2, validate_plan +2). The same four C rows were ALSO each one
+    # short at 77603db before that work (MEASURED on a pristine checkout: 72/31/77/56 against 71/30/76/55; the test that added
+    # them is not traced) - corrected here as well: C 389 -> 393 -> 403.
+    assert totals == {A: 113, W: 102, C: 403}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
     assert len(PATCH_POINTS) == 135  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 
