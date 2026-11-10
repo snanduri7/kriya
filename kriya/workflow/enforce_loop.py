@@ -53,6 +53,7 @@ from kriya.workflow.resume_support import (
     TOOL_EXECUTION_UNRESOLVED,
     TOOL_STARTED_NOT_DURABLE,
 )
+from kriya.workflow.skill_conventions import planning_skill_constraints
 from kriya.workflow.subtask_executor import plannable_tool_names
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport
 
@@ -681,6 +682,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "Set requirement_ids on each subtask to the REQ ids it serves, using only these ids. "
             "Never drop, merge or reword a requirement: one no subtask serves stays open."
         ))
+        # SHARED-DECISION-AUTHORITY-001: the skills applicable to this goal, selected and rendered by the same two functions the
+        # Developer-side analysis uses (kriya/workflow/skill_conventions.py), so the Planner sees the constraint the Developers will
+        # be expected to obey and can make a cross-subtask choice between a skill's mutually exclusive alternatives ONCE, in an
+        # integration relationship. Lossless and never trimmed (a request that cannot hold it is a typed dispatch refusal, not a
+        # silent drop); only skills applicable to this goal; the same failure mode as the Developer-side load (not swallowed).
+        planning_skill_text, planning_skill_names = (
+            planning_skill_constraints(kernel_config, workspace_path, goal, skill_engine=legacy_kwargs.get("skill_engine_override"))
+            if kernel_config is not None else ("", []))   # no configuration, no skills root to read
+        if planning_skill_text:
+            authoritative_planner_request += planning_skill_text
+            deps.logger.info("Planner given %d applicable skill(s): %s", len(planning_skill_names), ", ".join(planning_skill_names))
         # AUTH-GOAL-CONTAMINATION-001: retrieved reference text informs the
         # decomposition as fenced, untrusted context, appended after every
         # goal-derived section (initial and repair requests alike). Nothing
@@ -1199,6 +1211,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     validation_evidence=prompt_validation_evidence,
                     available_tool_names=planned_tool_names,
                 )
+                # The repair round sees the same applicable skills: a selection is corrected against the skill's own alternatives.
+                repair_prompt += planning_skill_text
                 repair_prompts = planner_prompts(repair_prompt)
                 if repair_prompts is not None:
                     repair_prompt = repair_prompts.first()

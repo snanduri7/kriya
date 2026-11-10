@@ -277,6 +277,43 @@ def build_subtask_constraint_context(original_goal: str) -> str:
     )
 
 
+INTEGRATION_CONTRACT_AUTHORITY = (
+    "Every integration contract below was fixed by the plan and binds each subtask it names. They are AUTHORITATIVE for "
+    "this stage, unlike skill text, which is advisory about how to implement. Where a contract records a decision "
+    "(alternatives and selected), implement exactly the selected alternative and no other, even when an applicable "
+    "skill allows another; the skill shows how to implement the selected alternative, it does not choose between "
+    "them. Do not infer the choice from another file's content."
+)
+
+
+def integration_contracts_for(plan: EngineeringPlan, subtask_id: str) -> List[Dict[str, Any]]:
+    """The plan's integration relationships that name ``subtask_id`` as a producer or a consumer, as the contracts its
+    Developer is handed (SHARED-DECISION-AUTHORITY-001). The single reader of the relationship seam for Developer
+    context: every participant gets every relationship that names it, rendered the same way."""
+    contracts: List[Dict[str, Any]] = []
+    for rel in plan.integration_relationships:
+        produces = subtask_id in rel.producer_subtask_ids
+        consumes = subtask_id in rel.consumer_subtask_ids
+        if not (produces or consumes):
+            continue
+        contract: Dict[str, Any] = {
+            "id": rel.id,
+            "kind": rel.kind.value,
+            "this_subtask_is": "producer and consumer" if produces and consumes else "producer" if produces else "consumer",
+            "producer_subtasks": list(rel.producer_subtask_ids),
+            "consumer_subtasks": list(rel.consumer_subtask_ids),
+            "statement": rel.relationship_statement,
+        }
+        if rel.participating_artifacts:
+            contract["artifacts"] = list(rel.participating_artifacts)
+        if rel.acceptance_condition:
+            contract["acceptance_condition"] = rel.acceptance_condition
+        if rel.alternatives or rel.selected_alternative:
+            contract["decision"] = {"alternatives": list(rel.alternatives), "selected": rel.selected_alternative}
+        contracts.append(contract)
+    return contracts
+
+
 def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> str:
     """Render the plan-level semantic contract for one bounded stage."""
     providers = {
@@ -324,6 +361,11 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
             if owns_test_artifact and runtime_owner_ids else None
         ),
     }
+    contracts = integration_contracts_for(plan, subtask.id)
+    if contracts:
+        # Only when the plan names this subtask in a relationship, so every other context is exactly as it was.
+        payload["integration_contracts"] = contracts
+        payload["integration_contract_authority"] = INTEGRATION_CONTRACT_AUTHORITY
     return "--- bounded subtask semantic context ---\n" + json.dumps(payload, indent=2, sort_keys=True)
 
 
@@ -424,7 +466,15 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "(a real live incident: a storage-service subtask and a main-application subtask that reads/"
     "writes storage each passed their own local checks while the main application never actually "
     "used the storage service it depended on). Omit the list entirely when no subtask's output is "
-    "meant to be directly used by another's code - most plans need none."
+    "meant to be directly used by another's code - most plans need none. "
+    "When an applicable skill (given to you under \"Applicable skill constraints\") presents mutually exclusive "
+    "alternatives and the choice affects more than one subtask, choose exactly ONE alternative now: record it in an "
+    "integration_relationships entry that names every affected subtask in producer_subtask_ids/consumer_subtask_ids, "
+    "list the skill's alternatives as it states them in \"alternatives\", and give your single choice, copied exactly "
+    "from that list, in \"selected_alternative\". The entry's id identifies the decision: never record two different "
+    "selections under one id. Do not record a decision for a choice only one subtask uses, or for unrelated choices - "
+    "those stay local to their subtask. The subtasks you plan are handed your selection and must implement it, not "
+    "choose again."
 )
 
 

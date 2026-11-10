@@ -568,7 +568,10 @@ def test_no_checkpoint_or_resume_code_can_carry_a_held_verification_across_a_res
     resume reader, a serializer), this fails and the persistence semantics must be decided on purpose."""
     root = pathlib.Path(__file__).resolve().parents[1] / "kriya"
     allowed = {"skills/skill.py", "workflow/state.py", "workflow/attempt_lifecycle.py", "workflow/runtime_verification.py",
-               "workflow/workflow.py", "workflow/enforce_loop.py", "workflow/stage_analysis.py", "workflow/attempt.py"}
+               "workflow/workflow.py", "workflow/enforce_loop.py", "workflow/stage_analysis.py", "workflow/attempt.py",
+               # SHARED-DECISION-AUTHORITY-001: the skill rendering moved here verbatim from stage_analysis; it only READS the
+               # in-memory reclassification (reclassify_held_rules) to render a skill's rules, it never persists a held verification.
+               "workflow/skill_conventions.py"}
     names = ("pending_skill_verifications", "_held_verifications", "hold_verifications", "HeldSkillVerification",
              "is_effectively_verified", "reclassify_held_rules", "apply_held_verifications", "discard_held_verifications")
     referencing = {path.relative_to(root).as_posix() for path in root.rglob("*.py")

@@ -379,10 +379,11 @@ def test_a_fallback_review_request_names_the_files_of_its_batch_it_could_not_car
 
 def test_the_enforce_planner_refits_its_reference_for_each_candidate(tmp_path):
     """The first request and the repair round each carry a CandidatePrompts:
-    a 12K fallback's request is refitted to its own room."""
+    a small fallback's request is refitted to its own room. (13 K: the window is sized so the reference only partly fits beside
+    the Planner system prompt, which grew by the cross-subtask choice rule, SHARED-DECISION-AUTHORITY-001.)"""
     from kriya.workflow.workflow_controller import AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
 
-    small = FallbackModelConfig(model=FALLBACK, context_window=12288)
+    small = FallbackModelConfig(model=FALLBACK, context_window=13312)
     calls, cfg, result = _enforce_calls(tmp_path, 32768, REFERENCE * 8)
     assert result.legacy_result.get("quality_gates_passed") is True and len(calls) == 2
     capacity = budget.candidate_request_capacity(cfg, small, "planner", max_tokens_override=cfg.llm.planner_max_tokens)

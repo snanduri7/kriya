@@ -23,6 +23,7 @@ from kriya.repository.project_view import build_current_project_view, project_vi
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.skill_conventions import render_skill_conventions, skill_applies_to_goal
 from kriya.workflow.stage_context import StageContext, StageDeps
 from kriya.workflow.toolchain import _java_toolchain_fact
 from kriya.workflow.untrusted_context import fence_untrusted_reference
@@ -145,58 +146,18 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
             )
         convention_prompt += "==========================================\n"
     for skill in se.list_skills():
-        # Check matches with repository facts (dependencies and frameworks) -
-        # shared with kriya/knowledge/channels/repo_manifest.py so both call
-        # sites use one implementation of "is this skill relevant to this repo".
-        is_relevant = (
-            _mentions_term(goal, skill.name) or
-            any(_mentions_term(goal, tag) for tag in skill.tags) or
-            skill.name.lower() == f"auto-{repo_slug}" or
-            _fact_match(skill, repo_model)
-        )
-            
-        # Check version-range compatibility, and (independently of any
-        # range constraint) whether this goal's mentioned version has
-        # drifted from what the skill was last verified against - both
-        # need the goal's extracted library/version, computed once here
-        # rather than gating the extraction behind supported_versions
-        # != "*" the way the range check alone used to.
-        if is_relevant:
-            libs = extract_library_versions(goal)
-            for lib, ver in libs:
-                if _mentions_term(skill.name, lib) or any(_mentions_term(lib, t) for t in skill.tags):
-                    if skill.supported_versions != "*":
-                        if not is_version_supported(ver, skill.supported_versions):
-                            is_relevant = False
-                            logger.info(f"Skipping skill '{skill.name}' because version '{ver}' does not satisfy constraint '{skill.supported_versions}'")
-                            break
-                    staleness = _skill_staleness_warning(skill, lib, ver)
-                    if staleness:
-                        skill_staleness_warnings.append(staleness)
-                        logger.info(f"Skill staleness: {staleness}")
-
+        # The selection and rendering are kriya/workflow/skill_conventions.py (SHARED-DECISION-AUTHORITY-001): the
+        # Planner is given the same applicable skills through the same two functions, so there is one selection path.
+        is_relevant, staleness_warnings = skill_applies_to_goal(
+            skill, goal, repo_slug=repo_slug, repo_model=repo_model, mentions_term=_mentions_term, fact_match=_fact_match,
+            extract_library_versions=extract_library_versions, is_version_supported=is_version_supported,
+            staleness_warning=_skill_staleness_warning, logger=logger)
+        skill_staleness_warnings.extend(staleness_warnings)
         if is_relevant:
             active_skills.append(skill.name)
-            if skill.rules or skill.instructions:
-                convention_prompt += f"\n\n=== Engineering Skill Conventions: {skill.name} ===\n"
-                if skill.rules:
-                    trusted_rules, unverified_rules = _split_rules_by_verification(skill)
-                    # P-B: a rule proven by a passing run of THIS run is trusted now, though its provenance flips only at the terminal boundary
-                    trusted_rules, unverified_rules = se.reclassify_held_rules(skill.name, trusted_rules, unverified_rules)
-                    if trusted_rules:
-                        convention_prompt += "Rules:\n" + "\n".join(f"- {r}" for r in trusted_rules) + "\n"
-                    if unverified_rules:
-                        convention_prompt += (
-                            "Unverified Rules (auto-extracted, not yet proven by a passing run - "
-                            "use with appropriate caution, prefer Rules above if they conflict):\n"
-                            + "\n".join(f"- {r}" for r in unverified_rules) + "\n"
-                        )
-                if skill.instructions:
-                    convention_prompt += f"Instructions:\n{skill.instructions}\n"
-                if skill.examples:
-                    convention_prompt += "Examples:\n"
-                    for basename, content in skill.examples.items():
-                        convention_prompt += f"=== Example File: {basename} ===\n{content}\n"
+            rendered = render_skill_conventions(skill, se, _split_rules_by_verification)
+            if rendered:
+                convention_prompt += rendered
                 logger.info(f"Loaded engineering skill '{skill.name}' for generation context.")
 
     # Names of every skill-gap candidate (Stage 1.2 goal-text-derived, Stage 2B

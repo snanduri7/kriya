@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -442,6 +442,57 @@ def planned_file_action_mismatches(structured_plan: Any, present_paths: Iterable
             if planned.action != FileAction.CREATE and planned.path not in present:
                 errors.append(planned_file_action_mismatch_error(subtask.id, planned.path, planned.action.value))
     return errors
+
+
+INTEGRATION_DECISION_SELECTION_MISSING = "INTEGRATION_DECISION_SELECTION_MISSING"
+INTEGRATION_DECISION_SELECTION_INVALID = "INTEGRATION_DECISION_SELECTION_INVALID"
+INTEGRATION_DECISION_CONFLICT = "INTEGRATION_DECISION_CONFLICT"
+
+
+def integration_decision_findings(relationships: Sequence[Any]) -> List[Tuple[str, str]]:
+    """Structural findings (reason code, message) about the cross-subtask decisions the plan records
+    (SHARED-DECISION-AUTHORITY-001). Cheap and exact, never semantic:
+
+    - a relationship that declares ``alternatives`` records a choice, so it must name at least two distinct, non-blank
+      alternatives and exactly one ``selected_alternative`` equal to one of them (a declared choice with no selection
+      is MISSING; a malformed menu or a selection outside it is INVALID);
+    - one relationship id is one decision: two entries with the same id and different selections are a CONFLICT.
+    A relationship that records no ``alternatives`` is a plain integration relationship and is not examined here."""
+    findings: List[Tuple[str, str]] = []
+    selections: Dict[str, str] = {}
+    conflicted: Set[str] = set()
+    for rel in relationships:
+        selected = rel.selected_alternative
+        if rel.id in selections and selections[rel.id] != selected and rel.id not in conflicted:
+            conflicted.add(rel.id)
+            findings.append((
+                INTEGRATION_DECISION_CONFLICT,
+                f"integration relationship {rel.id!r} records two different selections "
+                f"({selections[rel.id]!r} and {selected!r}); one relationship id is one decision",
+            ))
+        selections.setdefault(rel.id, selected)
+        if not rel.alternatives:
+            continue
+        distinct = set(rel.alternatives)
+        if "" in distinct or len(distinct) != len(rel.alternatives) or len(distinct) < 2:
+            findings.append((
+                INTEGRATION_DECISION_SELECTION_INVALID,
+                f"integration relationship {rel.id!r} declares alternatives {list(rel.alternatives)!r}; a choice "
+                "needs at least two distinct, non-blank alternatives",
+            ))
+        elif not selected:
+            findings.append((
+                INTEGRATION_DECISION_SELECTION_MISSING,
+                f"integration relationship {rel.id!r} declares alternatives {list(rel.alternatives)!r} but "
+                "selects none; the plan must select exactly one before implementation",
+            ))
+        elif selected not in distinct:
+            findings.append((
+                INTEGRATION_DECISION_SELECTION_INVALID,
+                f"integration relationship {rel.id!r} selects {selected!r}, which is not one of its alternatives "
+                f"{list(rel.alternatives)!r}",
+            ))
+    return findings
 
 
 async def validate_plan(
@@ -1028,6 +1079,11 @@ async def validate_plan(
     # id, never inferred from free text, same discipline as the global-
     # invariant reference check just above.
     subtask_ids = {st.id for st in plan.subtasks}
+    # SHARED-DECISION-AUTHORITY-001: a recorded cross-subtask decision is structurally well formed or the plan is
+    # repaired - never resolved by order or "last wins", and never left for the Developers to choose.
+    for code, message in integration_decision_findings(plan.integration_relationships):
+        errors.append(message)
+        reason_codes.append(code)
     for rel in plan.integration_relationships:
         unknown_producer_ids = sorted(set(rel.producer_subtask_ids) - subtask_ids)
         unknown_consumer_ids = sorted(set(rel.consumer_subtask_ids) - subtask_ids)

@@ -112,6 +112,9 @@ PLANNER_VALIDATION_FAILURE_CODES = frozenset({
     "UNKNOWN_GLOBAL_INVARIANT", "SUBTASK_REQUIREMENT_UNPROVIDED", "SEMANTIC_DEPENDENCY_EDGE_MISSING", "SEMANTIC_DEPENDENCY_EDGE_CONFLICT",
     "PLANNED_ARTIFACT_PREREQUISITE_INVALID", "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED",
     "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP", "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK",
+    # SHARED-DECISION-AUTHORITY-001: a recorded cross-subtask choice with no selection, a malformed menu or selection,
+    # or two selections under one id; dedicated guidance asks the Planner to select exactly once.
+    "INTEGRATION_DECISION_SELECTION_MISSING", "INTEGRATION_DECISION_SELECTION_INVALID", "INTEGRATION_DECISION_CONFLICT",
     "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM", "MODEL_SUBTASK_MISSING_PLANNED_FILES",
     "VERIFICATION_EVIDENCE_PATH_MISSING", "MUTATION_UNIT_ACCEPTANCE_PATH_MISSING",
     "PLAN_VERIFICATION_SCOPE_UNJUSTIFIED", "PLAN_REQUIREMENT_ID_UNKNOWN",
@@ -839,6 +842,17 @@ def build_structured_plan_repair_prompt(
             "producer or consumer subtask id: replace that id with a real subtask id from this "
             "plan's own subtasks, or remove the relationship entirely if it no longer applies. Do "
             "not invent a new subtask solely to satisfy a stale relationship id.\n"
+        )
+    if {"INTEGRATION_DECISION_SELECTION_MISSING", "INTEGRATION_DECISION_SELECTION_INVALID",
+            "INTEGRATION_DECISION_CONFLICT"} & set(reason_codes):
+        targeted_correction += (
+            "- For each integration_relationships entry the errors name as recording a cross-subtask choice "
+            "incorrectly: the entry's alternatives must list at least two distinct alternatives exactly as the "
+            "applicable skill states them, and selected_alternative must be exactly ONE of those strings, chosen by you "
+            "here so that no subtask has to choose again. Do not leave selected_alternative blank, do not select "
+            "something that is not in alternatives, and do not record two different selections under one relationship "
+            "id (one id is one decision). If the choice does not actually span more than one subtask, remove "
+            "alternatives and selected_alternative from the entry.\n"
         )
     if "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM" in reason_codes:
         targeted_correction += (

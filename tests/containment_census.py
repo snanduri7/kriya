@@ -230,6 +230,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_prd032_terminal_commit_stop.py': ('S', 'M'),
  'tests/test_prd033_events_and_cli.py': ('S', 'M'),
  'tests/test_reviewer_bound_001.py': ('S', 'M'),
+ 'tests/test_shared_decision_authority_001.py': ('S', 'M'),
  'tests/test_prd036_release_gate.py': ('N', 'F'),
  'tests/test_production_doctor.py': ('N', 'C'),
  'tests/test_prompt_budget_fit_001ab.py': ('S', 'M'),

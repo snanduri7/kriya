@@ -551,7 +551,9 @@ def test_the_enforce_planner_fits_its_reference_on_the_first_and_every_repair_re
     from kriya.workflow.workflow_controller import AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
 
     reference = REFERENCE * 8
-    requests, capacity, result = _enforce(tmp_path, 12288, reference)
+    # The window is sized so the fenced reference only partly fits beside the Planner system prompt; the prompt grew by the
+    # cross-subtask choice rule (SHARED-DECISION-AUTHORITY-001), so the same tight room is 1 K larger.
+    requests, capacity, result = _enforce(tmp_path, 13312, reference)
     assert len(requests) == 2  # the first request and one repair round
     for request in requests:
         assert UNTRUSTED_REFERENCE_BEGIN in request

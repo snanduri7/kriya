@@ -495,6 +495,14 @@ class IntegrationRelationship(BaseModel):
     participating_artifacts: List[str] = Field(default_factory=list)
     relationship_statement: str
     acceptance_condition: str = ""
+    # SHARED-DECISION-AUTHORITY-001 (owner ruling 2026-11-10): when an applicable skill offers mutually exclusive
+    # alternatives and the choice spans these subtasks, the Planner records the menu (``alternatives``) and its single
+    # choice (``selected_alternative``) HERE, once; the participating Developers are handed it and implement it, they do
+    # not choose again. Both optional (a relationship that records no decision is unchanged). The relationship ``id`` is
+    # the identity of the decision: validate_plan requires a declared menu to have exactly one selection from it and
+    # refuses two different selections under one id.
+    alternatives: List[str] = Field(default_factory=list)
+    selected_alternative: str = ""
 
     @field_validator("id")
     @classmethod
@@ -503,6 +511,16 @@ class IntegrationRelationship(BaseModel):
         if not v:
             raise ValueError("integration relationship id must not be blank")
         return v
+
+    @field_validator("alternatives")
+    @classmethod
+    def _strip_alternatives(cls, v: List[str]) -> List[str]:
+        return [(item or "").strip() for item in v]
+
+    @field_validator("selected_alternative")
+    @classmethod
+    def _strip_selected(cls, v: str) -> str:
+        return (v or "").strip()
 
     @field_validator("relationship_statement")
     @classmethod
