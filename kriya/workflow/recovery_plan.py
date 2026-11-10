@@ -103,11 +103,6 @@ class RecoveryAction(str, Enum):
 # (enforce_loop.py logs it and records it on each owner's plan_recovery_event; never a success).
 RECOVERY_MAY_CHANGE_ALL_UNCHANGED = "RECOVERY_MAY_CHANGE_ALL_UNCHANGED"
 
-# The key under which the enforce loop hands a MAY_CHANGE context request to owner_recovery._build_owner_recovery_
-# context on a COPY of the scope conflict ({"plan": EngineeringPlan, "participants": [RecoveryParticipant, ...]}).
-# The loop reaches owner_recovery only through that function's existing forwarder; the conflict itself never carries it.
-MAY_CHANGE_RECOVERY_REQUEST = "may_change_recovery_request"
-
 # `RecoveryParticipant.owner_resolution_basis` values of an in-scope artifact of an applicable decision relationship
 # that is NOT a reopen target (role READ_ONLY_CONTEXT - visible in the plan's participants, in no group):
 # - its canonical plan owner is the failing subtask itself: its execution path is the existing consumer retry;

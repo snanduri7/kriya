@@ -11,16 +11,19 @@ The enforce loop is the real one; each unit (``run_generation_workflow``) is scr
 planning/recovery controls - they prove what the recovery does with a given Developer outcome, never which outcome a
 live model produces. The outcome shapes are the ones measured in tests/test_recovery_may_change_characterization.py.
 """
+import ast
 import logging
 import subprocess
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _strict_doubles import strict_config, strict_kernel
 
+import kriya
 from kriya.control.persistence import load_control_state
 from kriya.control.state import ControlState
-from kriya.workflow import owner_recovery
+from kriya.workflow import enforce_loop, owner_recovery, recovery_plan, workflow_controller
 from kriya.workflow.plan_schema import EngineeringPlan
 from kriya.workflow.plan_validation import PlanValidationResult
 from kriya.workflow.recovery_plan import (
@@ -662,3 +665,157 @@ def test_class5_every_other_unresolved_in_scope_artifact_fails_closed(case):
     # one refused artifact refuses the whole recovery plan (the existing unresolved-owner refusal)
     assert [p for p in participants if p.owner_resolution_basis == "unresolved"] == [refused]
     assert build_recovery_execution_plan(plan, _conflict(["cons.py"]), plan.subtask_by_id("v")) is None
+
+
+# --- The context transport: one explicit controller forwarder; a scope conflict is failure evidence, never a request ---
+
+REMOVED_TRANSPORT_KEY = "may_change_recovery_request"
+
+
+async def _execute_spying_on_the_context_builders(tmp_path, plan, *, conflicts, recovery):
+    """The run, plus what reached each of owner_recovery's two context builders (through the controller's forwarders)
+    and the recovery execution plans the loop built."""
+    real_may, real_plain = owner_recovery._build_may_change_recovery_context, owner_recovery._build_owner_recovery_context
+    real_exec_plan = workflow_controller.build_recovery_execution_plan
+    may_calls, plain_calls, exec_plans = [], [], []
+
+    def spy_may(*args, **kwargs):
+        text = real_may(*args, **kwargs)
+        may_calls.append({"args": args, "kwargs": kwargs, "text": text})
+        return text
+
+    def spy_plain(*args, **kwargs):
+        text = real_plain(*args, **kwargs)
+        plain_calls.append({"args": args, "kwargs": kwargs, "text": text})
+        return text
+
+    def spy_exec_plan(*args, **kwargs):
+        built = real_exec_plan(*args, **kwargs)
+        if built is not None:  # the loop asks after every unit; a unit without a conflict has no recovery plan
+            exec_plans.append(built)
+        return built
+
+    with patch.object(owner_recovery, "_build_may_change_recovery_context", spy_may), \
+         patch.object(owner_recovery, "_build_owner_recovery_context", spy_plain), \
+         patch.object(workflow_controller, "build_recovery_execution_plan", spy_exec_plan):
+        result, calls = await _execute(tmp_path, plan, conflicts=conflicts, recovery=recovery)
+    return result, calls, may_calls, plain_calls, exec_plans
+
+
+def _may_change_participants_of(exec_plan, owner_id):
+    return [p for p in exec_plan.participants
+            if p.effective_owner_subtask_id == owner_id and p.recovery_action is RecoveryAction.MAY_CHANGE]
+
+
+@pytest.mark.asyncio
+async def test_the_may_change_request_reaches_the_canonical_builder_with_exactly_its_inputs(tmp_path):
+    """Transport control: for every MAY_CHANGE owner the loop calls owner_recovery._build_may_change_recovery_context
+    (the canonical builder) with the run's plan, the owner, the failing subtask, that owner's MAY_CHANGE participants
+    of the recovery plan (decision evidence included) and the scope conflict AS IT IS - and what the builder returns
+    is the Developer's recovery block, byte for byte. The MUST-FIX builder is not involved."""
+    plan = _plan()
+    _result, calls, may_calls, plain_calls, exec_plans = await _execute_spying_on_the_context_builders(
+        tmp_path, plan, conflicts={"v": [["cons.py"]]}, recovery={"p": ["unchanged"], "c": ["changed"]})
+    (exec_plan,) = exec_plans
+    assert [c["kwargs"]["owner_id"] for c in may_calls] == ["p", "c"] and plain_calls == []
+    blocks = {c["unit"]: c["kwargs"]["recovery_contract_block"] for c in calls if c["role"] == MAY}
+    for call in may_calls:
+        owner_id = call["kwargs"]["owner_id"]
+        expected_participants = _may_change_participants_of(exec_plan, owner_id)
+        assert len(expected_participants) == 1 and expected_participants[0].evidence_ids == ("plan.integration.r1",)
+        assert call["args"] == (plan,)
+        assert call["kwargs"] == {
+            "owner_id": owner_id, "failed_subtask_id": "v", "participants": expected_participants,
+            "scope_conflict": _conflict(["cons.py"]),
+        }
+        assert all(sent is planned for sent, planned in
+                   zip(call["kwargs"]["participants"], expected_participants, strict=True))
+        assert blocks[owner_id] == call["text"]
+        assert call["text"].startswith("--- INTEGRATION-DECISION RECOVERY (a change is NOT presumed) ---\n")
+        assert 'decision r1: SELECTED "declarative"' in call["text"] and EVIDENCE in call["text"]
+
+
+@pytest.mark.asyncio
+async def test_a_mixed_group_asks_each_builder_once_and_neither_conflict_carries_a_request(tmp_path):
+    plan = _mixed_plan()
+    conflict = _conflict(["cons.py", "extra.py"])
+    _result, calls, may_calls, plain_calls, exec_plans = await _execute_spying_on_the_context_builders(
+        tmp_path, plan, conflicts={"v": [["cons.py", "extra.py"]]},
+        recovery={"p": ["unchanged"], "c": [("changed", ["extra.py"])]})
+    (exec_plan,) = exec_plans
+    assert [c["kwargs"]["owner_id"] for c in may_calls] == ["p", "c"]
+    (plain,) = plain_calls
+    assert plain["kwargs"]["owner_id"] == "c" and plain["kwargs"]["required_owner_files"] == ["extra.py"]
+    assert plain["kwargs"]["cross_owner_obligation"] is not None
+    assert plain["kwargs"]["scope_conflict"] == conflict
+    mixed = may_calls[1]
+    assert mixed["args"] == (plan,) and mixed["kwargs"] == {
+        "owner_id": "c", "failed_subtask_id": "v", "participants": _may_change_participants_of(exec_plan, "c"),
+        "scope_conflict": conflict,
+    }
+    assert [p.artifact for p in mixed["kwargs"]["participants"]] == ["cons.py"]
+    (developer,) = [c for c in calls if (c["unit"], c["role"]) == ("c", MUST)]
+    assert developer["kwargs"]["recovery_contract_block"] == plain["text"] + "\n\n" + mixed["text"]
+
+
+def test_the_controller_forwarder_is_pure_transport_to_the_owner_recovery_builder():
+    plan = _plan()
+    conflict = _conflict(["cons.py"])
+    participants = _may_change_participants_of(
+        build_recovery_execution_plan(plan, conflict, plan.subtask_by_id("v")), "c")
+    assert participants
+    with patch.object(owner_recovery, "_build_may_change_recovery_context", return_value="the builder's text") as body:
+        forwarded = workflow_controller._build_may_change_recovery_context(
+            plan, owner_id="c", failed_subtask_id="v", participants=participants, scope_conflict=conflict)
+    assert forwarded == "the builder's text"
+    body.assert_called_once_with(
+        plan, owner_id="c", failed_subtask_id="v", participants=participants, scope_conflict=conflict)
+    sent = body.call_args
+    assert sent.args[0] is plan and sent.kwargs["participants"] is participants
+    assert sent.kwargs["scope_conflict"] is conflict
+    # unpatched: the forwarder's answer is the owner's answer
+    assert workflow_controller._build_may_change_recovery_context(
+        plan, owner_id="c", failed_subtask_id="v", participants=participants, scope_conflict=conflict,
+    ) == owner_recovery._build_may_change_recovery_context(
+        plan, owner_id="c", failed_subtask_id="v", participants=participants, scope_conflict=conflict)
+
+
+def test_a_scope_conflict_cannot_carry_a_may_change_request():
+    """Negative control: the removed transport key on a scope conflict is inert - the MUST-FIX builder neither reads
+    it nor reaches the MAY_CHANGE builder - and nothing in the product spells it."""
+    plan = _plan()
+    conflict = _conflict(["cons.py"])
+    participants = build_recovery_execution_plan(plan, conflict, plan.subtask_by_id("v")).participants
+    smuggled = {**conflict, REMOVED_TRANSPORT_KEY: {"plan": plan, "participants": participants}}
+    arguments = {"owner_id": "c", "failed_subtask_id": "v", "required_owner_files": ["cons.py"],
+                 "cross_owner_obligation": None}
+    with patch.object(owner_recovery, "_build_may_change_recovery_context") as may_change_builder:
+        text = owner_recovery._build_owner_recovery_context(scope_conflict=smuggled, **arguments)
+        via_controller = workflow_controller._build_owner_recovery_context(scope_conflict=smuggled, **arguments)
+    may_change_builder.assert_not_called()
+    assert text == via_controller == owner_recovery._build_owner_recovery_context(scope_conflict=conflict, **arguments)
+    assert text.startswith("--- authoritative plan recovery ---\n") and "INTEGRATION-DECISION" not in text
+    assert not hasattr(recovery_plan, "MAY_CHANGE_RECOVERY_REQUEST")
+    product = [*Path(kriya.__file__).parent.rglob("*.py"),
+               *(Path(kriya.__file__).parent.parent / "plugins").rglob("*.py")]
+    assert len(product) > 100
+    assert [str(path) for path in product
+            if REMOVED_TRANSPORT_KEY in path.read_text(encoding="utf-8").lower()] == []
+
+
+def test_the_enforce_loop_hands_every_context_builder_the_scope_conflict_itself():
+    """Static control: no ``deps._build_*_recovery_context(...)`` call in the enforce loop passes anything but the
+    bare ``scope_conflict`` name - a copy with an added key (under any name) is how a request was once tunnelled."""
+    tree = ast.parse(Path(enforce_loop.__file__).read_text(encoding="utf-8"))
+    builder_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == "deps"
+        and node.func.attr in ("_build_owner_recovery_context", "_build_may_change_recovery_context")
+    ]
+    assert sorted(call.func.attr for call in builder_calls) == [
+        "_build_may_change_recovery_context", "_build_may_change_recovery_context", "_build_owner_recovery_context"]
+    for call in builder_calls:
+        (conflict,) = [kw.value for kw in call.keywords if kw.arg == "scope_conflict"]
+        assert isinstance(conflict, ast.Name) and conflict.id == "scope_conflict", ast.unparse(call)
+        assert all(kw.arg is not None for kw in call.keywords), ast.unparse(call)  # no **splat

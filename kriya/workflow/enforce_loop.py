@@ -47,7 +47,6 @@ from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.outcome import workspace_commit_failure_fields
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
 from kriya.workflow.recovery_plan import (
-    MAY_CHANGE_RECOVERY_REQUEST,
     RECOVERY_MAY_CHANGE_ALL_UNCHANGED,
     RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED,
 )
@@ -81,6 +80,7 @@ class EnforceDeps:
     _UnsafeStructuredPlan: Any
     _attempt_owner_recovery_self_correction: Callable[..., Any]
     _authoritative_planner_extension_candidates: Callable[..., Any]
+    _build_may_change_recovery_context: Callable[..., Any]
     _build_owner_recovery_context: Callable[..., Any]
     _cross_owner_obligation_id: Callable[..., Any]
     _enforce_contract_transition: Callable[..., Any]
@@ -2818,12 +2818,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         )
                         control_state = _persist_control_state(control_state)
                         owner_position = order.index(owner_id) + 1
-                        recovery_context = deps._build_owner_recovery_context(
-                            owner_id=owner_id, failed_subtask_id=subtask.id,
-                            required_owner_files=required_owner_files, cross_owner_obligation=None,
-                            scope_conflict={**scope_conflict, MAY_CHANGE_RECOVERY_REQUEST: {
-                                "plan": plan, "participants": may_change_participants,
-                            }},
+                        recovery_context = deps._build_may_change_recovery_context(
+                            plan, owner_id=owner_id, failed_subtask_id=subtask.id,
+                            participants=may_change_participants, scope_conflict=scope_conflict,
                         )
                         deps.logger.info(
                             "RECOVERY_GROUP_STARTED plan_id=%s group_id=%s owner=%s",
@@ -2991,13 +2988,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     if may_change_participants:
                         # A mixed group: the MUST-FIX above names only the MUST_CHANGE files; the owner's MAY_CHANGE
                         # artifacts get their own, change-not-presumed section.
-                        recovery_context = recovery_context + "\n\n" + deps._build_owner_recovery_context(
-                            owner_id=owner_id, failed_subtask_id=subtask.id,
-                            required_owner_files=[p.artifact for p in may_change_participants],
-                            cross_owner_obligation=None,
-                            scope_conflict={**scope_conflict, MAY_CHANGE_RECOVERY_REQUEST: {
-                                "plan": plan, "participants": may_change_participants,
-                            }},
+                        recovery_context = recovery_context + "\n\n" + deps._build_may_change_recovery_context(
+                            plan, owner_id=owner_id, failed_subtask_id=subtask.id,
+                            participants=may_change_participants, scope_conflict=scope_conflict,
                         )
                     deps.logger.info(
                         "CROSS_OWNER_RECOVERY_SCHEDULED requirement_id=%s artifact=%s owner_subtask_id=%s",

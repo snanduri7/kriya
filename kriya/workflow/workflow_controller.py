@@ -510,6 +510,7 @@ def _enforce_deps(controller: WorkflowController) -> Any:
         _StructuredPlanUnavailable=_StructuredPlanUnavailable, _UnsafeStructuredPlan=_UnsafeStructuredPlan,
         _attempt_owner_recovery_self_correction=_attempt_owner_recovery_self_correction,
         _authoritative_planner_extension_candidates=_authoritative_planner_extension_candidates,
+        _build_may_change_recovery_context=_build_may_change_recovery_context,
         _build_owner_recovery_context=_build_owner_recovery_context,
         _cross_owner_obligation_id=_cross_owner_obligation_id,
         _enforce_contract_transition=_enforce_contract_transition,
@@ -917,6 +918,21 @@ def _build_owner_recovery_context(
     return owner_recovery._build_owner_recovery_context(
         owner_id=owner_id, failed_subtask_id=failed_subtask_id, required_owner_files=required_owner_files,
         cross_owner_obligation=cross_owner_obligation, scope_conflict=scope_conflict,
+    )
+
+
+def _build_may_change_recovery_context(
+    plan: EngineeringPlan,
+    *,
+    owner_id: str,
+    failed_subtask_id: str,
+    participants: Sequence[RecoveryParticipant],
+    scope_conflict: Dict[str, Any],
+) -> str:
+    """The body is kriya/workflow/owner_recovery.py (transport only: the context of a reopened owner's MAY_CHANGE artifacts)."""
+    return owner_recovery._build_may_change_recovery_context(
+        plan, owner_id=owner_id, failed_subtask_id=failed_subtask_id, participants=participants,
+        scope_conflict=scope_conflict,
     )
 
 

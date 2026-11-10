@@ -439,6 +439,7 @@ E11_CONTROLLER_NAMES: Dict[str, Tuple[str, str, Optional[str]]] = {
     '_prior_cross_owner_musts': ('owner_recovery', 'def', "(ledger: 'Optional[ObligationLedger]', *, owner_subtask_id: 'str', required_files: 'List[str]') -> 'List[str]'"),
     '_get_or_create_cross_owner_obligation': ('owner_recovery', 'def', "(ledger: 'Optional[ObligationLedger]', *, originating_subtask_id: 'str', owner_subtask_id: 'str', required_files: 'List[str]', scope_conflict: 'Dict[str, Any]', generation: 'int', revision: 'Any') -> 'Optional[ObligationRecord]'"),
     '_build_owner_recovery_context': ('owner_recovery', 'def', "(*, owner_id: 'str', failed_subtask_id: 'str', required_owner_files: 'List[str]', cross_owner_obligation: 'Optional[ObligationRecord]', scope_conflict: 'Dict[str, Any]') -> 'str'"),
+    '_build_may_change_recovery_context': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', *, owner_id: 'str', failed_subtask_id: 'str', participants: 'Sequence[RecoveryParticipant]', scope_conflict: 'Dict[str, Any]') -> 'str'"),
     '_evaluate_recovery_acceptance_precheck': ('owner_recovery', 'def', "(*, scope_conflict: 'Dict[str, Any]', plan_workspace_path: 'str', required_owner_files: 'List[str]') -> 'Optional[bool]'"),
     '_participant_evidence_is_grounded': ('owner_recovery', 'def', "(scope_conflict: 'Dict[str, Any]') -> 'bool'"),
     '_scope_conflict_evidence_authority': ('owner_recovery', 'def', "(scope_conflict: 'Dict[str, Any]') -> 'ObligationAuthority'"),

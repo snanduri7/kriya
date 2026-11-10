@@ -302,7 +302,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E12: 3 -> 1 lookup: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
     # workflow_controller._enforce_deps); the patch sites above are the dynamic proof.
     (C, 'bound_approval'): P(1, 'kriya.workflow.acceptance_approval', ((C, 1),), ()),
-    (C, 'build_recovery_execution_plan'): P(7, C, ((C, 1),), ()),
+    (C, 'build_recovery_execution_plan'): P(8, C, ((C, 1),), ()),
     (C, 'build_structured_plan_repair_prompt'): P(1, 'kriya.workflow.planner_repair', ((C, 1),), ()),
     (C, 'check_plan_targets'): P(1, 'kriya.workflow.plan_targets', ((C, 1),), ()),
     (C, 'classify_planner_outcome'): P(1, 'kriya.workflow.planner_repair', ((C, 2),), ()),
@@ -456,7 +456,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # parse_planner_structured_output +3, create_git_worktree +2, validate_plan +2). The same four C rows were ALSO each one
     # short at 77603db before that work (MEASURED on a pristine checkout: 72/31/77/56 against 71/30/76/55; the test that added
     # them is not traced) - corrected here as well: C 389 -> 393 -> 403.
-    assert totals == {A: 113, W: 102, C: 403}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    # MAY_CHANGE context transport control (tests/test_recovery_may_change_001.py: the recovery plan the loop built, read
+    # at the documented controller seam; no new row): +1 C (build_recovery_execution_plan): C 403 -> 404.
+    assert totals == {A: 113, W: 102, C: 404}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
     assert len(PATCH_POINTS) == 135  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 

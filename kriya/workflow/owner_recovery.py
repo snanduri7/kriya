@@ -55,7 +55,6 @@ from kriya.workflow.obligations import (
 from kriya.workflow.plan_revision import _plan_scope_conflict_files, _transitive_upstream_ids
 from kriya.workflow.plan_schema import EngineeringPlan, FileAction, Subtask
 from kriya.workflow.recovery_plan import (
-    MAY_CHANGE_RECOVERY_REQUEST,
     RELATIONSHIP_ARTIFACT_HANDLED_BY_CONSUMER_RETRY,
     RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED,
     RecoveryAction,
@@ -545,19 +544,10 @@ def _build_owner_recovery_context(
     framing only when no ledger was available to record an obligation into
     (a caller outside structured/enforce execution).
 
-    MAY_CHANGE (RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001):
-    the enforce loop reaches this module only through this function's
-    forwarder, so a MAY_CHANGE request arrives as ``scope_conflict
-    [MAY_CHANGE_RECOVERY_REQUEST] = {"plan": ..., "participants": ...}`` on a
-    COPY of the conflict, with no obligation - and is answered by
-    _build_may_change_recovery_context (no MUST FIX, a change is not
-    presumed)."""
-    may_change_request = scope_conflict.get(MAY_CHANGE_RECOVERY_REQUEST)
-    if may_change_request is not None and cross_owner_obligation is None:
-        return _build_may_change_recovery_context(
-            may_change_request["plan"], owner_id=owner_id, failed_subtask_id=failed_subtask_id,
-            participants=may_change_request["participants"], scope_conflict=scope_conflict,
-        )
+    The MAY_CHANGE artifacts of a reopened owner have their own builder,
+    _build_may_change_recovery_context, reached through its own controller
+    forwarder; the scope conflict carries failure evidence only, never a
+    request."""
     if cross_owner_obligation is not None:
         ev = cross_owner_obligation.evidence
         return (
