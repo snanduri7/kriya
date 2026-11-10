@@ -190,6 +190,7 @@ async def call_with_escalation(
     temperature_override: Optional[float] = None,
     max_tokens_override: Optional[int] = None,
     role: Optional[str] = None,
+    require_complete: bool = False,
 ) -> str:
     """See _call_with_escalation; ``role`` attributes every call it makes to
     that agent role (PRD-018 per-role metrics)."""
@@ -197,7 +198,7 @@ async def call_with_escalation(
         return await _call_with_escalation(
             llm, system_prompt, prompt, candidates, json_mode=json_mode, stream_callback=stream_callback,
             is_failure=is_failure, temperature_override=temperature_override,
-            max_tokens_override=max_tokens_override,
+            max_tokens_override=max_tokens_override, require_complete=require_complete,
         )
 
 
@@ -211,6 +212,7 @@ async def _call_with_escalation(
     is_failure: Optional[Callable[[str], bool]] = None,
     temperature_override: Optional[float] = None,
     max_tokens_override: Optional[int] = None,
+    require_complete: bool = False,
 ) -> str:
     """Tries each candidate in order - a role's own configured model, then its own
     escalation chain (kriya/config/config.py::AgentModelConfig) - via llm.complete(),
@@ -237,6 +239,8 @@ async def _call_with_escalation(
     evidence rather than sizing one prompt for every model."""
     last_exc: Optional[Exception] = None
     last_response: Optional[str] = None
+    # Passed only when a role asks for it, so every other role's call keeps its exact shape.
+    complete_kwargs: Dict[str, Any] = {"require_complete": True} if require_complete else {}
     for i, cand in enumerate(candidates):
         try:
             cand_prompt = prompt(cand) if callable(prompt) else prompt
@@ -245,6 +249,7 @@ async def _call_with_escalation(
                     system_prompt, cand_prompt, stream_callback=stream_callback, json_mode=json_mode,
                     temperature_override=temperature_override,
                     **({"max_tokens_override": max_tokens_override} if max_tokens_override is not None else {}),
+                    **complete_kwargs,
                 )
             else:
                 candidate_max_tokens = candidate_output_tokens(llm.config, cand, max_tokens_override)
@@ -257,6 +262,7 @@ async def _call_with_escalation(
                     max_tokens_override=candidate_max_tokens,
                     reasoning_override=cand.reasoning,
                     extra_body_override=cand.extra_body,
+                    **complete_kwargs,
                 )
         except InferenceDeadlineError:
             raise  # the run's deadline binds every candidate alike
@@ -357,6 +363,12 @@ def _coerce_bool_field(value: Any, field_name: str, context: str) -> bool:
 class BaseAgent(ABC):
     """Abstract Base Class for Kriya specialized agents."""
 
+    # A role whose answer is a verdict or report, not a file rewrite, sets its own output ceiling here and may
+    # refuse a cut-off answer (CompletionProtocolError, reason_code OUTPUT_TRUNCATED) instead of passing the
+    # fragment on as if it were finished. The defaults keep every other role exactly as it was.
+    DEFAULT_MAX_OUTPUT_TOKENS: Optional[int] = None
+    REQUIRE_COMPLETE_OUTPUT: bool = False
+
     def __init__(
         self,
         name: str,
@@ -373,6 +385,18 @@ class BaseAgent(ABC):
         # default) fails - independent of Developer's quality-gate-driven retry loop.
         self.role_llm = role_llm
         self.role_chain = role_chain or []
+        # The role's own output ceiling: the configured agent_llms.<role>.max_output_tokens, else the role's
+        # own default, else None (the model binding's max_tokens, the Developer's file-rewrite budget).
+        if max_output_tokens is None and self.DEFAULT_MAX_OUTPUT_TOKENS is not None:
+            # A default is a CEILING, never a raise: it is clamped to the budget this role's first model binding
+            # already asks for, so a deployment configured below it keeps its smaller budget (an explicit
+            # agent_llms.<role>.max_output_tokens is the owner's own choice and is taken as written).
+            max_output_tokens = self.DEFAULT_MAX_OUTPUT_TOKENS
+            config = getattr(llm_client, "config", None)
+            if getattr(config, "llm", None) is not None:
+                from kriya.core.model_runtime import binding_output_tokens
+
+                max_output_tokens = min(max_output_tokens, binding_output_tokens(config, role_llm))
         self.max_output_tokens = max_output_tokens
 
     @property
@@ -408,6 +432,7 @@ class BaseAgent(ABC):
             json_mode=json_mode, stream_callback=stream_callback, role=metrics_role or self.name,
             temperature_override=temperature_override,
             max_tokens_override=role_output_override(self, max_tokens_override),
+            require_complete=self.REQUIRE_COMPLETE_OUTPUT,
         )
 
 
@@ -3415,7 +3440,16 @@ class SkillGapAgent(BaseAgent):
         return valid
 
 
+# MEASURED (run 20261110T064040-fcf2b210): nine Reviewer reports took 359-856 output tokens (10-32 s); one repetition
+# loop ran to the 16384-token ceiling the Reviewer inherited from the Developer binding and took 597 s. 4096 is about
+# five times the largest measured report; agent_llms.reviewer.max_output_tokens overrides it.
+REVIEWER_DEFAULT_MAX_OUTPUT_TOKENS = 4096
+
+
 class ReviewerAgent(BaseAgent):
+    DEFAULT_MAX_OUTPUT_TOKENS = REVIEWER_DEFAULT_MAX_OUTPUT_TOKENS
+    REQUIRE_COMPLETE_OUTPUT = True
+
     @property
     def system_prompt(self) -> str:
         return (

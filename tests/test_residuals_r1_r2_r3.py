@@ -354,15 +354,16 @@ class TestPlannerMaxTokenContract:
         llm = LLMClient(cfg)
         llm.complete = AsyncMock(return_value="Review: Approved")
         engine = WorkflowEngine(kernel, llm)
-        # Reviewer never received a max_output_tokens at construction
-        # (unchanged by this fix) - it must NOT pick up the Planner's own
-        # stage-specific budget.
-        assert engine.reviewer.max_output_tokens is None
+        # Reviewer never received a configured max_output_tokens - it must NOT pick up the Planner's own
+        # stage-specific budget. Since REVIEWER-RUNAWAY-UNBOUNDED-OUTPUT-001 it has its OWN role ceiling
+        # (the built-in default clamped to the general budget, here 4096), which is neither the Planner's
+        # 3333 nor unset.
+        assert engine.reviewer.max_output_tokens == 4096 != cfg.llm.planner_max_tokens
 
         await engine.reviewer.run("review this")
 
         _, kwargs = llm.complete.call_args
-        assert kwargs.get("max_tokens_override") is None
+        assert kwargs.get("max_tokens_override") == 4096
 
     def test_planner_construction_time_budget_is_an_explicit_int(self):
         cfg = AppConfig()

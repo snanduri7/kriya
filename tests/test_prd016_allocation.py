@@ -188,13 +188,16 @@ def test_review_batches_fit_beside_the_output_budget():
     cfg.llm.context_window = 32768
     cfg.llm.max_tokens = 16384
     cfg.llm.extra_body = {}
-    reviewer = ReviewerAgent("reviewer", None)
-    header = "Goal: review\n" + "diff line\n" * 2000
-    files = [(f"Big{i}.java", _java_class(80, i)) for i in range(4)]
-    requests, _, _ = review_requests(cfg, reviewer, files, reviewer.system_prompt, header)
-    room = 32768 - 16384 - tb.TWO_MESSAGE_FRAMING_TOKENS - tb.DISPATCH_SAFETY_MARGIN_TOKENS
-    assert requests and all(
-        _dispatch_tokens(reviewer.system_prompt + request.first()) <= room for request in requests)
+    # The Reviewer's own output ceiling (REVIEWER-RUNAWAY-UNBOUNDED-OUTPUT-001) is what its call asks for, so that is
+    # what its batches are fitted beside; an owner who configures the old 16384 gets the original, tighter fit.
+    for output_budget in (None, 16384):
+        reviewer = ReviewerAgent("reviewer", None, max_output_tokens=output_budget)
+        header = "Goal: review\n" + "diff line\n" * 2000
+        files = [(f"Big{i}.java", _java_class(80, i)) for i in range(4)]
+        requests, _, _ = review_requests(cfg, reviewer, files, reviewer.system_prompt, header)
+        room = 32768 - reviewer.max_output_tokens - tb.TWO_MESSAGE_FRAMING_TOKENS - tb.DISPATCH_SAFETY_MARGIN_TOKENS
+        assert requests and all(
+            _dispatch_tokens(reviewer.system_prompt + request.first()) <= room for request in requests)
 
 
 def test_investigation_evidence_keeps_whole_items_and_names_the_rest():

@@ -778,8 +778,14 @@ class LLMClient:
         reasoning_override: Optional[bool] = None,
         extra_body_override: Optional[Dict[str, Any]] = None,
         expected_output=None,
+        require_complete: bool = False,
     ) -> str:
         """Call the local LLM server and return the text completion (supporting streaming and JSON mode).
+
+        ``require_complete`` (default False: the compatibility behaviour below) makes a completion whose
+        normalized status is not OK - above all OUTPUT_TRUNCATED, the provider stopping at the output budget -
+        raise ``CompletionProtocolError`` instead of being returned as text, for a caller (the Reviewer) whose
+        output is evidence that is useless when cut off and must never be taken for a finished answer.
 
         PRD-015 compatibility API over ``complete_result``: returns the visible
         content and raises the original exception for a backend error or
@@ -809,6 +815,10 @@ class LLMClient:
         if result.error is not None:
             logger.error(f"Local LLM call failed: {result.error}", exc_info=result.error)
             raise result.error
+        if require_complete and result.status.value != "OK":
+            from kriya.core.completion import CompletionProtocolError
+
+            raise CompletionProtocolError(result, "the model output is not a complete answer")
         if result.status.value != "OK":
             logger.warning(
                 "Completion from '%s' is %s (finish_reason=%s); returned to a compatibility caller as text.",
