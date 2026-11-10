@@ -272,6 +272,7 @@ from kriya.workflow.requirements import (
 )
 from kriya.workflow.resume_support import ToolResumeDecision
 from kriya.workflow.retry_progress import VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
+from kriya.workflow.skill_extraction import planning_skill_constraints
 from kriya.workflow.static_checks import (
     derive_stack_contract,
     log_stack_contract_boundary,
@@ -603,6 +604,7 @@ def _enforce_deps(controller: WorkflowController) -> Any:
         requirement_outcomes=requirement_outcomes, requirement_verdict_details=requirement_verdict_details,
         requirements_prompt_block=requirements_prompt_block, seed_requirement_obligations=seed_requirement_obligations,
         VERIFICATION_RETRY_NO_CHANGE_POSSIBLE=VERIFICATION_RETRY_NO_CHANGE_POSSIBLE,
+        planning_skill_constraints=planning_skill_constraints,
         derive_stack_contract=derive_stack_contract, log_stack_contract_boundary=log_stack_contract_boundary,
         validate_stack_contract_artifacts=validate_stack_contract_artifacts,
         topological_subtask_order=topological_subtask_order, project_for_subtask=project_for_subtask,

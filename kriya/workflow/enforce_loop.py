@@ -58,7 +58,6 @@ from kriya.workflow.resume_support import (
     TOOL_EXECUTION_UNRESOLVED,
     TOOL_STARTED_NOT_DURABLE,
 )
-from kriya.workflow.skill_conventions import planning_skill_constraints
 from kriya.workflow.subtask_executor import plannable_tool_names
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport
 
@@ -269,6 +268,8 @@ class EnforceDeps:
     seed_requirement_obligations: Callable[..., Any]
     # kriya.workflow.retry_progress
     VERIFICATION_RETRY_NO_CHANGE_POSSIBLE: Any
+    # kriya.workflow.skill_extraction (all-import cycle): the Planner-side skill selection, called where the planner request is built
+    planning_skill_constraints: Callable[..., Any]
     # kriya.workflow.static_checks
     derive_stack_contract: Callable[..., Any]
     log_stack_contract_boundary: Callable[..., Any]
@@ -688,12 +689,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "Never drop, merge or reword a requirement: one no subtask serves stays open."
         ))
         # SHARED-DECISION-AUTHORITY-001: the skills applicable to this goal, selected and rendered by the same two functions the
-        # Developer-side analysis uses (kriya/workflow/skill_conventions.py), so the Planner sees the constraint the Developers will
+        # Developer-side analysis uses (kriya/workflow/skill_conventions.py; composed in skill_extraction.planning_skill_constraints,
+        # which arrives through EnforceDeps - its imports are all-import-cycle members), so the Planner sees the constraint the Developers will
         # be expected to obey and can make a cross-subtask choice between a skill's mutually exclusive alternatives ONCE, in an
         # integration relationship. Lossless and never trimmed (a request that cannot hold it is a typed dispatch refusal, not a
         # silent drop); only skills applicable to this goal; the same failure mode as the Developer-side load (not swallowed).
         planning_skill_text, planning_skill_names = (
-            planning_skill_constraints(kernel_config, workspace_path, goal, skill_engine=legacy_kwargs.get("skill_engine_override"))
+            deps.planning_skill_constraints(kernel_config, workspace_path, goal, skill_engine=legacy_kwargs.get("skill_engine_override"))
             if kernel_config is not None else ("", []))   # no configuration, no skills root to read
         if planning_skill_text:
             authoritative_planner_request += planning_skill_text

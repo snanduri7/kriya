@@ -37,7 +37,7 @@ from kriya.workflow.planning_request import (
     build_subtask_semantic_context,
     integration_contracts_for,
 )
-from kriya.workflow.skill_conventions import planning_skill_constraints
+from kriya.workflow.skill_extraction import planning_skill_constraints
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import WorkflowController
 
@@ -283,6 +283,26 @@ async def test_the_enforce_planner_request_carries_the_skill_and_both_developers
     for sid in ("s1", "s2"):
         assert '"selected": "' + RED in by_subtask[sid] and INTEGRATION_CONTRACT_AUTHORITY in by_subtask[sid]
     assert "integration_contracts" not in by_subtask["s9"]
+
+
+@pytest.mark.usefixtures("bound_workspace")
+@pytest.mark.asyncio
+async def test_the_enforce_planner_request_is_built_from_the_runs_one_skill_engine_not_a_second_one(tmp_path, skills_root):
+    """ARCH-TESTS-FOUR-FAIL-AT-77603DB-SKILL-CONVENTIONS-CYCLE-001 (argument preservation of the EnforceDeps transport): the
+    enforce loop hands the run's shared engine (``skill_engine_override``, loaded once by the controller) to
+    ``planning_skill_constraints``. Called without it, the function builds a SECOND engine from the configuration - a second
+    registry load that would not see what the run holds."""
+    real = SkillEngine.from_config
+    built = []
+
+    def counting(*args, **kwargs):
+        built.append(real(*args, **kwargs))
+        return built[-1]
+
+    with patch.object(SkillEngine, "from_config", side_effect=counting):
+        request, _ = await _run_enforce(tmp_path, skills_root, _plan())
+    assert MENU_RULE in request   # the Planner block was built (so the callable ran)
+    assert len(built) == 1        # ... from the controller's one engine
 
 
 @pytest.mark.usefixtures("bound_workspace")

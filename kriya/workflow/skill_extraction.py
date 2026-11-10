@@ -326,3 +326,48 @@ def _split_rules_by_verification(skill: Any) -> Tuple[List[str], List[str]]:
         else:
             trusted.append(r)
     return trusted, unverified
+
+
+def planning_skill_constraints(config: Any, workspace_path: str, goal: str, *, skill_engine: Any = None) -> Tuple[str, List[str]]:
+    """The applicable skills' conventions for the Planner: ``(block, skill_names)``, ``("", [])`` when none apply.
+
+    Selected by ``skill_applies_to_goal`` over the goal the plan serves, and rendered by ``render_skill_conventions``
+    - the same two functions the Developer-side analysis uses - so the Planner sees the constraint the Developers will
+    be expected to obey, and only the skills applicable to this goal (never the whole skills directory). Lossless: no
+    rule is summarised or dropped to save tokens. Read-only: it never writes, bootstraps or marks a skill.
+
+    Moved here verbatim from ``skill_conventions.py`` (ARCH-TESTS-FOUR-FAIL-AT-77603DB-SKILL-CONVENTIONS-CYCLE-001): its
+    imports below are all-import-cycle members, and ``skill_conventions`` is imported by kernel owner modules that must
+    stay outside every cycle. The enforce loop receives this function through ``EnforceDeps`` and never imports this
+    module."""
+    from kriya.analyzer.analyzer import RepositoryAnalyzer
+    from kriya.skills.skill import SkillEngine, fact_match, is_version_supported, mentions_term
+    from kriya.tools.knowledge import extract_library_versions
+    from kriya.workflow.skill_conventions import (
+        PLANNING_SKILL_CONSTRAINTS_HEADER,
+        render_skill_conventions,
+        skill_applies_to_goal,
+    )
+
+    engine = skill_engine
+    if engine is None:
+        engine = SkillEngine.from_config(config, workspace_path=workspace_path)
+        engine.discover_and_load()
+    repo_model = RepositoryAnalyzer(workspace_path).analyze()
+    repo_slug = os.path.basename(workspace_path).lower().strip(".") or "root"
+    blocks: List[str] = []
+    names: List[str] = []
+    for skill in engine.list_skills():
+        applies, _ = skill_applies_to_goal(
+            skill, goal, repo_slug=repo_slug, repo_model=repo_model, mentions_term=mentions_term, fact_match=fact_match,
+            extract_library_versions=extract_library_versions, is_version_supported=is_version_supported,
+            staleness_warning=_skill_staleness_warning)
+        if not applies:
+            continue
+        rendered = render_skill_conventions(skill, engine, _split_rules_by_verification)
+        if rendered:
+            blocks.append(rendered)
+            names.append(skill.name)
+    if not blocks:
+        return "", []
+    return PLANNING_SKILL_CONSTRAINTS_HEADER + "".join(blocks), names
