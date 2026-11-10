@@ -109,7 +109,7 @@ PLANNER_VALIDATION_FAILURE_CODES = frozenset({
     "UNREGISTERED_TOOL_NAME", "PLANNED_TOOL_NOT_PLANNABLE", "PLAN_GLOBAL_INVARIANTS_MISSING", "SUBTASK_SEMANTIC_CONTRACT_MISSING",
     "SUBTASK_GLOBAL_INVARIANTS_MISSING", "DUPLICATE_SUBTASK_ID", "SUBTASK_DEPENDS_ON_UNKNOWN_ID",
     "SUBTASK_DEPENDENCY_CYCLE", "AMBIGUOUS_PLANNED_FILE_OWNERSHIP", "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER",
-    "UNKNOWN_GLOBAL_INVARIANT", "SUBTASK_REQUIREMENT_UNPROVIDED", "SEMANTIC_DEPENDENCY_EDGE_MISSING",
+    "UNKNOWN_GLOBAL_INVARIANT", "SUBTASK_REQUIREMENT_UNPROVIDED", "SEMANTIC_DEPENDENCY_EDGE_MISSING", "SEMANTIC_DEPENDENCY_EDGE_CONFLICT",
     "PLANNED_ARTIFACT_PREREQUISITE_INVALID", "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED",
     "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP", "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK",
     "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM", "MODEL_SUBTASK_MISSING_PLANNED_FILES",
@@ -388,7 +388,27 @@ def build_structured_plan_repair_prompt(
         item for item in (validation_evidence or [])
         if item.get("consumer_subtask") and item.get("provider_subtask")
         and (item.get("missing_requires_edge") or item.get("missing_depends_on_edge"))
+        and not item.get("depends_on_edge_creates_cycle")      # an edge that would close a cycle is never recommended (below: a conflict to restructure)
     ]
+    conflict_evidence = [
+        item for item in (validation_evidence or [])
+        if item.get("consumer_subtask") and item.get("provider_subtask") and item.get("depends_on_edge_creates_cycle")
+    ]
+    if conflict_evidence:
+        targeted_correction += "- These planned prerequisites cannot be satisfied by adding a dependency (the provider already depends on the consumer, so the edge would be a cycle):\n"
+        for item in conflict_evidence:
+            targeted_correction += (
+                f"  Consumer: subtask={item['consumer_subtask']} file={item['consumer_file']}\n"
+                f"  Needed planned capability: {item['prerequisite_capability']}\n"
+                f"  Provider: subtask={item['provider_subtask']} file={item['provider_file']} (already downstream of the consumer)\n"
+            )
+    if "SEMANTIC_DEPENDENCY_EDGE_CONFLICT" in reason_codes:
+        targeted_correction += (
+            "- For each conflict the errors name (a subtask needs a capability from a provider that already depends, directly or transitively, on that subtask): do NOT add that dependency "
+            "- it would create a cycle. Restructure instead, keeping every other valid edge: move the capability claim (provides) to the subtask that actually produces it and out of the other, "
+            "or place the artifact or work in a subtask ordered BEFORE its users (an artifact is available to the subtasks that depend on its owner, never to that owner's dependencies), "
+            "or remove the requirement if the subtask does not actually need it. Do not invent a new subtask or widen the scope.\n"
+        )
     if prerequisite_evidence:
         targeted_correction += "- Apply these exact planned-prerequisite corrections:\n"
         for item in prerequisite_evidence:

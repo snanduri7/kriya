@@ -108,9 +108,20 @@ _PREREQUISITE_CAPABILITY_MARKERS = (
 
 
 def _planned_artifact_prerequisite_evidence(subtasks: List[Subtask]) -> List[Dict[str, Any]]:
-    """Resolve grounded environment-tool -> planned-manifest relationships."""
+    """Resolve grounded environment-tool -> planned-manifest relationships.
+
+    ARTIFACT AVAILABILITY FLOWS FORWARD (PLAN-VALIDATOR-CREATOR-INFERRED-AS-CONSUMER-001, measured in replacement Scenario-A run 20261110T060714-704ab94f). A subtask that plans an artifact
+    EARLIER in the dependency order is where that artifact comes into being; a subtask that plans the SAME artifact path LATER (downstream through depends_on - the sequential ownership
+    chain ``_forms_sequential_ownership_chain`` already accepts) evolves what already exists. That later owner can never be the prerequisite PROVIDER for the earlier one: inferring it would demand
+    an edge from the origin to its own successor, i.e. a dependency cycle. The distinction cannot be read from the declared create/modify action - the controller canonicalizes every action
+    against the repository before validation (a greenfield turns each `modify` into `create`) - so it is read from the plan's own dependency order over the same artifact path.
+
+    Deliberately narrow: only a manifest path the CONSUMER ITSELF plans is excluded, and only for an owner downstream of it. A reverse edge between different artifacts is NOT hidden: the record is
+    kept and, when the edge it would need closes a cycle, carries ``depends_on_edge_creates_cycle`` so validation reports a typed conflict instead of an add-edge repair."""
     records: List[Dict[str, Any]] = []
+    upstream_of = _transitive_dependencies(subtasks)
     for consumer in subtasks:
+        consumer_paths = {planned.path for planned in consumer.planned_files}
         for artifact in consumer.planned_files:
             environment = {item.lower() for item in artifact.environment_requirements if item}
             # Compatibility with plans produced while requires_capabilities
@@ -131,6 +142,9 @@ def _planned_artifact_prerequisite_evidence(subtasks: List[Subtask]) -> List[Dic
                         pf.path for pf in owner.planned_files
                         if os.path.basename(pf.path).lower() in manifests
                     ]
+                    if consumer.id in upstream_of.get(owner.id, set()):
+                        # The owner is DOWNSTREAM of the consumer: an artifact the consumer itself plans is the owner's LATER stage of it, not a prerequisite the consumer consumes from it.
+                        owner_files = [path for path in owner_files if path not in consumer_paths]
                     if not owner_files:
                         continue
                     tool_capabilities = [cap for cap in owner.provides if tool in cap.lower()]
@@ -143,7 +157,7 @@ def _planned_artifact_prerequisite_evidence(subtasks: List[Subtask]) -> List[Dic
                 if len(providers) != 1:
                     continue
                 owner, provider_file, capability = providers[0]
-                records.append({
+                record: Dict[str, Any] = {
                     "consumer_subtask": consumer.id,
                     "consumer_file": artifact.path,
                     "prerequisite_capability": capability,
@@ -151,7 +165,11 @@ def _planned_artifact_prerequisite_evidence(subtasks: List[Subtask]) -> List[Dic
                     "provider_file": provider_file,
                     "missing_requires_edge": capability not in consumer.requires,
                     "missing_depends_on_edge": owner.id not in consumer.depends_on,
-                })
+                }
+                if record["missing_depends_on_edge"] and consumer.id in upstream_of.get(owner.id, set()):
+                    # The provider already depends (transitively) on the consumer: the edge this prerequisite needs would close a cycle. Present only when true.
+                    record["depends_on_edge_creates_cycle"] = True
+                records.append(record)
     return records
 
 
@@ -781,11 +799,20 @@ async def validate_plan(
                 reason_codes.append("SUBTASK_REQUIREMENT_UNPROVIDED")
                 requirement_violated = True
             elif len(providers) == 1 and providers[0] not in st.depends_on:
-                errors.append(
-                    f"subtask {st.id!r} requires {requirement!r} from {providers[0]!r} "
-                    "but does not declare that provider in depends_on"
-                )
-                reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
+                if st.id in transitive_deps.get(providers[0], set()):
+                    # The provider already depends (transitively) on this subtask: the missing edge would close a cycle, so no add-edge repair may be offered (typed conflict, still a failure).
+                    errors.append(
+                        f"subtask {st.id!r} requires {requirement!r} from {providers[0]!r}, but {providers[0]!r} already depends "
+                        f"(directly or transitively) on {st.id!r}: the dependency edge this requirement needs would close a cycle; "
+                        f"restructure which subtask provides {requirement!r} or the task decomposition instead of adding it"
+                    )
+                    reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_CONFLICT")
+                else:
+                    errors.append(
+                        f"subtask {st.id!r} requires {requirement!r} from {providers[0]!r} "
+                        "but does not declare that provider in depends_on"
+                    )
+                    reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
                 requirement_violated = True
             if obligation_ledger is not None:
                 # PRV-17 (2026-09-07, P7): same SUBTASK_SEMANTIC_CONTRACT
@@ -948,6 +975,16 @@ async def validate_plan(
     prerequisite_records = _planned_artifact_prerequisite_evidence(plan.subtasks)
     evidence.extend(prerequisite_records)
     for record in prerequisite_records:
+        if record.get("depends_on_edge_creates_cycle"):
+            # A typed conflict, never an add-edge instruction and never silence: the provider already depends on the consumer, so the dependency this prerequisite needs would be a cycle.
+            errors.append(
+                f"planned prerequisite consumer {record['consumer_subtask']!r} file {record['consumer_file']!r} needs "
+                f"{record['prerequisite_capability']!r} from provider {record['provider_subtask']!r} file {record['provider_file']!r}, "
+                f"but {record['provider_subtask']!r} already depends (directly or transitively) on {record['consumer_subtask']!r}: "
+                "the dependency edge this prerequisite needs would close a cycle; restructure which subtask owns the artifact or provides the capability instead of adding it"
+            )
+            reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_CONFLICT")
+            continue
         if record["missing_requires_edge"]:
             errors.append(
                 f"planned prerequisite consumer {record['consumer_subtask']!r} file "
