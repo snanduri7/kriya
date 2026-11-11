@@ -198,6 +198,38 @@ def test_the_skill_loads_through_skillservice_and_is_selected_for_the_goal(tmp_p
         assert rule_fact in rules, rule_fact
 
 
+def test_the_skill_projects_cacheconfiguration_in_its_real_package(tmp_path: Path) -> None:
+    """IGNITE-SKILL-CACHECONFIGURATION-PACKAGE-001 (Scenario-A run 6, s5 attempt 1): the rule placed CacheConfiguration in org.apache.ignite.cache; the
+    compiler refused it (`cannot find symbol class CacheConfiguration, location: package org.apache.ignite.cache`). MEASURED against ignite-core-2.18.0.jar:
+    org/apache/ignite/configuration/CacheConfiguration.class; org.apache.ignite.cache holds CacheMode and CacheAtomicityMode. The text a Developer is shown
+    (the one renderer both the Planner and the Developer side use) names the real package and never the wrong one."""
+    from kriya.workflow.skill_conventions import render_skill_conventions
+    from kriya.workflow.skill_extraction import _split_rules_by_verification
+
+    config_path = _rendered_config(tmp_path)
+    skills_dir = tmp_path / "work" / "skills"
+    skills_dir.mkdir()
+    shutil.copytree(SKILL, skills_dir / SKILL.name)
+    workspace = tmp_path / "work" / "workspace"
+    workspace.mkdir()
+    config = AppConfig.model_validate(yaml.safe_load(config_path.read_text(encoding="utf-8")))
+    engine = SkillEngine.from_config(config, workspace_path=str(workspace))
+    engine.discover_and_load()
+    skill = engine.get_skill("ignite-java17")
+    projected = render_skill_conventions(skill, engine, _split_rules_by_verification)
+    assert "import org.apache.ignite.configuration.CacheConfiguration;" in projected
+    trusted, unverified = _split_rules_by_verification(skill)
+    assert any("org.apache.ignite.configuration.CacheConfiguration" in rule for rule in trusted)  # an authoritative (trusted) rule, not an unverified one
+    assert not any("CacheConfiguration" in rule for rule in unverified)
+    # the wrong package: neither the qualified name nor the old grouping that listed the class among org.apache.ignite.cache's types, anywhere in the skill
+    assert "org.apache.ignite.cache.CacheConfiguration" not in projected
+    for match in re.finditer(r"org\.apache\.ignite\.cache holds[^.;]*", projected):
+        assert "CacheConfiguration" not in match.group(0), match.group(0)
+    assert "CacheMode, CacheAtomicityMode" in projected  # the two types that really are in org.apache.ignite.cache stay stated
+    for path in sorted(p for p in SKILL.rglob("*") if p.is_file()):
+        assert "org.apache.ignite.cache.CacheConfiguration" not in path.read_text(encoding="utf-8"), path
+
+
 def test_negative_control_without_the_skill_directory_nothing_is_selected(tmp_path: Path) -> None:
     config = AppConfig.model_validate(yaml.safe_load(_rendered_config(tmp_path).read_text(encoding="utf-8")))
     (tmp_path / "work" / "skills").mkdir()
