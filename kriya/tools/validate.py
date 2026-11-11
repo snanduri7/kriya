@@ -24,6 +24,7 @@ from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools import test_execution
 from kriya.tools.containment import (
+    BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST,
     DEPENDENCY_CACHE_SCOPE_REQUIRED,
     PROJECT_VENV_NOT_DISCARDED,
     PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED,
@@ -309,6 +310,8 @@ _EXECUTION_EVIDENCE_KEYS = (
     "runtime_artifacts",
     # DEMO-RESET-REUSES-DOCKER-BIND-ANCESTOR-PATH-001: a container backend's `bind source path does not exist` start refusal with the host facts captured when it returned (observation only).
     "infrastructure_diagnostic",
+    # BIND-SOURCE-RELAUNCH-001: the one bounded relaunch after that refusal while the source existed on the host - the first launch's diagnostic and the relaunch's outcome.
+    "infrastructure_recovery",
 )
 
 
@@ -401,6 +404,7 @@ def _record_gate_result(name: str, result: Any, started: float, *, error: Option
             "timed_out": result.get("timed_out") if isinstance(result, dict) else None,
             **({"purpose": attempt_evidence_scope.current_gate_purpose()} if attempt_evidence_scope.current_gate_purpose() else {}),   # WHY this gate ran, declared by its orchestrator (absent = not recorded)
             "runtime_artifacts": result.get("runtime_artifacts") if isinstance(result, dict) else None,
+            **({"infrastructure_recovery": result["infrastructure_recovery"]} if isinstance(result, dict) and result.get("infrastructure_recovery") else {}),   # BIND-SOURCE-RELAUNCH-001: both launches stay in evidence
             "error_type": type(error).__name__ if error is not None else None,
             **meta,
         }
@@ -469,6 +473,8 @@ def _verification_gate(name: str):
                     artifacts = self._leave_gate_scope(name, ephemeral)
                     if ephemeral and artifacts is not None and isinstance(result, dict):
                         result["runtime_artifacts"] = artifacts
+                    if self._bind_source_recovery is not None and isinstance(result, dict):
+                        result.setdefault("infrastructure_recovery", self._bind_source_recovery)   # BIND-SOURCE-RELAUNCH-001: whatever shape the gate's own result has
                     _record_gate_result(name, result, started)
                     return result
                 finally:
@@ -519,6 +525,8 @@ class PolymorphicValidator:
     # R3: the ephemeral dependency layers of the outermost verification scope now open (None: no scope is open, so no cache may be asked for).
     _cache_scope_depth: int = 0
     _gate_caches: Optional[Dict[str, str]] = None
+    # BIND-SOURCE-RELAUNCH-001: the record of the ONE relaunch the outermost verification scope now open has used (None: none used). Reset when that scope opens.
+    _bind_source_recovery: Optional[Dict[str, Any]] = None
     # PYTHON-VENV-SOURCE-REUSE-001: the project venv of a view-backed scope is bind-mounted from a HOST source the scope owns - an ephemeral unit (kriya/tools/dependency_cache.py), never
     # a pathname that is removed and recreated. ``_venv_source`` is the one source of truth for what is bound (None: the scope has no venv yet); ``_venv_units`` are every unit the
     # scope allocated (the retry's and a rebuild's earlier ones included), all kept until the outermost scope ends so no allocated pathname can be handed out again within it.
@@ -732,6 +740,7 @@ class PolymorphicValidator:
             self._discard_project_venv(required=True)
             self._gate_caches = {}
             self._venv_source, self._venv_units = None, ()
+            self._bind_source_recovery = None
         self._cache_scope_depth += 1
         try:
             yield
@@ -1521,10 +1530,29 @@ class PolymorphicValidator:
             # command is ever spawned on the host from here; a missing profile or backend is the typed refusal, never a bare spawn.
             raise ContainmentSetupError(
                 f"no containment profile/backend for {cmd[:1]!r}: project-controlled execution has no host mode and is refused, never run uncontained")
+        launched = time.monotonic()
         result = ProcessController().run(
             cmd, cwd=cwd, timeout=timeout, stdin_payload=stdin_payload,
             containment_profile=profile, containment_backend=backend,
         )
+        recovery = self._bind_source_relaunch_record(result)
+        if recovery is not None:
+            # BIND-SOURCE-RELAUNCH-001 (owner ruling 2026-11-11): the backend refused to start the container for a bind source that EXISTS on the host (the typed
+            # fact kriya/tools/containment.py established; nothing is re-read from text here). Nothing about the candidate was observed, so the SAME launch - this
+            # command, cwd, stdin, profile and backend, unchanged - is made ONCE more. The bound is what remains of this launch's own timeout: no deadline, run clock
+            # or budget is reset, no model is called and no byte of the candidate changes in between. A second identical refusal is returned as it is (the typed
+            # never-started result the gates stop on); nothing else is ever relaunched.
+            remaining = max(1, int(timeout - (time.monotonic() - launched)))
+            logger.warning("%s: relaunching the same contained command once (%s; %ss of its timeout left)", recovery["reason_code"], cmd[:1], remaining)
+            result = ProcessController().run(
+                cmd, cwd=cwd, timeout=remaining, stdin_payload=stdin_payload,
+                containment_profile=profile, containment_backend=backend,
+            )
+            again = result.infrastructure_diagnostic or {}
+            recovery["relaunch_outcome"] = ("SAME_CONDITION" if again.get("reason_code") == BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST
+                                            else "TARGET_STARTED" if result.target_started else "TARGET_NOT_STARTED")
+            recovery["relaunch_returncode"], recovery["relaunch_timeout_seconds"] = result.returncode, remaining
+            logger.warning("%s: the relaunch ended %s", recovery["reason_code"], recovery["relaunch_outcome"])
         if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY:
             # SEC-006: raises RegistryAcquisitionSetupError (a
             # ContainmentSetupError) rather than returning if the
@@ -1532,7 +1560,26 @@ class PolymorphicValidator:
             # (firewall/IPv6/privilege-drop) failed - never let that
             # failure be misread as an ordinary mvn/pip result.
             finalize_registry_acquisition_result(result)
-        return result.to_dict()
+        launched_result = result.to_dict()
+        if recovery is not None:
+            launched_result["infrastructure_recovery"] = recovery
+        return launched_result
+
+    def _bind_source_relaunch_record(self, result: Any) -> Optional[Dict[str, Any]]:
+        """BIND-SOURCE-RELAUNCH-001: the record that authorizes ONE relaunch of the launch that just returned, or None. Only the exact typed condition qualifies
+        (the backend's bind-source refusal of a source that exists on the host: a target that never started and did not time out); a source absent on the host, any
+        other backend error and every started target do not. At most one per outermost verification scope (one gate execution, nested gates included); a launch
+        outside any scope has its own single relaunch."""
+        diagnostic = getattr(result, "infrastructure_diagnostic", None)
+        if not isinstance(diagnostic, dict) or diagnostic.get("reason_code") != BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST:
+            return None
+        if self._cache_scope_depth > 0 and self._bind_source_recovery is not None:
+            return None
+        record: Dict[str, Any] = {"reason_code": BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST, "relaunches": 1, "first_launch": dict(diagnostic),
+                                  "first_launch_returncode": getattr(result, "returncode", None)}
+        if self._cache_scope_depth > 0:
+            self._bind_source_recovery = record
+        return record
 
     def _register_gate_output(self, cmd: List[str], cwd: str) -> None:
         """FILE-INTEGRITY-CONTRACT-001B: the verification gate now running
@@ -1588,6 +1635,15 @@ class PolymorphicValidator:
             for key in ("environment_reason_code", "gradle_distribution"):
                 if command_result.get(key) is not None:
                     result[key] = command_result[key]
+            diagnostic = command_result.get("infrastructure_diagnostic")
+            if (result.get("environment_reason_code") is None and command_result.get("target_started") is False and isinstance(diagnostic, dict)
+                    and diagnostic.get("reason_code") == BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST):
+                # BIND-SOURCE-RELAUNCH-001: the verification tool never started because the backend refused a bind source that exists on the host (still so after the
+                # one relaunch, or with the scope's relaunch already used). The typed code makes every gate that consumes ``environment_reason_code`` stop as the
+                # existing verification_infrastructure_failure: never a compile / test failure of the candidate, never offered to the Developer for repair.
+                result["success"] = False
+                result["environment_reason_code"] = BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST
+                result["output"] = f"{infrastructure_diagnostic_line(diagnostic)}\n{output}"
         return result
 
     _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"

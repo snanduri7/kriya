@@ -722,8 +722,10 @@ def decide_external_execution(autonomy: object, *, subject: str) -> ExternalExec
 # MEASURED (Scenario-A Run 3, and a 988-trial reproduction): a container backend can refuse to start a container with `bind source path does not exist: <path>` although the directory exists on the host. The
 # runtime fact Kriya records is generic: the BACKEND reported a bind source missing, and the HOST either has it or does not. Which of the two it was decides who to look at first (a source that was present
 # means the backend's own view of the host file system disagreed with the host; a source that was absent means a Kriya source-lifecycle suspect). The facts are captured at the moment the backend returns,
-# before any Kriya cleanup (the gate view / cache unit is removed later by its owner). This is evidence only: nothing is retried, no path is substituted, no wait is added, and the outcome stays the
-# fail-closed verification-infrastructure failure it already was. The cause of such a disagreement is campaign diagnosis, deliberately NOT asserted here.
+# before any Kriya cleanup (the gate view / cache unit is removed later by its owner). THIS module only establishes the typed fact: it retries nothing, substitutes no path and adds no wait. What is done
+# with the fact is its consumer's decision (BIND-SOURCE-RELAUNCH-001, owner ruling 2026-11-11): the validator's launch seam (kriya/tools/validate.py::_run_cmd_with_timeout) makes the SAME launch once more
+# for the host-present code only, and a repeated refusal is the fail-closed verification-infrastructure stop for every gate (never a candidate failure). The cause of such a disagreement is campaign
+# diagnosis, deliberately NOT asserted here.
 BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST = "BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST"
 BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST = "BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST"
 INFRASTRUCTURE_DIAGNOSTIC_CODES = frozenset({BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST, BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST})

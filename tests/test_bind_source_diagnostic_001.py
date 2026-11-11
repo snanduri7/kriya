@@ -2,8 +2,9 @@
 the typed fact "the backend reported the source missing" together with whether the HOST has it, captured when the backend returned and before any Kriya cleanup.
 
 What is pinned: the classification (host-present vs host-absent), that only a run whose target NEVER started can carry it (a started candidate printing the same text cannot forge it), that it reaches the result and the
-gate's failure text, and that the verdict stays exactly what it was - the fail-closed verification-infrastructure failure, with NO retry, NO wait and NO path substitution. The cause of such a disagreement (the campaign
-diagnosis) is deliberately not asserted by the product.
+gate's failure text, and that the verdict stays exactly what it was - the fail-closed verification-infrastructure failure, with NO second gate invocation, NO wait and NO path substitution. The cause of such a
+disagreement (the campaign diagnosis) is deliberately not asserted by the product. Since BIND-SOURCE-RELAUNCH-001 the validator's LAUNCH seam relaunches the same contained command once for the host-present
+code (tests/test_bind_source_relaunch_001.py); that happens below the seam these gate tests script, and the diagnostic owner itself still retries nothing.
 """
 from __future__ import annotations
 
