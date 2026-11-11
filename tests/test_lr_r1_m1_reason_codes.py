@@ -67,7 +67,14 @@ def test_regression_unattributed_is_typed_beside_its_unchanged_message(tmp_path,
     assert decisions[-1]["stop_reason_code"] == REGRESSION_UNATTRIBUTED
 
 
-def test_no_authorized_repair_target_is_typed_beside_its_unchanged_message(tmp_path, monkeypatch):
+def test_a_judge_tier_attribution_no_longer_produces_the_no_authorized_repair_target_stop(tmp_path, monkeypatch):
+    """ATTRIBUTION-MODEL-CLAIM-HARD-STOP-001 (owner ruling 2026-11-11), the intentional reversal of
+    ``test_no_authorized_repair_target_is_typed_beside_its_unchanged_message``: the SAME scenario (a judge-tier attribution
+    naming only an out-of-scope file) used to end the unit with the typed NO_AUTHORIZED_REPAIR_TARGET stop. A judge /
+    triage / self-diagnosis attribution is advisory and no longer makes that decision: no stop, no code, the ordinary
+    retry. Kept as the negative control. The code's typed pairing itself (StopReasonEvidence beside the unchanged message)
+    is pinned structurally below (_CODE_NAMES) and in tests/test_attribution_model_claim_hard_stop_001.py; with every
+    current producer a deterministic tier is claimed first by the plan-scope escalation, so no scenario reaches it."""
     from kriya.workflow.attribution import AttributionResult
 
     state = GenerationState()
@@ -85,10 +92,11 @@ def test_no_authorized_repair_target_is_typed_beside_its_unchanged_message(tmp_p
         with patch("kriya.workflow.retry_strategy.attribute_failure", AsyncMock(return_value=attribution)):
             return await handle_attempt_failure(state, ctx, exc)
     should_break, decisions = _recorded(tmp_path, monkeypatch, "run-d7-scope", body)
-    assert should_break is True
-    assert state.environment_failure.startswith("NO_AUTHORIZED_REPAIR_TARGET: this failure is grounded to ")
-    assert state.stop_reason_evidence == StopReasonEvidence(NO_AUTHORIZED_REPAIR_TARGET, state.environment_failure)
-    assert decisions[-1]["stop_reason_code"] == NO_AUTHORIZED_REPAIR_TARGET
+    assert should_break is False
+    assert state.environment_failure is None and state.stop_reason_evidence is None
+    assert decisions[-1]["stop_reason_code"] is None and decisions[-1]["retry"] is True
+    assert all(decision.get("stop_reason_code") != NO_AUTHORIZED_REPAIR_TARGET for decision in decisions)
+    assert state.rejected_generation_targets == ["proj/settings.py"] and state.last_implicated_files is None
 
 
 def test_an_ordinary_failure_carries_no_code(tmp_path, monkeypatch):

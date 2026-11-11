@@ -1455,8 +1455,20 @@ async def _record_attempt_failure(
             # of a conflict that's already correctly routing to a real owner
             # (test_handle_attempt_failure_scope_denial_with_real_existing_
             # owner_is_unaffected).
+            #
+            # ATTRIBUTION-MODEL-CLAIM-HARD-STOP-001 (Scenario-A run 6 consumer trace, owner ruling 2026-11-11): this
+            # hard stop is an AUTHORITATIVE decision ("no generation against this unit's files can fix it"), so only an
+            # attribution of a DETERMINISTIC_ATTRIBUTION_TIERS tier may make it - the same set that gates the plan-scope
+            # escalation above and the obligation authority in owner_recovery. A judge / triage / self_diagnosis
+            # attribution is advisory: MEASURED, a triage claim of confidence "low" naming one out-of-scope file stopped
+            # the unit with "this failure is grounded to ...". Such a file is already dropped from the targets above
+            # (never a target, never write scope) and recorded in rejected_generation_targets; the unit keeps its
+            # ordinary retry from the remaining evidence. Confidence is the model's own word and is never read here.
+            # A deterministic tier naming only out-of-scope files is claimed first by the plan-scope escalation above
+            # (state.plan_scope_conflict, the typed PLAN_SCOPE_REVISION_REQUIRED stop), which this gate never replaces.
             if (
                 implicated and not narrowed_implicated
+                and attribution.tier in DETERMINISTIC_ATTRIBUTION_TIERS
                 and getattr(ctx, "write_scope_mode", None) == WriteScopeMode.ALLOWLIST
                 and state.environment_failure is None
                 and state.plan_scope_conflict is None

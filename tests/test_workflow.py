@@ -15102,9 +15102,13 @@ async def test_handle_attempt_failure_stops_before_developer_call_when_no_author
     ):
         should_break = await handle_attempt_failure(state, ctx, exc)
 
-    assert should_break is True
-    assert state.environment_failure is not None
-    assert "NO_AUTHORIZED_REPAIR_TARGET" in state.environment_failure
+    # ATTRIBUTION-MODEL-CLAIM-HARD-STOP-001 (owner ruling 2026-11-11): the intentional reversal of what this test
+    # pinned (its name and the docstring above describe the superseded PRV-17 behaviour and are kept as the record of
+    # it). A JUDGMENT-tier attribution is advisory: it no longer ends the unit with NO_AUTHORIZED_REPAIR_TARGET by
+    # itself. The out-of-scope files are still never targets and never write scope; the ordinary retry goes on.
+    assert should_break is False
+    assert state.environment_failure is None
+    assert state.rejected_generation_targets == ["customers_project/settings.py", "customers_project/urls.py"]
     assert state.last_implicated_files is None
     assert state.plan_scope_conflict is None
 

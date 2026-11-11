@@ -278,9 +278,13 @@ async def test_prv17_stage_contract_architecture(tmp_path):
         "kriya.workflow.retry_strategy.attribute_failure", AsyncMock(return_value=grounded_future_owned),
     ):
         should_break = await handle_attempt_failure(recovery_state, recovery_ctx, out_of_scope_failure)
-    assert should_break is True
-    assert recovery_state.environment_failure is not None
-    assert "NO_AUTHORIZED_REPAIR_TARGET" in recovery_state.environment_failure
+    # ATTRIBUTION-MODEL-CLAIM-HARD-STOP-001 (owner ruling 2026-11-11): the intentional reversal of this step. A JUDGE-tier
+    # attribution is advisory and no longer ends the unit by itself (it used to: NO_AUTHORIZED_REPAIR_TARGET). The
+    # future-owned files are still never targets and never write scope; handle_attempt_failure itself makes no Developer call.
+    assert should_break is False
+    assert recovery_state.environment_failure is None and recovery_state.plan_scope_conflict is None
+    assert recovery_state.last_implicated_files is None
+    assert recovery_state.rejected_generation_targets == ["customers_project/settings.py", "customers_project/urls.py"]
     assert not recovery_developer.run_generation.called
 
     # --- Regression: a genuine CURRENT semantic violation (a real syntax
