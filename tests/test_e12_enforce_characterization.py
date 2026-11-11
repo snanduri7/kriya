@@ -1776,16 +1776,20 @@ async def test_a_scope_revision_that_fails_revalidation_is_not_retried(tmp_path)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("owner_answer", [
-    {"final_review_refusal": {"detail": "unsendable", "reason_code": "FINAL_REVIEW_UNSENDABLE"}},
     {"_skip_write": True, "files": ["a.py"]},
     {"_write": ["a.py", "zzz.py"], "files": ["a.py", "zzz.py"]},
     {"quality_gates_passed": None},
-], ids=["review_refused", "unchanged_bytes", "undeclared_file", "gates_unreported"])
+], ids=["unchanged_bytes", "undeclared_file", "gates_unreported"])
 @pytest.mark.usefixtures("bound_workspace")
 async def test_a_reopened_owner_candidate_must_be_reviewed_changed_and_in_scope(tmp_path, owner_answer):
-    """EW04 / EW06 / EW07: each refusal leaves the verification failure standing (no rerun) and is recorded as a
-    rejected reopen. The orchestrator's pin (v4) adds the owner whose Quality Gates outcome is not reported at all
-    (None, neither True nor False): acceptance needs the gates to have PASSED."""
+    """EW06 / EW07: each refusal leaves the verification failure standing (no rerun) and is recorded as a rejected
+    reopen. The orchestrator's pin (v4) adds the owner whose Quality Gates outcome is not reported at all (None,
+    neither True nor False): acceptance needs the gates to have PASSED.
+
+    EW04 (the ``review_refused`` case, "its final review was performed") was REMOVED ON PURPOSE on 2026-11-11: it
+    pinned behaviour the owner ruled wrong (ENFORCE-UNIT-ADVISORY-REVIEW-ACCEPTANCE-001, audit root R2 - a unit's
+    final review is advisory in an enforce plan). The corrected decision, with its negative controls, is pinned in
+    tests/test_enforce_unit_advisory_review_acceptance_001.py (the verification-owner reopen tests)."""
     events = []
     with patch("kriya.core.attempt_evidence.scope.mirror_event", side_effect=lambda event: events.append(event)):
         result, calls = await _enforce_scripted(

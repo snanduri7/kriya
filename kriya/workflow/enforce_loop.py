@@ -1705,6 +1705,27 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # ledger's own history() - no new counter needed for that part.
         recovery_generation_by_key: Dict[Tuple[str, str, Tuple[str, ...]], int] = {}
         plan_recovery_events: List[Dict[str, Any]] = []
+        # ENFORCE-UNIT-ADVISORY-REVIEW-ACCEPTANCE-001 (R2): every unit invocation whose deterministic gates passed and
+        # whose advisory final review was NOT performed (cut off, refused, deadline, budget, provider error). Reported
+        # on the run result as `advisory_reviews_not_performed`: accepted work is never shown as reviewed work.
+        advisory_reviews_not_performed: List[Dict[str, Any]] = []
+
+        def _unit_gates_accepted(unit_id: str, role: str, unit_result: Mapping[str, Any]) -> bool:
+            """The loop's one acceptance question (enforce_unit_gates_accepted), recording an unperformed review once."""
+            refusal = advisory_review_refusal(unit_result)
+            if refusal is not None:
+                record = {
+                    "subtask_id": unit_id, "execution_role": role, "reason_code": refusal.get("reason_code"),
+                    "detail": refusal.get("detail"), "review_performed": False,
+                }
+                if record not in advisory_reviews_not_performed:
+                    advisory_reviews_not_performed.append(record)
+                    deps.logger.warning(
+                        "%s subtask=%s role=%s reason=%s - the unit's deterministic gates passed and its candidate is "
+                        "applied; its advisory final review was not performed and decides nothing in an enforce plan.",
+                        ADVISORY_REVIEW_NOT_PERFORMED, unit_id, role, refusal.get("reason_code"),
+                    )
+            return enforce_unit_gates_accepted(unit_result)
         # Recovery Execution Contract (PRV-06, 2026-08-29) - a live incident
         # this closes: an owner's OWN regenerated candidate can be byte-
         # identical to what it already had, pass the owner's own local
@@ -2856,8 +2877,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         target_changed = targets_after != targets_before
                         # retained-byte truth: what is in the plan worktree and what the unit committed, never a label
                         bytes_retained = owner_after != owner_before or bool(committed_files(owner_result))
+                        may_change_gates_accepted = _unit_gates_accepted(
+                            owner_id, "may_change_owner_recovery", owner_result)
                         may_change_changed = (
-                            bool(owner_result.get("quality_gates_passed"))
+                            may_change_gates_accepted
                             and not owner_undeclared
                             and target_changed
                         )
@@ -2866,7 +2889,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         # with every target fingerprint equal and no byte of the owner retained or committed.
                         may_change_unchanged = (
                             owner_result.get("no_progress_reason") == deps.VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
-                            and not owner_result.get("quality_gates_passed")
+                            and not may_change_gates_accepted
                             and not target_changed
                             and not bytes_retained
                             and not owner_undeclared
@@ -3071,13 +3094,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         deps.read_file_revision(os.path.join(plan_workspace_path, path))
                         for path in sorted(must_change_files)
                     )
+                    owner_gates_accepted = _unit_gates_accepted(owner_id, "owner_recovery", owner_result)
                     recovery_no_progress = (
-                        bool(owner_result.get("quality_gates_passed"))
+                        owner_gates_accepted
                         and recovery_candidate_fingerprints.get(fingerprint_key) == candidate_fingerprint
                     )
                     recovery_candidate_fingerprints[fingerprint_key] = candidate_fingerprint
                     owner_local_accepted = (
-                        bool(owner_result.get("quality_gates_passed"))
+                        owner_gates_accepted
                         and not owner_undeclared
                         and set(must_change_files).issubset(owner_written)
                         and not recovery_no_progress
@@ -3219,7 +3243,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         # itself reports below - "group local PASS" is never
                         # conflated with "recovery PASS" anywhere in this
                         # cycle.
-                        plan_recovery_accepted = bool(call_result.get("quality_gates_passed"))
+                        # (the same reading; this result is recorded once, where it is evaluated as the unit's result below)
+                        plan_recovery_accepted = enforce_unit_gates_accepted(call_result)
                 else:
                     plan_recovery_accepted = False
 
@@ -3402,15 +3427,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     after = tuple(deps.read_file_revision(os.path.join(plan_workspace_path, path)) for path in owner_files)
                     owner_undeclared = sorted(
                         set(owner_result.get("files") or []) - {pf.path for pf in owner.planned_files})
-                    # Acceptance needs ALL of: the owner's gates passed, its final review was performed (a
-                    # candidate whose review is refused or deadline-stopped after the gates IS applied with
-                    # quality_gates_passed False - independent review F1, workflow.py's review refusal path),
-                    # its declared verification COMPLETED (the same evaluation the planned path applies), a
-                    # byte change in the plan worktree, and no file outside its declared scope (MA6 invariant 4).
+                    # Acceptance needs ALL of: the owner's deterministic gates passed (the loop's one reading,
+                    # enforce_unit_gates_accepted: R2 - a unit's final review is advisory in an enforce plan, so a
+                    # candidate applied with its review refused or deadline-stopped is NOT refused for that; this
+                    # replaces the earlier "its final review was performed" term), its declared verification
+                    # COMPLETED (the same evaluation the planned path applies), a byte change in the plan worktree,
+                    # and no file outside its declared scope (MA6 invariant 4).
                     owner_status, _owner_error, _owner_codes = deps._evaluate_subtask_verification(owner, owner_result)
                     owner_accepted = (
-                        owner_result.get("quality_gates_passed") is True
-                        and not owner_result.get("final_review_refusal")
+                        _unit_gates_accepted(owner.id, "verification_owner_recovery", owner_result)
                         and owner_status == deps.SubtaskStatus.COMPLETED
                         and after != before
                         and not owner_undeclared
@@ -3476,7 +3501,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         )
             subtask_call_results.append(call_result)
 
-            quality_gates_passed = bool(call_result.get("quality_gates_passed"))
+            # R2: the unit's deterministic gates, by the loop's one reading (an unperformed advisory review excuses
+            # nothing else and fails nothing by itself). The name is kept: every branch below already means this.
+            quality_gates_passed = _unit_gates_accepted(subtask.id, "unit", call_result)
             # MA6 invariant 4 (kriya/workflow/workflow_types.py::SubtaskResult's
             # own docstring: "a subtask may not modify undeclared files
             # silently... deciding what to do about it is the calling
@@ -3530,7 +3557,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 reason_codes=(
                     deps.subtask_scope_conflict_report(call_result["plan_scope_conflict"])[1]
                     if call_result.get("plan_scope_conflict")
-                    else (review_refusal.get("reason_code"),) if review_refusal
+                    else (review_refusal.get("reason_code"),) if review_refusal and not quality_gates_passed
+                    # R2: accepted on its deterministic gates with the advisory review not performed - said so, with
+                    # the refusal's own reason code, never left looking like a reviewed unit.
+                    else tuple(verification_reason_codes) + (ADVISORY_REVIEW_NOT_PERFORMED, str(review_refusal.get("reason_code")))
+                    if review_refusal and advisory_review_refusal(call_result) is not None
                     # ENFORCE-VERIFIED-NO-CHANGE-001: the unit completed with
                     # no mutation, on deterministic evidence - recorded, never
                     # implied by an empty file list.
@@ -3992,6 +4023,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             codes.extend(code for code in deps.subtask_scope_conflict_report(scope_conflict_result)[1]
                          if code not in codes)
             aggregated["plan_scope_conflict"] = scope_conflict_result
+        if advisory_reviews_not_performed:
+            # R2: reported on every terminal status this aggregate has (success, needs_review, failed).
+            aggregated["advisory_reviews_not_performed"] = advisory_reviews_not_performed
         if plan_recovery_events:
             aggregated["plan_recovery_events"] = plan_recovery_events
         if subtask_call_results:
@@ -4062,6 +4096,46 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 # of what each MODEL unit committed to this run's candidate (ControlState.subtask_written_files - the evidence the
 # planned-read view (subtask_executor.reads_candidate_view), owner resolution (owner_recovery) and the abandoned-plan
 # quarantine (resume_support) read).
+
+ADVISORY_REVIEW_NOT_PERFORMED = "ADVISORY_REVIEW_NOT_PERFORMED"
+
+
+def advisory_review_refusal(result: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+    """The unit's ``final_review_refusal`` when that refusal is the ONLY reason its ``quality_gates_passed`` is False;
+    None otherwise (the unit passed outright, or something deterministic failed too).
+
+    ENFORCE-UNIT-ADVISORY-REVIEW-ACCEPTANCE-001 (audit root R2, owner ruling 2026-11-11): inside an enforce plan a
+    unit's Reviewer is advisory evidence - nothing in the loop reads its text, and the plan's authority is the
+    deterministic gates, the unit's declared verification, the plan/recovery invariants and the terminal gates. A
+    unit's ``quality_gates_passed`` is RunState.final_workflow_quality_passed, which also folds in "the final review
+    was performed". The deterministic terms of that fold are read here one by one, from the fields the unit result
+    already reports: the candidate was applied to the plan worktree (``candidate_applied`` = quality_gates_succeeded),
+    its candidate gates passed, its terminal regression passed (the point where a pending API-contract recovery is
+    cleared, development_loop), and the attempt as a whole passed. Any one of them missing, a scope conflict or a
+    commit failure, and the refusal excuses nothing."""
+    refusal = result.get("final_review_refusal")
+    if (
+        isinstance(refusal, Mapping)
+        and not result.get("quality_gates_passed")
+        and refusal.get("candidate_applied") is True
+        and result.get("candidate_gates_passed") is True
+        and result.get("terminal_regression_passed") is True
+        and result.get("overall_attempt_passed") is True
+        and not result.get("plan_scope_conflict")
+        and result.get("workspace_commit_failure") is None
+    ):
+        return refusal
+    return None
+
+
+def enforce_unit_gates_accepted(result: Mapping[str, Any]) -> bool:
+    """THE enforce loop's reading of "this unit invocation's deterministic gates passed" - every acceptance site of
+    the loop (planned unit, owner recovery, MAY_CHANGE owner, consumer retry, verification-owner reopen) asks this
+    and nothing else. True when the unit passed outright, or when only its advisory final review was not performed
+    (``advisory_review_refusal``). It never replaces the checks each site adds (declared verification, write scope,
+    byte change, no-progress). The direct path does not use it: there the final review stays authoritative."""
+    return bool(result.get("quality_gates_passed")) or advisory_review_refusal(result) is not None
+
 
 def committed_files(result: Mapping[str, Any]) -> List[str]:
     """The files one unit invocation COMMITTED to the run's candidate, by the candidate transaction's own result

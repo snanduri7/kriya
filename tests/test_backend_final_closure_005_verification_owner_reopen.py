@@ -245,17 +245,23 @@ def test_an_owner_candidate_outside_its_declared_scope_is_not_folded(tmp_path):
     assert (workspace / SERVICE).read_text() == BASE_SOURCE
 
 
-def test_an_owner_candidate_whose_final_review_was_refused_is_not_folded(tmp_path):
-    """Negative control (review F1 / mutant m118): the owner's fix passed its gates but its final review was stopped
-    by the run deadline - the candidate IS applied to the plan worktree with quality_gates_passed False. The reopen
-    must not fold it: no second verification, the original failure stands."""
+def test_an_owner_candidate_whose_final_review_was_not_performed_is_folded_and_reported_as_unreviewed(tmp_path):
+    """INVERTED ON PURPOSE 2026-11-11 (ENFORCE-UNIT-ADVISORY-REVIEW-ACCEPTANCE-001, audit root R2; it was the negative
+    control of review F1, ``..._whose_final_review_was_refused_is_not_folded``, and pinned the behaviour the owner
+    ruled wrong). The owner's fix passed its gates and IS applied to the plan worktree; its final review was stopped
+    by the run deadline, so the unit reports quality_gates_passed False. In an enforce plan that review is advisory:
+    the reopen folds the fix, the verification runs a second time against it, and the run says the review was not
+    performed. The deterministic negative controls above (gates failed, out of scope) are unchanged."""
     workspace, _events, result, _model_calls, prompts, test_gate_runs = _enforce(
         tmp_path, owner_fixes=True, owner_review_refused=True)
     status = {r.subtask_id: r.status.value for r in result.subtask_results}
-    assert status == {"s1": "completed", "s2": "failed"}
-    assert test_gate_runs.count("s2") == 1 and result.legacy_result["status"] == "failed"
+    assert status == {"s1": "completed", "s2": "completed"}
+    assert test_gate_runs == ["s1", "s2", "s1", "s2", "s2"]  # exactly the accepted reopen's shape (the first test of this file)
     assert any("VERIFICATION FAILURE RECOVERY" in p for p in prompts[1:])
-    assert (workspace / SERVICE).read_text() == BASE_SOURCE
+    (record,) = result.legacy_result["advisory_reviews_not_performed"]
+    assert (record["subtask_id"], record["execution_role"], record["review_performed"]) == (
+        "s1", "verification_owner_recovery", False)
+    assert record["reason_code"] == "INFERENCE_DEADLINE_EXCEEDED"
 
 
 def test_an_owner_whose_declared_verification_is_not_completed_is_not_folded(tmp_path, monkeypatch):
