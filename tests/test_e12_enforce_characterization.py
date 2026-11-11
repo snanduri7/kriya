@@ -1881,9 +1881,12 @@ async def test_the_commit_carries_the_plans_contract_transition(tmp_path):
 
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
-async def test_a_verification_unit_reopens_its_nearest_completed_ancestor_not_one_invalidated_by_recovery(tmp_path):
-    """EW11 (the candidates not restricted to completed units): after an owner recovery invalidated s1 (it is never
-    re-run), the verification unit's nearest COMPLETED mutating ancestor is s0, not s1."""
+async def test_a_verification_unit_reopens_its_nearest_completed_ancestor_after_recovery_convergence(tmp_path):
+    """EW11 (the candidates not restricted to completed units), INVERTED by ENFORCE-RECOVERY-CONVERGENCE-001 (audit
+    root R4). It used to pin wrong product behaviour: an owner recovery invalidated s1, s1 was never re-run, and the
+    verification unit therefore reopened s0. Now s1 (and then s2, which depends on it) is re-entered BEFORE the
+    verification unit starts, so its nearest COMPLETED mutating ancestor is s1 again. The old scenario is kept as
+    the negative control right below."""
     plan = _plan_of(_unit("s0", "a.py"), _unit("s1", "b.py", depends_on=["s0"]), _unit("s2", "c.py", depends_on=["s1"]),
                     Subtask(id="sv", description="verify", execution_method=ExecutionMethod.MODEL,
                             execution_role=ExecutionRole.VERIFICATION, depends_on=["s1"],
@@ -1895,7 +1898,28 @@ async def test_a_verification_unit_reopens_its_nearest_completed_ancestor_not_on
     result, calls = await _enforce_scripted(_enforce_engine(tmp_path), tmp_path, plan, script)
     roles = [c["execution_scope"] for c in calls]
     assert "subtask=s0 role=owner_recovery" in roles and "subtask=s2 role=consumer_retry" in roles
-    assert [r for r in roles if r.endswith("verification_owner_recovery")] == ["subtask=s0 role=verification_owner_recovery"]
+    assert roles.index("subtask=s1 role=dependent_reverification") < roles.index("subtask=sv role=planned")
+    assert [r for r in roles if r.endswith("verification_owner_recovery")] == ["subtask=s1 role=verification_owner_recovery"]
+
+
+@pytest.mark.usefixtures("bound_workspace")
+@pytest.mark.asyncio
+async def test_a_verification_unit_never_starts_over_a_dependency_whose_reentry_failed(tmp_path):
+    """The old scenario as the negative control: s1 was invalidated by an owner recovery and its re-entry fails, so
+    it is not completed - the run stops there, the verification unit never runs and nothing is reopened for it."""
+    plan = _plan_of(_unit("s0", "a.py"), _unit("s1", "b.py", depends_on=["s0"]), _unit("s2", "c.py", depends_on=["s1"]),
+                    Subtask(id="sv", description="verify", execution_method=ExecutionMethod.MODEL,
+                            execution_role=ExecutionRole.VERIFICATION, depends_on=["s1"],
+                            verification=[_COMPILE]))
+    needs_a = {"quality_gates_passed": False, "status": "failed", "plan_scope_conflict": {
+        "classification": "PLAN_SCOPE_INSUFFICIENT", "required_files": ["a.py"], "failure_type": "COMPILE_ERROR",
+        "reason": "a.py must change"}}
+    script = {("s2", "planned"): [needs_a],
+              ("s1", "dependent_reverification"): [{"quality_gates_passed": False, "status": "failed", "_skip_write": True}]}
+    result, calls = await _enforce_scripted(_enforce_engine(tmp_path), tmp_path, plan, script)
+    roles = [c["execution_scope"] for c in calls]
+    assert roles[-1] == "subtask=s1 role=dependent_reverification" and not [r for r in roles if "subtask=sv " in r]
+    assert result.legacy_result["status"] == "failed" and result.control_state.subtask_states["s1"] == "failed"
 
 
 # ============================================================================ orchestrator pins (independent mutation campaign over E12)

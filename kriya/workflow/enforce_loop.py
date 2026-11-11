@@ -1854,7 +1854,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # regeneration is then the unit's ONE-attempt typed stop (VERIFICATION_RETRY_NO_CHANGE_POSSIBLE),
                 # never repair retries on the same answer. For a MAY_CHANGE owner (RECOVERY-SHARED-DECISION-
                 # PARTICIPANTS-CANNOT-MAY-CHANGE-001) that stop is the characterized "legitimately unchanged" signal.
-                reopened_owner=execution_role in ("verification_owner_recovery", "may_change_owner_recovery"),
+                # R4: a dependent reverification of a unit that owns files is the third such reopen (its identical
+                # regeneration is "reverified, unchanged"); a verification-only unit has nothing to regenerate.
+                reopened_owner=(
+                    execution_role in ("verification_owner_recovery", "may_change_owner_recovery")
+                    or (execution_role == "dependent_reverification" and bool(target.planned_files))
+                ),
                 grounding_goal=goal,
                 migration_resolution=migration_resolution,
                 strict_dependency_index=bool(
@@ -1879,10 +1884,148 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001: each verification-only unit may reopen its
         # upstream owner once per run (the bound), whatever the owner then produces.
         verification_owner_reopened: set = set()
-        for position, subtask_id in enumerate(order, start=1):
+
+        # ENFORCE-RECOVERY-CONVERGENCE-001 (audit root R4). A recovery that changes an upstream stage's bytes makes
+        # every COMPLETED dependent stale. The stale stage loses its current result at once, is re-entered through
+        # this same loop body (dependent reverification) and the run can end successfully only when nothing is left
+        # to re-enter. Everything here is local to this invocation; nothing new is persisted.
+        convergence_reentry: set = set()        # completed stages invalidated by an accepted upstream change
+        convergence_signatures: set = set()     # convergence states already seen (repeated state = no progress)
+        convergence_recovery_cycles = 0         # owner-recovery cycles started in this run (see the cap at its use)
+        reentered_stage_id: Optional[str] = None
+
+        def _completed_tool_dependents(owner_id: str) -> List[str]:
+            """The preflight of every recovery that may change ``owner_id``: its transitive dependents that are
+            COMPLETED TOOL executions. Such an effect is never run again (D1) and no persisted state can say
+            "completed, but its inputs changed since", so the recovery is refused BEFORE the owner is invoked."""
+            return [
+                dependent_id for dependent_id in deps.transitive_subtask_dependents(plan, owner_id)
+                if approved_stage_states.get(dependent_id) == deps.SubtaskStatus.COMPLETED.value
+                and getattr(plan.subtask_by_id(dependent_id), "execution_method", None) == deps.ExecutionMethod.TOOL
+            ]
+
+        def _invalidate_dependents(owner_id: str) -> Dict[str, Any]:
+            """The ONE invalidation of the loop (ordinary owner recovery, MAY_CHANGE owner, verification-owner
+            reopen, a changed dependent reverification): every transitive dependent of ``owner_id`` is pending in
+            the plan document's stage states and in the ControlState; a dependent that was COMPLETED also loses its
+            entry in ``subtask_results`` (the terminal decision reads the latest entry per stage, so a stale one is
+            no longer current truth) and is queued for re-entry. Returns what ``_restore_invalidation`` needs."""
+            nonlocal control_state
+            invalidated = deps.transitive_subtask_dependents(plan, owner_id)
+            snapshot: Dict[str, Any] = {
+                "invalidated": invalidated,
+                "stage_states": {i: approved_stage_states.get(i) for i in invalidated},
+                "control_states": {i: control_state.subtask_states.get(i) for i in invalidated},
+                "results": [], "reentry": [],
+            }
+            for invalidated_id in invalidated:
+                if approved_stage_states.get(invalidated_id) == deps.SubtaskStatus.COMPLETED.value:
+                    for index in range(len(subtask_results) - 1, -1, -1):
+                        if subtask_results[index].subtask_id == invalidated_id:
+                            snapshot["results"].append((index, subtask_results.pop(index)))
+                    if invalidated_id not in convergence_reentry:
+                        convergence_reentry.add(invalidated_id)
+                        snapshot["reentry"].append(invalidated_id)
+                approved_stage_states[invalidated_id] = "pending"
+            control_state = control_state.with_updates(subtask_states={
+                **control_state.subtask_states, **{invalidated_id: "pending" for invalidated_id in invalidated},
+            })
+            return snapshot
+
+        def _restore_invalidation(snapshot: Dict[str, Any]) -> None:
+            """Undo one ``_invalidate_dependents`` exactly (a MAY_CHANGE owner that retained no byte: the dependents'
+            earlier evidence still describes the bytes they ran against)."""
+            nonlocal control_state
+            for invalidated_id in snapshot["invalidated"]:
+                approved_stage_states[invalidated_id] = snapshot["stage_states"][invalidated_id]
+            control_state = control_state.with_updates(subtask_states={
+                **control_state.subtask_states,
+                **{i: state for i, state in snapshot["control_states"].items() if state is not None},
+            })
+            for index, stale_result in sorted(snapshot["results"], key=lambda item: item[0]):
+                subtask_results.insert(index, stale_result)
+            for invalidated_id in snapshot["reentry"]:
+                convergence_reentry.discard(invalidated_id)
+
+        def _stage_revisions(stage: Subtask) -> Tuple[str, ...]:
+            return tuple(
+                deps.read_file_revision(os.path.join(plan_workspace_path, planned_file.path))
+                for planned_file in sorted(stage.planned_files, key=lambda pf: pf.path)
+            )
+
+        def _refuse_convergence(stage_id: str, detail: str) -> None:
+            """ENFORCE_CONVERGENCE_NOT_REACHED for a stage that is still to be re-entered: needs_review, never run."""
+            nonlocal control_state
+            subtask_results.append(deps.SubtaskResult(
+                subtask_id=stage_id, status=deps.SubtaskStatus.NEEDS_REVIEW,
+                execution_method=deps.ExecutionMethod.MODEL.value,
+                error=f"{ENFORCE_CONVERGENCE_NOT_REACHED}: {detail}", reason_codes=(ENFORCE_CONVERGENCE_NOT_REACHED,),
+            ))
+            approved_stage_states[stage_id] = deps.SubtaskStatus.NEEDS_REVIEW.value
+            control_state = control_state.with_updates(subtask_states={
+                **control_state.subtask_states, stage_id: deps.SubtaskStatus.NEEDS_REVIEW.value,
+            })
+            deps.save_approved_plan(
+                workspace_path, plan.plan_id,
+                deps.build_approved_plan_document(
+                    plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                    stage_states=approved_stage_states, lifecycle_state="needs_review",
+                ),
+            )
+            control_state = _persist_control_state(control_state)
+            deps.logger.warning(
+                "%s run=%s stage=%s pending=%s - %s", ENFORCE_CONVERGENCE_NOT_REACHED, run_id, stage_id,
+                sorted(convergence_reentry), detail,
+            )
+
+        def _stage_schedule() -> Any:
+            """What the loop body runs next. The initial pass is exactly the traversal this loop always made (the
+            canonical order as it stood when the loop started). Before each initial stage, and after the last one,
+            every stage queued for convergence re-entry runs first, earliest in the CURRENT canonical order: a
+            stage never starts over a dependency that is still to be re-entered.
+
+            Termination. Between two recovery events re-entry is monotone: a re-entered stage invalidates only
+            stages later in the topological order, so at most (stages - 1) re-entries follow one event. Recovery
+            events are bounded where they start (the owner-recovery cycle cap, the one verification-owner reopen
+            per unit). In front of both: the same convergence state (plan, stages to re-enter, bytes of every
+            planned file) seen twice is no progress and stops typed."""
+            nonlocal reentered_stage_id
+            initial = iter(list(enumerate(order, start=1)))
+            while True:
+                if convergence_reentry:
+                    current_order = deps.topological_subtask_order(plan)
+                    stage_id = next((i for i in current_order if i in convergence_reentry), None)
+                    if stage_id is None:          # the queued stages were merged away by a plan revision
+                        convergence_reentry.clear()
+                        continue
+                    signature = (
+                        current_plan_hash, tuple(sorted(convergence_reentry)),
+                        tuple(_stage_revisions(stage) for stage in plan.subtasks),
+                    )
+                    if signature in convergence_signatures:
+                        _refuse_convergence(
+                            stage_id, "the same convergence state (stages to re-enter and the bytes of every planned "
+                                      "file) repeated; recovery is making no forward progress")
+                        return
+                    convergence_signatures.add(signature)
+                    convergence_reentry.discard(stage_id)
+                    reentered_stage_id = stage_id
+                    yield current_order.index(stage_id) + 1, stage_id
+                    continue
+                reentered_stage_id = None
+                following = next(initial, None)
+                if following is None:
+                    return
+                yield following
+
+        for position, subtask_id in _stage_schedule():
             subtask = plan.subtask_by_id(subtask_id)
             if subtask is None:
                 continue
+            # R4: this execution is a convergence re-entry of a stage an accepted upstream change invalidated.
+            is_reentry = reentered_stage_id == subtask_id
+            # R4: a typed stop of this stage decided inside the body (code, error) - reported on its result.
+            stage_refusal: Optional[Tuple[str, str]] = None
 
             if subtask.execution_method == deps.ExecutionMethod.TOOL and subtask_id in resumed_tool_unresolved:
                 # D1: durably STARTED, never durably COMPLETED -> needs_review. The loop transports the classification (resume_support.classify_tool_resume); it never retries
@@ -1958,7 +2101,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 ))
                 continue
 
-            if resumed_subtask_states.get(subtask_id) == "completed":
+            # R4: a stage this run invalidated is re-entered even though the resumed state once called it completed
+            # (the resumed states themselves are untouched; every other resumed stage is skipped as before).
+            if resumed_subtask_states.get(subtask_id) == "completed" and not is_reentry:
                 deps.logger.info(f"Subtask '{subtask.id}' ({position}/{total}) already completed (resume) - skipping.")
                 subtask_results.append(deps.SubtaskResult(
                     subtask_id=subtask.id, status=deps.SubtaskStatus.COMPLETED,
@@ -2142,7 +2287,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # own docstring for the full account of what is and isn't
             # skipped.
             predetermined_files = [pf.path for pf in subtask.planned_files]
-            call_result = await _invoke_bounded_subtask(subtask, position)
+            reentry_revisions_before = _stage_revisions(subtask)
+            if is_reentry:
+                # Dependent reverification: the same Developer and the same unit machinery, told the truth about why
+                # it runs. With reopened_owner (a unit that owns files) an identical regeneration is the unit's
+                # one-attempt typed stop AFTER its gates ran on the current tree, never "make a change" retries.
+                deps.logger.info(
+                    "DEPENDENT_REVERIFICATION_STARTED subtask=%s (%s/%s) still_to_reenter=%s",
+                    subtask.id, position, total, sorted(convergence_reentry),
+                )
+                call_result = await _invoke_bounded_subtask(
+                    subtask, position, recovery_context=DEPENDENT_REVERIFICATION_CONTEXT,
+                    execution_role="dependent_reverification",
+                )
+            else:
+                call_result = await _invoke_bounded_subtask(subtask, position)
+            reverification_result = call_result if is_reentry else None
             scope_conflict = call_result.get("plan_scope_conflict") or {}
             if scope_conflict.get("reason_code") == "PLANNED_PREREQUISITE_OWNER_REQUIRED":
                 owner_id = scope_conflict.get("required_owner_subtask_id")
@@ -2686,6 +2846,44 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         subtask.id, materialized_unowned,
                     )
                     break
+                # R4 preflight, before ANY owner of this recovery plan is invoked: an owner whose change would
+                # invalidate a COMPLETED TOOL execution is not reopened at all (a VERIFY group invokes nobody).
+                tool_blocked_owners = {
+                    group.owner_subtask_id: blocked_tools
+                    for group in exec_plan.groups
+                    if any(p.recovery_action is not deps.RecoveryAction.VERIFY for p in group.participants)
+                    and (blocked_tools := _completed_tool_dependents(group.owner_subtask_id))
+                }
+                if tool_blocked_owners:
+                    stage_refusal = (TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE, (
+                        f"{TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE}: recovering {subtask.id!r} would change upstream "
+                        f"owner(s) {sorted(tool_blocked_owners)!r}, whose completed TOOL dependent(s) "
+                        f"{sorted({t for tools in tool_blocked_owners.values() for t in tools})!r} are never run "
+                        "again; the owner(s) were not reopened and the original failure stands."))
+                    plan_recovery_events.append({
+                        "failed_subtask": subtask.id,
+                        "classification": scope_conflict.get("classification", "PLAN_SCOPE_INSUFFICIENT"),
+                        "reason": scope_conflict.get("reason"),
+                        "reason_codes": [TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE],
+                        "blocked_owners": {owner: list(tools) for owner, tools in sorted(tool_blocked_owners.items())},
+                        "owner_recovery_passed": False,
+                    })
+                    deps.logger.warning("%s", stage_refusal[1])
+                    break
+                # R4 convergence cap. Every stage execution may start at most _MAX_PLAN_SCOPE_REVISION_ATTEMPTS
+                # owner-recovery cycles (this loop's own range), so one canonical pass over the plan can legally
+                # start stages x that many. Convergence re-entries execute stages again; they share that total
+                # instead of renewing it, so with the monotone re-entry between recovery events (_stage_schedule)
+                # the run executes at most a number of stages fixed by the plan's size.
+                if convergence_recovery_cycles >= len(plan.subtasks) * deps._MAX_PLAN_SCOPE_REVISION_ATTEMPTS:
+                    stage_refusal = (ENFORCE_CONVERGENCE_NOT_REACHED, (
+                        f"{ENFORCE_CONVERGENCE_NOT_REACHED}: the run started {convergence_recovery_cycles} "
+                        f"owner-recovery cycles ({len(plan.subtasks)} stages x "
+                        f"{deps._MAX_PLAN_SCOPE_REVISION_ATTEMPTS} per stage) without converging; "
+                        f"{subtask.id!r} is not recovered again."))
+                    deps.logger.warning("%s", stage_refusal[1])
+                    break
+                convergence_recovery_cycles += 1
                 deps.logger.info(
                     "RECOVERY_EXECUTION_PLAN_STARTED plan_id=%s groups=%s",
                     exec_plan.id, list(exec_plan.group_order),
@@ -2806,6 +3004,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "generation": generation,
                             "cross_owner_obligation": None,
                             "owner_result": owner_result,
+                            "owner_reran": False,           # R4: carried forward, the owner was not invoked
                         })
                         exec_plan.completed_group_ids = exec_plan.completed_group_ids + (group_id,)
                         progressed_groups.append(group_id)
@@ -2816,20 +3015,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         # owner is reopened with the failure evidence and the selected alternative, WITHOUT the
                         # self-correction loop (raw failure text alone must not mutate it) and WITHOUT a MUST-FIX
                         # obligation, and may legitimately come back unchanged.
-                        invalidated = deps.transitive_subtask_dependents(plan, owner_id)
                         # Snapshot, then invalidate BEFORE the owner runs (as every reopen does): a crash in between
                         # leaves the dependents pending - re-executed on resume, never completed over changed bytes.
-                        prior_stage_states = {i: approved_stage_states.get(i) for i in invalidated}
-                        prior_control_states = {i: control_state.subtask_states.get(i) for i in invalidated}
-                        for invalidated_id in invalidated:
-                            approved_stage_states[invalidated_id] = "pending"
+                        # R4: the one invalidation (_invalidate_dependents); its snapshot is what the restore reads.
+                        invalidation = _invalidate_dependents(owner_id)
+                        invalidated = invalidation["invalidated"]
                         approved_stage_states[owner_id] = "in_progress"
                         control_state = control_state.with_updates(
-                            subtask_states={
-                                **control_state.subtask_states,
-                                **{invalidated_id: "pending" for invalidated_id in invalidated},
-                                owner_id: "in_progress",
-                            },
+                            subtask_states={**control_state.subtask_states, owner_id: "in_progress"},
                         )
                         deps.save_approved_plan(
                             workspace_path, plan.plan_id,
@@ -2879,10 +3072,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         bytes_retained = owner_after != owner_before or bool(committed_files(owner_result))
                         may_change_gates_accepted = _unit_gates_accepted(
                             owner_id, "may_change_owner_recovery", owner_result)
+                        # R4 verification parity: a changed MAY_CHANGE owner is accepted on exactly the declared
+                        # verification evidence its planned execution needs (none declared = nothing more asked).
                         may_change_changed = (
                             may_change_gates_accepted
                             and not owner_undeclared
                             and target_changed
+                            and deps._evaluate_subtask_verification(owner, owner_result)[0] == deps.SubtaskStatus.COMPLETED
                         )
                         # "Legitimately unchanged" is ONLY the characterized form (tests/test_recovery_may_change_
                         # characterization.py K1): the unit's one-attempt typed stop for an identical regeneration,
@@ -2897,14 +3093,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         if not may_change_changed and not bytes_retained:
                             # Nothing of this owner changed in the candidate: the dependents' earlier evidence still
                             # describes the bytes they ran against. (A retained off-target write keeps them pending.)
-                            for invalidated_id in invalidated:
-                                approved_stage_states[invalidated_id] = prior_stage_states[invalidated_id]
-                            control_state = control_state.with_updates(
-                                subtask_states={
-                                    **control_state.subtask_states,
-                                    **{i: state for i, state in prior_control_states.items() if state is not None},
-                                },
-                            )
+                            _restore_invalidation(invalidation)
                             deps.save_approved_plan(
                                 workspace_path, plan.plan_id,
                                 deps.build_approved_plan_document(
@@ -2934,6 +3123,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "cross_owner_obligation": None,
                             "owner_result": owner_result,
                             "may_change_outcome": outcome,
+                            "owner_reran": outcome == "changed",   # R4: only an accepted changed run is a new execution
                         })
                         if outcome == "failed":
                             # an off-target write, a gate failure, an undeclared write or any result that is not
@@ -2961,16 +3151,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         )
                         plan_locally_accepted = False
                         break
-                    invalidated = deps.transitive_subtask_dependents(plan, owner_id)
-                    for invalidated_id in invalidated:
-                        approved_stage_states[invalidated_id] = "pending"
+                    invalidation = _invalidate_dependents(owner_id)   # R4: the one invalidation
+                    invalidated = invalidation["invalidated"]
+                    owner_bytes_before = _stage_revisions(owner)
                     approved_stage_states[owner_id] = "in_progress"
                     control_state = control_state.with_updates(
-                        subtask_states={
-                            **control_state.subtask_states,
-                            **{invalidated_id: "pending" for invalidated_id in invalidated},
-                            owner_id: "in_progress",
-                        },
+                        subtask_states={**control_state.subtask_states, owner_id: "in_progress"},
                     )
                     deps.save_approved_plan(
                         workspace_path, plan.plan_id,
@@ -3054,7 +3240,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         )
                     owner_result = None
                     _self_correction_kernel = getattr(deps.workflow_engine, "kernel", None)
-                    if _self_correction_kernel is not None:
+                    # R4 verification parity: the self-correction result carries no verification evidence, so an
+                    # owner that declares verification goes straight to the governed owner recovery (never
+                    # self-corrected first and then re-invoked over already-mutated bytes to obtain the evidence).
+                    if _self_correction_kernel is not None and not owner.verification:
                         owner_result = await deps._attempt_owner_recovery_self_correction(
                             kernel=_self_correction_kernel,
                             developer_llm=deps.workflow_engine.developer.llm,
@@ -3100,11 +3289,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         and recovery_candidate_fingerprints.get(fingerprint_key) == candidate_fingerprint
                     )
                     recovery_candidate_fingerprints[fingerprint_key] = candidate_fingerprint
+                    # R4 verification parity: exactly the declared verification evidence the planned path requires
+                    # (the canonical evaluator; an owner that declares none is asked for nothing more).
                     owner_local_accepted = (
                         owner_gates_accepted
                         and not owner_undeclared
                         and set(must_change_files).issubset(owner_written)
                         and not recovery_no_progress
+                        and deps._evaluate_subtask_verification(owner, owner_result)[0] == deps.SubtaskStatus.COMPLETED
                     )
                     if recovery_no_progress:
                         deps.logger.warning(
@@ -3133,8 +3325,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "generation": generation,
                         "cross_owner_obligation": cross_owner_obligation,
                         "owner_result": owner_result,
+                        "owner_reran": True,
                     })
                     if not owner_local_accepted:
+                        if not owner_undeclared and _stage_revisions(owner) == owner_bytes_before:
+                            # R4: only a real change of the owner's bytes makes its dependents stale. A refused
+                            # recovery that left every byte of the owner as it was (and wrote nothing else) puts
+                            # their states and results back exactly; refused WITH retained bytes keeps them pending.
+                            _restore_invalidation(invalidation)
+                            record_invalidated: List[str] = []
+                            invoked_group_records[-1]["invalidated"] = record_invalidated
                         plan_locally_accepted = False
                         break
                     # Group locally accepted - fold its real, on-disk output
@@ -3332,6 +3532,26 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         ),
                     )
                     control_state = _persist_control_state(control_state)
+                    # R4: an owner that an earlier group of this recovery invalidated (it depends on that group's
+                    # owner) lost its stale result then. Its own accepted recovery run, made after that change, is
+                    # its newest execution: the current result, and nothing is left to re-enter for it. A
+                    # carried-forward (VERIFY) or unchanged MAY_CHANGE owner did not run again and stays queued.
+                    owner_has_result = any(prior.subtask_id == owner_id for prior in subtask_results)
+                    if record["owner_reran"] and (plan_recovery_accepted or consumer_invoked_this_cycle):
+                        # (the consumer is reached only after every group was locally accepted; when its retry then
+                        # fails, each owner's own work stays reported as it always was - see the note below)
+                        convergence_reentry.discard(owner_id)
+                        if not owner_has_result:
+                            subtask_results.append(deps.SubtaskResult(
+                                subtask_id=owner_id, status=deps.SubtaskStatus.COMPLETED,
+                                execution_method=deps.ExecutionMethod.MODEL.value, error=None,
+                            ))
+                    elif not consumer_invoked_this_cycle and not owner_has_result:
+                        # the downgrade below replaces an entry; a stale one was removed, so there is one to replace
+                        subtask_results.append(deps.SubtaskResult(
+                            subtask_id=owner_id, status=deps.SubtaskStatus.NEEDS_REVIEW,
+                            execution_method=deps.ExecutionMethod.MODEL.value, error=None,
+                        ))
                     # Matches the original single-owner code's own
                     # distinction exactly: the FINAL reported
                     # subtask_results list is only ever downgraded to
@@ -3408,6 +3628,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     [sid for sid, stage_state in approved_stage_states.items()
                      if stage_state == deps.SubtaskStatus.COMPLETED.value],
                 )
+                # R4 preflight (the same as the owner-recovery plan's): never reopen an owner whose change would
+                # invalidate a COMPLETED TOOL execution. The verification failure stands, typed.
+                verification_tool_blocked = _completed_tool_dependents(owner.id) if owner is not None else []
+                if owner is not None and verification_tool_blocked:
+                    stage_refusal = (TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE, (
+                        f"{TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE}: reopening upstream owner {owner.id!r} for "
+                        f"verification unit {subtask.id!r} would invalidate its completed TOOL dependent(s) "
+                        f"{verification_tool_blocked!r}, which are never run again; the owner was not reopened and "
+                        "the verification failure stands."))
+                    plan_recovery_events.append({
+                        "failed_subtask": subtask.id, "classification": "VERIFICATION_OWNER_RECOVERY",
+                        "reason_codes": [TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE],
+                        "blocked_owners": {owner.id: list(verification_tool_blocked)},
+                        "owner_recovery_passed": False,
+                    })
+                    deps.logger.warning("%s", stage_refusal[1])
+                    owner = None
                 if owner is not None:
                     owner_files = sorted(pf.path for pf in owner.planned_files if pf.action != deps.FileAction.DELETE)
                     owner_position = order.index(owner.id) + 1 if owner.id in order else position
@@ -3487,6 +3724,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             provenance=established_provenance,
                         )
                         control_state = record_committed_effects(control_state, owner.id, owner_result)
+                        # R4: the owner's bytes changed, so its OTHER completed dependents are stale as well (the
+                        # one invalidation). This verification unit is among the dependents and is the stage that
+                        # is running: it stays in progress and is rerun right below.
+                        _invalidate_dependents(owner.id)
+                        approved_stage_states[subtask.id] = "in_progress"
+                        control_state = control_state.with_updates(
+                            subtask_states={**control_state.subtask_states, subtask.id: "in_progress"},
+                        )
+                        deps.save_approved_plan(
+                            workspace_path, plan.plan_id,
+                            deps.build_approved_plan_document(
+                                plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                                stage_states=approved_stage_states, lifecycle_state="recovering",
+                            ),
+                        )
                         # Persisted before the rerun: a crash between the fold and the verification leaves the
                         # owner's real written set behind (independent review F8). The reopen bound itself is
                         # per process: a resumed run that re-verifies and fails may reopen once more.
@@ -3503,7 +3755,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
             # R2: the unit's deterministic gates, by the loop's one reading (an unperformed advisory review excuses
             # nothing else and fails nothing by itself). The name is kept: every branch below already means this.
-            quality_gates_passed = _unit_gates_accepted(subtask.id, "unit", call_result)
+            # R4: a dependent reverification that changed nothing. ONLY the characterized form counts - the unit's
+            # typed one-attempt stop for an identical regeneration, raised after its candidate gates passed on the
+            # current tree, with no byte of the stage retained or committed. The unit reports
+            # terminal_regression_passed=False on that stop although the regression gate outcome succeeded (the flag
+            # is set after the settlement raises), so that flag is not read. Declared verification is still decided
+            # by the canonical evaluation below, like any unit's.
+            reverified_unchanged = bool(
+                is_reentry and call_result is reverification_result
+                and call_result.get("no_progress_reason") == deps.VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
+                and call_result.get("candidate_gates_passed") is True
+                and not committed_files(call_result)
+                and _stage_revisions(subtask) == reentry_revisions_before
+            )
+            quality_gates_passed = reverified_unchanged or _unit_gates_accepted(subtask.id, "unit", call_result)
             # MA6 invariant 4 (kriya/workflow/workflow_types.py::SubtaskResult's
             # own docstring: "a subtask may not modify undeclared files
             # silently... deciding what to do about it is the calling
@@ -3544,18 +3809,27 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 error = verification_error
             else:
                 error = None
+            if stage_refusal is not None and not passed:
+                # R4: the typed stop decided above (a recovery refused before any owner ran, or the convergence cap).
+                error = stage_refusal[1]
             result = deps.SubtaskResult(
                 subtask_id=subtask.id,
                 status=(
                     deps.SubtaskStatus.COMPLETED if passed
-                    else deps.SubtaskStatus.NEEDS_REVIEW if call_result.get("plan_scope_conflict")
+                    else deps.SubtaskStatus.NEEDS_REVIEW if call_result.get("plan_scope_conflict") or stage_refusal is not None
                     else deps.SubtaskStatus.FAILED if not quality_gates_passed or undeclared_files
                     else verification_status
                 ),
                 execution_method=deps.ExecutionMethod.MODEL.value,
                 undeclared_files=tuple(undeclared_files), error=error,
                 reason_codes=(
-                    deps.subtask_scope_conflict_report(call_result["plan_scope_conflict"])[1]
+                    (stage_refusal[0],) + tuple(
+                        deps.subtask_scope_conflict_report(call_result["plan_scope_conflict"])[1]
+                        if call_result.get("plan_scope_conflict") else ())
+                    if stage_refusal is not None and not passed
+                    else tuple(verification_reason_codes) + (DEPENDENT_REVERIFIED_UNCHANGED,)
+                    if passed and reverified_unchanged
+                    else deps.subtask_scope_conflict_report(call_result["plan_scope_conflict"])[1]
                     if call_result.get("plan_scope_conflict")
                     else (review_refusal.get("reason_code"),) if review_refusal and not quality_gates_passed
                     # R2: accepted on its deterministic gates with the advisory review not performed - said so, with
@@ -3627,6 +3901,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "run_id": call_result.get("run_id", run_id),
                     }
                 break
+
+            if is_reentry and _stage_revisions(subtask) != reentry_revisions_before:
+                # R4: the re-entered stage was accepted with different bytes, so every completed stage that depends
+                # on it is stale in turn (the cascade; a byte-equal reverification invalidates nothing).
+                cascade = _invalidate_dependents(subtask.id)
+                deps.logger.info(
+                    "DEPENDENT_REVERIFICATION_CHANGED subtask=%s invalidated=%s to_reenter=%s",
+                    subtask.id, list(cascade["invalidated"]), sorted(convergence_reentry),
+                )
+                deps.save_approved_plan(
+                    workspace_path, plan.plan_id,
+                    deps.build_approved_plan_document(
+                        plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                        stage_states=approved_stage_states, lifecycle_state="recovering",
+                    ),
+                )
+                control_state = _persist_control_state(control_state)
 
             for path in call_result.get("files", []):
                 try:
@@ -4098,6 +4389,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 # quarantine (resume_support) read).
 
 ADVISORY_REVIEW_NOT_PERFORMED = "ADVISORY_REVIEW_NOT_PERFORMED"
+
+# ENFORCE-RECOVERY-CONVERGENCE-001 (audit root R4): the reason codes of recovery convergence.
+# A stage could not be brought back to completed after an accepted upstream change: the same convergence state
+# repeated, or the run used up its owner-recovery cycles. needs_review, never success.
+ENFORCE_CONVERGENCE_NOT_REACHED = "ENFORCE_CONVERGENCE_NOT_REACHED"
+# A recovery was refused BEFORE its owner was reopened because the owner's change would invalidate a completed TOOL
+# execution, which is never run again. The TOOL stays completed, the owner unchanged, the original failure stands.
+TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE = "TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE"
+# A stage re-entered for dependent reverification passed its gates and declared verification on the current tree and
+# regenerated its artifacts byte-identical: completed again, nothing downstream invalidated.
+DEPENDENT_REVERIFIED_UNCHANGED = "DEPENDENT_REVERIFIED_UNCHANGED"
+# What a stage re-entered for dependent reverification is told (generic: no scenario, no stack).
+DEPENDENT_REVERIFICATION_CONTEXT = (
+    "--- dependent reverification ---\n"
+    "An upstream stage this unit depends on was changed by a recovery after this unit had completed, so its "
+    "authoritative inputs are no longer the ones it was built and verified against. Revalidate this unit against "
+    "the current workspace and its declared verification. Change the artifacts this unit owns ONLY if the current "
+    "upstream state requires it; if they are already correct, return them exactly as they are."
+)
 
 
 def advisory_review_refusal(result: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:

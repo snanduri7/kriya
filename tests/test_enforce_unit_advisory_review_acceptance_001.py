@@ -315,10 +315,15 @@ async def test_a_reopened_owner_with_a_deterministic_failure_is_still_rejected(t
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_consumer_retry_whose_review_was_not_performed_is_accepted(tmp_path):
-    script = {("s2", "planned"): [dict(_NEEDS_A)], ("s2", "consumer_retry"): [dict(REFUSED)]}
+    # R4 (ENFORCE-RECOVERY-CONVERGENCE-001): s1, completed before its owner s0 was recovered, is re-entered after the
+    # consumer retry; it is scripted byte-identical (the unit's typed stop), so s2's accepted retry stays current.
+    reverified_unchanged = {"_skip_write": True, "quality_gates_passed": False, "status": "failed", "files": [],
+                            "candidate_gates_passed": True, "no_progress_reason": "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"}
+    script = {("s2", "planned"): [dict(_NEEDS_A)], ("s2", "consumer_retry"): [dict(REFUSED)],
+              ("s1", "dependent_reverification"): [reverified_unchanged]}
     result, calls = await _enforce_scripted(_enforce_engine(tmp_path), tmp_path, _chain(), script)
     legacy = result.legacy_result
-    assert _roles(calls)[-1] == "subtask=s2 role=consumer_retry"
+    assert _roles(calls)[-2:] == ["subtask=s2 role=consumer_retry", "subtask=s1 role=dependent_reverification"]
     (event,) = legacy["plan_recovery_events"]
     assert event["owner_recovery_passed"] is True
     unit = _by_id(legacy)["s2"]

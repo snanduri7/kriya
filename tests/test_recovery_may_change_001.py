@@ -148,6 +148,10 @@ async def _execute(tmp_path, plan, *, conflicts, recovery, kernel=None):
                 return {**write(planned[:1]), "files": planned[:1] + ["somewhere/else.txt"]}
             kind, value = outcome
             return write(value if kind == "changed" else [value])
+        if role == "dependent_reverification" and planned:
+            # R4 (ENFORCE-RECOVERY-CONVERGENCE-001): a completed stage an accepted owner change invalidated is
+            # re-entered; here it regenerates its artifacts byte-identical (the unit's typed stop, gates passed).
+            return {**UNCHANGED, "candidate_gates_passed": True}
         if conflicts.get(uid):
             return {"status": "failed", "quality_gates_passed": False, "files": [],
                     "plan_scope_conflict": _conflict(conflicts[uid].pop(0))}
@@ -457,8 +461,9 @@ async def test_no_must_fix_obligation_is_created_for_a_may_change_owner(tmp_path
 
 @pytest.mark.asyncio
 async def test_dependents_are_restored_after_an_unchanged_owner_and_stay_invalidated_after_a_changed_one(tmp_path):
-    """d depends on the provider only. Snapshot, invalidate, then: restored when the provider is unchanged; left
-    pending when it changed."""
+    """d depends on the provider only. Snapshot, invalidate, then: restored when the provider is unchanged; when it
+    changed, d stays invalidated until it is re-entered and reverified (R4, ENFORCE-RECOVERY-CONVERGENCE-001: this
+    test used to pin d left ``pending`` under a successful run)."""
     _result, calls = await _execute(tmp_path, _plan(), conflicts={"v": [["cons.py"]]},
                                     recovery={"p": ["unchanged"], "c": ["changed"]})
     by_role = {(c["unit"], c["role"]): c["states"] for c in calls}
@@ -472,7 +477,11 @@ async def test_dependents_are_restored_after_an_unchanged_owner_and_stay_invalid
                                    recovery={"p": ["changed"], "c": ["unchanged"]})
     states_at_c = next(c["states"] for c in calls if (c["unit"], c["role"]) == ("c", MAY))
     assert states_at_c["d"] == "pending"  # the provider changed: its dependent stays invalidated
-    assert result.control_state.subtask_states["d"] == "pending"
+    assert [(c["unit"], c["role"]) for c in calls][-2:] == [("c", "dependent_reverification"),
+                                                           ("d", "dependent_reverification")]   # canonical order
+    assert all(c["states"]["d"] != "completed" for c in calls
+               if (c["unit"], c["role"]) in (("c", MAY), ("v", "consumer_retry")))   # never completed while stale
+    assert result.control_state.subtask_states["d"] == "completed" and result.legacy_result["status"] == "success"
 
 
 def _two_file_provider_plan():

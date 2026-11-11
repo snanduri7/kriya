@@ -3792,6 +3792,21 @@ async def test_enforce_recovery_plan_group_upstream_changes_group_downstream_see
     assert len(calls) == 6
 
 
+
+def _answering_dependent_reverification(fake_run, reverified):
+    """R4 (ENFORCE-RECOVERY-CONVERGENCE-001): a completed stage that an accepted owner recovery invalidated is
+    re-entered as a dependent reverification before the run can succeed. The recovery tests below script their
+    units by call count, so that call is answered here - the unit's typed stop for a byte-identical regeneration
+    after its gates passed - recorded in ``reverified`` and kept out of the test's own count."""
+    async def run(**kwargs):
+        if kwargs["execution_scope"].endswith("role=dependent_reverification"):
+            reverified.append(kwargs["current_subtask_id"])
+            return {"status": "failed", "quality_gates_passed": False, "files": [], "candidate_gates_passed": True,
+                    "no_progress_reason": "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"}
+        return await fake_run(**kwargs)
+    return run
+
+
 @pytest.mark.asyncio
 async def test_enforce_recovery_plan_group_unchanged_is_no_progress(tmp_path):
     """spec §14 item 8: RECOVERY_NO_PROGRESS still fires per-group under the
@@ -4076,7 +4091,8 @@ async def test_enforce_recovery_plan_later_distinct_two_owner_requirement_reopen
         (tmp_path / "IntegrationTest.java").write_text("class IntegrationTest {}")
         return {"status": "success", "quality_gates_passed": True, "files": ["IntegrationTest.java"]}
 
-    we.run_generation_workflow = fake_run
+    reverified = []
+    we.run_generation_workflow = _answering_dependent_reverification(fake_run, reverified)
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         result = await WorkflowController(we).execute(
@@ -4084,6 +4100,7 @@ async def test_enforce_recovery_plan_later_distinct_two_owner_requirement_reopen
         )
 
     assert result.legacy_result["status"] == "success"
+    assert reverified == ["s3"]   # R4: the completed dependent(s) of the recovered owner
     assert len(calls) == 10
     events = result.legacy_result["plan_recovery_events"]
     assert len(events) == 4  # 2 groups x 2 distinct plans
@@ -4235,7 +4252,8 @@ async def test_enforce_recovery_plan_read_context_artifact_never_enters_write_sc
         (tmp_path / "AppTest.java").write_text("class AppTest {}")
         return {"status": "success", "quality_gates_passed": True, "files": ["AppTest.java"]}
 
-    we.run_generation_workflow = fake_run
+    reverified = []
+    we.run_generation_workflow = _answering_dependent_reverification(fake_run, reverified)
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         result = await WorkflowController(we).execute(
@@ -4243,6 +4261,7 @@ async def test_enforce_recovery_plan_read_context_artifact_never_enters_write_sc
         )
 
     assert result.legacy_result["status"] == "success"
+    assert reverified == ["s2"]   # R4: the completed dependent(s) of the recovered owner
     assert len(calls) == 5
     events = result.legacy_result["plan_recovery_events"]
     assert len(events) == 1
@@ -4617,7 +4636,8 @@ async def test_enforce_recovery_plan_must_change_and_verify_unchanged_consumer_p
         (tmp_path / "CustomerTest.java").write_text("class CustomerTest {}")
         return {"status": "success", "quality_gates_passed": True, "files": ["CustomerTest.java"]}
 
-    we.run_generation_workflow = fake_run
+    reverified = []
+    we.run_generation_workflow = _answering_dependent_reverification(fake_run, reverified)
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         result = await WorkflowController(we).execute(
@@ -4625,6 +4645,7 @@ async def test_enforce_recovery_plan_must_change_and_verify_unchanged_consumer_p
         )
 
     assert result.legacy_result["status"] == "success"
+    assert reverified == ["s2"]   # R4: the completed dependent(s) of the recovered owner
     # 1(s1) + 1(s2) + 1(s3 fail#1) + 1(pom.xml recovery cycle0) +
     # 1(s3 consumer retry cycle0, fails again) + 1(pom.xml recovery cycle1)
     # + 1(s3 consumer retry cycle1, succeeds) = 7 - Customer.java's own
@@ -5144,8 +5165,11 @@ async def test_enforce_recovery_plan_atomic_rejection_one_group_corrupt(tmp_path
     events = result.legacy_result["plan_recovery_events"]
     assert len(events) == 1
     assert events[0]["owner_recovery_passed"] is False
-    s2_result = next(item for item in result.subtask_results if item.subtask_id == "s2")
-    assert s2_result.status == SubtaskStatus.COMPLETED  # s2's OWN initial pass untouched - never reopened
+    # R4 (ENFORCE-RECOVERY-CONVERGENCE-001): s2 was never reopened, but it depends on s1 and s1's refused recovery
+    # left changed bytes behind - so s2's earlier completion is no longer current: no result entry, state pending.
+    # (This used to pin the stale ``completed`` entry.)
+    assert [item for item in result.subtask_results if item.subtask_id == "s2"] == []
+    assert result.control_state.subtask_states["s2"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -8366,7 +8390,8 @@ async def test_enforce_reopened_owner_receives_grounded_requirement_not_generic_
             "src/test/java/AppTest.java", "src/test/java/InMemoryServiceTest.java",
         ]}
 
-    we.run_generation_workflow = fake_run
+    reverified = []
+    we.run_generation_workflow = _answering_dependent_reverification(fake_run, reverified)
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         result = await WorkflowController(we).execute(
@@ -8374,6 +8399,7 @@ async def test_enforce_reopened_owner_receives_grounded_requirement_not_generic_
         )
 
     assert result.legacy_result["status"] == "success"
+    assert reverified == ["s2", "s3"]   # R4: the completed dependent(s) of the recovered owner
     assert len(calls) == 6
     # The reopened owner (call index 4, s1's owner_recovery) must have
     # received the exact grounded requirement, not generic framing.
@@ -8444,7 +8470,8 @@ async def test_enforce_cross_owner_recovery_generic_non_maven_shape(tmp_path):
         (tmp_path / "test_service.py").write_text("def test_x(): pass\n")
         return {"status": "success", "quality_gates_passed": True, "files": ["test_service.py"]}
 
-    we.run_generation_workflow = fake_run
+    reverified = []
+    we.run_generation_workflow = _answering_dependent_reverification(fake_run, reverified)
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         result = await WorkflowController(we).execute(
@@ -8452,6 +8479,7 @@ async def test_enforce_cross_owner_recovery_generic_non_maven_shape(tmp_path):
         )
 
     assert result.legacy_result["status"] == "success"
+    assert reverified == ["s2"]   # R4: the completed dependent(s) of the recovered owner
     assert len(calls) == 5
     owner_recovery_context = calls[3]["recovery_contract_block"]
     assert "MUST FIX" in owner_recovery_context
@@ -8713,7 +8741,8 @@ async def test_enforce_second_owner_recovery_preserves_earlier_requirements_must
         (tmp_path / "src" / "AppTest.java").write_text("class AppTest {}")
         return {"status": "success", "quality_gates_passed": True, "files": ["src/AppTest.java"]}
 
-    we.run_generation_workflow = fake_run
+    reverified = []
+    we.run_generation_workflow = _answering_dependent_reverification(fake_run, reverified)
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         result = await WorkflowController(we).execute(
@@ -8721,6 +8750,7 @@ async def test_enforce_second_owner_recovery_preserves_earlier_requirements_must
         )
 
     assert result.legacy_result["status"] == "success"
+    assert reverified == ["s3"]   # R4: the completed dependent(s) of the recovered owner
     assert len(calls) == 7
     events = result.legacy_result["plan_recovery_events"]
     assert len(events) == 2

@@ -160,7 +160,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
-    (W, 'WorkflowEngine.run_generation_workflow'): P(21, W, None, ()),
+    (W, 'WorkflowEngine.run_generation_workflow'): P(22, W, None, ()),
     (W, '_direct_terminal_writes'): P(1, W, ((W, 4),), ()),
     (W, '_ensure_repository_indexed'): P(2, W, ((W, 1),), ()),
     (W, '_gate_outcome_proven'): P(1, W, ((W, 2),), ()),
@@ -459,7 +459,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # MAY_CHANGE context transport control (tests/test_recovery_may_change_001.py: the recovery plan the loop built, read
     # at the documented controller seam; no new row): +1 C (build_recovery_execution_plan): C 403 -> 404.
     # R2 (2026-11-11, tests/test_enforce_unit_advisory_review_acceptance_001.py, the MAY_CHANGE-site control): +1 C (create_git_worktree): C 404 -> 405.
-    assert totals == {A: 113, W: 102, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    # R4 (2026-11-11, tests/test_enforce_recovery_convergence_001.py, the real-unit dependent-reverification control): +1 W
+    # (run_generation_workflow, patched at the documented seam like the other real-unit enforce harnesses): W 102 -> 103.
+    assert totals == {A: 113, W: 103, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
     assert len(PATCH_POINTS) == 135  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 

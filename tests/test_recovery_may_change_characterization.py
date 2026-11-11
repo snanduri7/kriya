@@ -18,7 +18,7 @@ on the reopened call is the deterministic equivalent of an ``owner_recovery`` in
 - K4: a reopened owner that changes only another planned file (its other file returned identical): what is reported,
   committed and left in the plan worktree, with passing and with failing gates.
 - K5: ``record_committed_effects`` for a refused / no-write owner result.
-- K6: what an owner reopen leaves in the dependents' states.
+- K6: what an owner reopen leaves in the dependents' states (inverted by R4: they are re-entered before the run can succeed).
 - K7: a file's revision does not distinguish an absent file from an empty one.
 """
 import asyncio
@@ -296,14 +296,18 @@ def _three_unit_plan():
 
 
 @pytest.mark.asyncio
-async def test_k6_dependents_marked_pending_on_an_owner_reopen_are_never_restored(tmp_path, _plan_worktree_is_the_workspace):
-    """s1 is reopened for s3's failure. Its dependents s2 and s3 are set to ``pending`` before it runs; s3 gets a new
-    state from its own retry, the intermediate dependent s2 is neither re-run nor re-marked - with the run a success."""
-    states_at_reopen = {}
+async def test_k6_dependents_marked_pending_on_an_owner_reopen_are_reentered_before_success(tmp_path, _plan_worktree_is_the_workspace):
+    """INVERTED by ENFORCE-RECOVERY-CONVERGENCE-001 (audit root R4). This test used to pin wrong product behaviour:
+    s1 is reopened for s3's failure, its dependents s2 and s3 are set to ``pending`` before it runs, s3 gets a new
+    state from its own retry - and the intermediate dependent s2 was neither re-run nor re-marked while the run
+    ended ``success``. Same scenario, now: s2 is re-entered as a dependent reverification (here: byte-identical)
+    and only then does the run succeed, with every state ``completed``."""
+    states_at_reopen, states_at_retry = {}, {}
     calls = []
     engine = _scripted_engine()
 
     async def fake_run(**kwargs):
+        from kriya.control.persistence import load_control_state
         calls.append(kwargs["execution_scope"])
         n = len(calls)
         if n == 1:
@@ -317,12 +321,16 @@ async def test_k6_dependents_marked_pending_on_an_owner_reopen_are_never_restore
                     "plan_scope_conflict": {"reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "failure_type": "compile",
                                             "required_files": ["owner.cfg"], "allowed_files": ["consumer.py"]}}
         if n == 4:
-            from kriya.control.persistence import load_control_state
             states_at_reopen.update(load_control_state(str(tmp_path)).subtask_states)
             (tmp_path / "owner.cfg").write_text("v2")
             return {"status": "success", "quality_gates_passed": True, "files": ["owner.cfg"]}
-        (tmp_path / "consumer.py").write_text("c")
-        return {"status": "success", "quality_gates_passed": True, "files": ["consumer.py"]}
+        if n == 5:
+            states_at_retry.update(load_control_state(str(tmp_path)).subtask_states)
+            (tmp_path / "consumer.py").write_text("c")
+            return {"status": "success", "quality_gates_passed": True, "files": ["consumer.py"]}
+        # the re-entered intermediate dependent: an identical regeneration (the unit's typed stop, gates passed)
+        return {"status": "failed", "quality_gates_passed": False, "files": [], "candidate_gates_passed": True,
+                "no_progress_reason": VERIFICATION_RETRY_NO_CHANGE_POSSIBLE}
 
     engine.run_generation_workflow = fake_run
     plan = _three_unit_plan()
@@ -333,9 +341,10 @@ async def test_k6_dependents_marked_pending_on_an_owner_reopen_are_never_restore
         result = await WorkflowController(engine).execute("goal", str(tmp_path), migration_mode="enforce")
 
     assert calls == ["subtask=s1 role=planned", "subtask=s2 role=planned", "subtask=s3 role=planned",
-                     "subtask=s1 role=owner_recovery", "subtask=s3 role=consumer_retry"]
+                     "subtask=s1 role=owner_recovery", "subtask=s3 role=consumer_retry",
+                     "subtask=s2 role=dependent_reverification"]
     assert (states_at_reopen["s1"], states_at_reopen["s2"], states_at_reopen["s3"]) == ("in_progress", "pending", "pending")
+    assert states_at_retry["s2"] == "pending"      # the negative control: still stale while the consumer is retried
     assert result.legacy_result["status"] == "success"
-    final = result.control_state.subtask_states
-    assert (final["s1"], final["s3"]) == ("completed", "completed")
-    assert final["s2"] == "pending"  # the intermediate dependent: invalidated, never re-run, never restored
+    assert dict(result.control_state.subtask_states) == {"s1": "completed", "s2": "completed", "s3": "completed"}
+    assert (tmp_path / "middle.py").read_text() == "m"
