@@ -293,6 +293,7 @@ class ShadowMode:
         event when structured planning failed, the ``requirement.verdicts``
         event when the terminal verifier ran, and the role metrics no subtask
         row reported. Not a RunRecord and not a lifecycle state."""
+        from kriya.core.attempt_evidence import scope as attempt_evidence_scope
         from kriya.core.state_paths import trace_db_path
         from kriya.workflow.run_events import EventAuthority, RunEvent
         write_outcome_trace = deps.load_write_outcome_trace()
@@ -405,6 +406,23 @@ class ShadowMode:
                 details={"requirement_set_digest": requirements.get("digest"),
                          "outcomes": requirements.get("outcomes"), "verdicts": requirements["verdicts"]},
             ).to_dict())
+        truth = result.get("requirement_truth")
+        if isinstance(truth, dict):
+            # ENFORCE-TERMINAL-REQUIREMENT-TRUTH-001 (R1): the result's OWN field, copied - never computed here. The
+            # history readers (application/history.py) project the LAST `requirement.truth` event of a row.
+            events.append(RunEvent(
+                kind="requirement.truth", attempt=0, source=source, authority=EventAuthority.AUTHORITATIVE,
+                message=(f"requirement truth: {truth.get('status')} ({truth.get('verified')} verified, "
+                         f"{truth.get('accepted')} accepted, {truth.get('total')} mandatory)"),
+                details={"requirement_set_digest": requirements.get("digest"), **truth},
+            ).to_dict())
+        # R1 (run attribution): where this run's attempt evidence lives, or why it does not - the same pointer, from the
+        # same owner, every unit row records (run_lifecycle.open_run_state). A workspace-scoped run list reaches the
+        # run's workspace only through this event; without it the enforce row belonged to no workspace.
+        events.append(RunEvent(
+            kind="evidence.attempt_store", attempt=0, source=source, authority=EventAuthority.AUXILIARY,
+            message="attempt evidence store", details=attempt_evidence_scope.store_pointer(),
+        ).to_dict())
         failure_category = enforce_terminal_category(result)
         try:
             trace_db = trace_db_path(kernel.config)

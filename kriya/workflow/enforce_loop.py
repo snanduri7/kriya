@@ -263,6 +263,7 @@ class EnforceDeps:
     blocking_requirements: Callable[..., Any]
     requirement_evidence: Callable[..., Any]
     requirement_outcomes: Callable[..., Any]
+    requirement_truth: Callable[..., Any]
     requirement_verdict_details: Callable[..., Any]
     requirements_prompt_block: Callable[..., Any]
     seed_requirement_obligations: Callable[..., Any]
@@ -3939,10 +3940,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # PRD-020: every original requirement's outcome, as the direct path
         # reports it (the verifier's verdict, or closed by evidence).
         try:
+            final_requirement_outcomes = deps.requirement_outcomes(obligation_ledger, requirement_set)
             aggregated["requirements"] = {
                 **requirement_set.to_dict(),
-                "outcomes": {rid: outcome.value for rid, outcome in
-                             deps.requirement_outcomes(obligation_ledger, requirement_set).items()},
+                "outcomes": {rid: outcome.value for rid, outcome in final_requirement_outcomes.items()},
                 "evidence": deps.requirement_evidence(obligation_ledger, requirement_set),
                 # Each verdict with its reason code, verifier and candidate.
                 "verdicts": deps.requirement_verdict_details(obligation_ledger, requirement_set),
@@ -3950,6 +3951,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # left open by missing evidence is otherwise undiagnosable).
                 "closure_attempts": list(gate_report.requirement_closure_attempts),
             }
+            # ENFORCE-TERMINAL-REQUIREMENT-TRUTH-001 (R1): the run's typed FINAL requirement truth, computed ONCE, here, from
+            # the very outcomes reported above (the direct path's field, outcome.completed_result). The launch record and the
+            # `.enforce` trace row copy this value; no reader computes it again. It never changes the lifecycle status: an
+            # open requirement blocks only where the requirement policy says so (blocking_requirements, the terminal gates).
+            aggregated["requirement_truth"] = deps.requirement_truth(final_requirement_outcomes, requirement_set)
         except Exception as error:
             deps.logger.warning(f"Original requirement outcomes unavailable for the result: {error}")
         if gate_report.artifact_error:

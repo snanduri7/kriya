@@ -205,7 +205,10 @@ def _row(cfg):
 
 
 def _kinds(events):
-    return [e["kind"] for e in events if e["kind"] != "model.role_metrics"]
+    # The two per-row auxiliary events every enforce row carries are left out of these decision pins: the role metrics,
+    # and (R1, ENFORCE-TERMINAL-REQUIREMENT-TRUTH-001) the attempt-evidence store pointer, whose presence on EVERY
+    # terminal shape is pinned in tests/test_enforce_terminal_requirement_truth_001.py.
+    return [e["kind"] for e in events if e["kind"] not in ("model.role_metrics", "evidence.attempt_store")]
 
 
 def test_an_error_result_writes_a_run_exception_event():
