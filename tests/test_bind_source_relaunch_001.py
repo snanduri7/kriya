@@ -1,4 +1,4 @@
-"""BIND-SOURCE-RELAUNCH-001 (owner ruling 2026-11-11; root MAVEN-GATE-CACHE-BIND-SOURCE-MISSING-ON-UNIQUE-PATH-001).
+"""BIND-SOURCE-RELAUNCH-001 (owner ruling 2026-11-11; root DOCKER-BIND-SOURCE-REFUSED-AFTER-PATHNAME-RECREATION-001).
 
 MEASURED (pre-live gate on b64bd4b, then 1 of 24 crash subprocesses under 8 workers): the container backend refused to start a
 gate's container with `bind source path does not exist: <path>` while the path existed on the host. TRACED + reproduced at the
