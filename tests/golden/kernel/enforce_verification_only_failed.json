@@ -1690,7 +1690,7 @@
     {
      "attempt": 1,
      "kind": "model.result",
-     "payload": "sha256:b32673613da770eb",
+     "payload": "sha256:3cca4a4b39e565e7",
      "payload_keys": [
       "backend_error",
       "backend_status",
@@ -1748,7 +1748,7 @@
     {
      "attempt": 1,
      "content": {
-      "event": "sha256:a9d67d0ca482fb3d"
+      "event": "sha256:050c10bfda690164"
      },
      "event": "developer.prompt_composition",
      "kind": "mirror.event",
@@ -1769,7 +1769,7 @@
     {
      "attempt": 1,
      "content": {
-      "event": "sha256:0c79c18ad0be6634"
+      "event": "sha256:1a94028bd6c7d40f"
      },
      "event": "generation.completed",
      "kind": "mirror.event",
@@ -2156,7 +2156,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:a3dfead1fea21c44"
+      "event": "sha256:33834b4d66a94f00"
      },
      "event": "model.role_metrics",
      "kind": "mirror.event",
@@ -2211,7 +2211,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:36f2548b95087b18"
+      "event": "sha256:badb0d7145d8775c"
      },
      "event": "verification.owner_recovery_rejected",
      "kind": "mirror.event",
@@ -2647,6 +2647,7 @@
     "failure_category",
     "files",
     "last_subtask_result",
+    "plan_recovery_events",
     "plan_repair_attempts",
     "quality_gates_passed",
     "requirement_truth",
@@ -2788,6 +2789,23 @@
      ],
      "workspace_commit_failure": null
     },
+    "plan_recovery_events": [
+     {
+      "accepted_owner": null,
+      "classification": "VERIFICATION_OWNER_RECOVERY",
+      "failed_subtask": "s2",
+      "owner_recovery_passed": false,
+      "owners_invoked": [
+       "s1"
+      ],
+      "reason_codes": [
+       "VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED"
+      ],
+      "unchanged_owners": [
+       "s1"
+      ]
+     }
+    ],
     "plan_repair_attempts": 0,
     "quality_gates_passed": false,
     "requirement_truth": {
@@ -3363,14 +3381,14 @@
     {
      "attempt": 1,
      "authority": "advisory",
-     "details": "sha256:6acc0aebd00a0ecb",
+     "details": "sha256:c2bb7e136bde863a",
      "kind": "developer.prompt_composition",
      "source": "developer"
     },
     {
      "attempt": 1,
      "authority": "advisory",
-     "details": "sha256:3ff09b999ff14582",
+     "details": "sha256:624652144e74024d",
      "kind": "generation.completed",
      "source": "developer"
     },
@@ -3433,7 +3451,7 @@
     {
      "attempt": 1,
      "authority": "auxiliary",
-     "details": "sha256:6b93013fa727fb77",
+     "details": "sha256:a76c5c1c8ab8e781",
      "kind": "model.role_metrics",
      "source": "workflow"
     }

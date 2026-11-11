@@ -339,3 +339,26 @@ def test_a_reopened_owner_that_changes_one_planned_file_and_returns_another_iden
     assert delivered == [[HELPER], [HELPER]], delivered
     assert [e.details.get("reason_code") for e in events if e.kind == "retry.no_progress_terminal"] == [
         "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"]  # s2's first failure only
+
+
+def test_the_real_reopened_developer_request_carries_the_owners_own_review_fenced_and_labelled(tmp_path):
+    """K-A (VERIFICATION-OWNER-REOPEN-ADVISORY-REVIEW-NOT-TRANSPORTED-001) through the REAL workflow: the review the
+    Reviewer wrote about s1's accepted candidate reaches the reopened s1's Developer request inside the untrusted fence,
+    after the gate's own output. MEASURED before K-A on Scenario-A run 6: 0 of the review's lines were in that request."""
+    from kriya.workflow.owner_recovery import ADVISORY_REVIEW_HEADING
+    from kriya.workflow.untrusted_context import (
+        UNTRUSTED_REFERENCE_BEGIN,
+        UNTRUSTED_REFERENCE_END,
+        outside_untrusted_reference,
+    )
+
+    workspace, _events, result, _model_calls, prompts, _test_gate_runs = _enforce(tmp_path, owner_fixes=True)
+    assert result.legacy_result["status"] == "success" and (workspace / SERVICE).read_text() == FIXED_SOURCE
+    planned, reopened = prompts[0], prompts[1]
+    assert ADVISORY_REVIEW_HEADING not in planned                                    # only a reopened owner is shown a review
+    assert "assert 5 == 10" in reopened and ADVISORY_REVIEW_HEADING in reopened
+    assert reopened.index("assert 5 == 10") < reopened.index(ADVISORY_REVIEW_HEADING)
+    start = reopened.index(UNTRUSTED_REFERENCE_BEGIN, reopened.index(ADVISORY_REVIEW_HEADING))
+    fenced = reopened[start:reopened.index(UNTRUSTED_REFERENCE_END, start)]
+    assert "Review: Approved" in fenced                                              # the scripted Reviewer's text about s1
+    assert "Review: Approved" not in outside_untrusted_reference(reopened)

@@ -833,10 +833,12 @@ def verification_failure_evidence(call_result: Mapping[str, Any]) -> str:
 
 def verification_owner_recovery_context(
     *, verification_subtask_id: str, owner_id: str, owner_files: Sequence[str], evidence: str,
+    advisory_review: str = "", unchanged_owners: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     """The body is kriya/workflow/owner_recovery.py (E11)."""
     return owner_recovery.verification_owner_recovery_context(
         verification_subtask_id=verification_subtask_id, owner_id=owner_id, owner_files=owner_files, evidence=evidence,
+        advisory_review=advisory_review, unchanged_owners=unchanged_owners,
     )
 
 

@@ -1752,6 +1752,36 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # requirement on the same subtask.
         recovery_plan_generation_by_subtask: Dict[str, int] = {}
 
+        # VERIFICATION-OWNER-REOPEN-ADVISORY-REVIEW-NOT-TRANSPORTED-001 (K-A, Scenario-A run 6). The advisory review
+        # of each file-owning unit, bound to the exact bytes it was written about: recorded at the ONE invocation
+        # choke point (_invoke_bounded_subtask) only for an invocation that passed outright (its candidate is applied
+        # and its review was performed - TRACED: state.pre_approval_review is reset every attempt, so that review is of
+        # the applied bytes), together with the unit's file revisions at that moment. A later invocation that is
+        # refused, unreviewed or unchanged leaves the record alone; freshness is decided at use, by revision.
+        advisory_review_records: Dict[str, Dict[str, Any]] = {}
+
+        def _record_advisory_review(target: Subtask, unit_result: Mapping[str, Any]) -> None:
+            review = unit_result.get("review")
+            if (
+                target.planned_files
+                and isinstance(review, str) and review.strip()
+                # passed outright: the unit's own fold of "candidate applied, gates passed AND the final review was
+                # performed" (a refused, cut-off or deadline-stopped review leaves this False even when R2 accepts the unit)
+                and unit_result.get("quality_gates_passed") is True
+            ):
+                advisory_review_records[target.id] = {"review": review, "revisions": _stage_revisions(target)}
+
+        def _fresh_advisory_review(owner: Subtask) -> Tuple[str, str]:
+            """(review text, disposition) for an owner about to be reopened: the text only when a review of THIS owner
+            was recorded AND the owner's files still have exactly the revisions it was written about. Never another
+            unit's review; a stale, missing, refused or unperformed review is simply not shown."""
+            record = advisory_review_records.get(owner.id)
+            if record is None:
+                return "", ADVISORY_REVIEW_ABSENT
+            if record["revisions"] != _stage_revisions(owner):
+                return "", ADVISORY_REVIEW_STALE
+            return record["review"], ADVISORY_REVIEW_INCLUDED
+
         async def _invoke_bounded_subtask(
             target: Subtask,
             target_position: int,
@@ -1788,7 +1818,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 subtask_id for subtask_id, status in approved_stage_states.items()
                 if status == deps.SubtaskStatus.COMPLETED.value
             )
-            return await deps.workflow_engine.run_generation_workflow(
+            unit_result = await deps.workflow_engine.run_generation_workflow(
                 goal=target_goal,
                 workspace_path=plan_workspace_path,
                 supplementary_context="\n\n".join(filter(None, (
@@ -1880,9 +1910,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 enforce_run_id=f"{run_id}.enforce",
                 **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )
+            _record_advisory_review(target, unit_result)
+            return unit_result
 
-        # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001: each verification-only unit may reopen its
-        # upstream owner once per run (the bound), whatever the owner then produces.
+        # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001: each verification-only unit starts ONE owner-reopen
+        # episode per run (the bound), whatever its owners then produce. VERIFICATION-OWNER-REOPEN-SINGLE-OWNER-001
+        # (K-B): inside that episode each distinct eligible owner is invoked at most once (see the episode's own loop).
         verification_owner_reopened: set = set()
 
         # ENFORCE-RECOVERY-CONVERGENCE-001 (audit root R4). A recovery that changes an upstream stage's bytes makes
@@ -1903,6 +1936,32 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 if approved_stage_states.get(dependent_id) == deps.SubtaskStatus.COMPLETED.value
                 and getattr(plan.subtask_by_id(dependent_id), "execution_method", None) == deps.ExecutionMethod.TOOL
             ]
+
+        def _next_eligible_reopen_owner(
+            verification_unit: Subtask, completed_ids: Sequence[str], considered: List[str], blocked: Dict[str, List[str]],
+        ) -> Optional[Subtask]:
+            """K-B: the next owner of one verification-failure episode - the EXISTING canonical resolver
+            (nearest_mutating_upstream_owner: breadth-first over the plan's declared depends_on, completed file-owning
+            stages only) asked again without the owners this episode already considered, so the order is the
+            resolver's own nearest-to-farthest order and no second traversal exists. An owner whose change would
+            invalidate a COMPLETED TOOL execution (the R4 preflight) is ineligible: it is recorded in ``blocked``,
+            never invoked, and the next one is asked for. Every returned or blocked owner is added to ``considered``,
+            so no owner is considered twice. None when no eligible owner is left."""
+            while True:
+                candidate = deps.nearest_mutating_upstream_owner(
+                    plan, verification_unit, [stage_id for stage_id in completed_ids if stage_id not in considered])
+                if candidate is None:
+                    return None
+                considered.append(candidate.id)
+                tool_dependents = _completed_tool_dependents(candidate.id)
+                if not tool_dependents:
+                    return candidate
+                blocked[candidate.id] = list(tool_dependents)
+                deps.logger.warning(
+                    "VERIFICATION_OWNER_RECOVERY_OWNER_INELIGIBLE verification=%s owner=%s completed_tool_dependents=%s "
+                    "- not reopened (%s)", verification_unit.id, candidate.id, tool_dependents,
+                    TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE,
+                )
 
         def _invalidate_dependents(owner_id: str) -> Dict[str, Any]:
             """The ONE invalidation of the loop (ordinary owner recovery, MAY_CHANGE owner, verification-owner
@@ -3623,33 +3682,34 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 and subtask.id not in verification_owner_reopened
             ):
                 verification_owner_reopened.add(subtask.id)
-                owner = deps.nearest_mutating_upstream_owner(
-                    plan, subtask,
-                    [sid for sid, stage_state in approved_stage_states.items()
-                     if stage_state == deps.SubtaskStatus.COMPLETED.value],
-                )
-                # R4 preflight (the same as the owner-recovery plan's): never reopen an owner whose change would
-                # invalidate a COMPLETED TOOL execution. The verification failure stands, typed.
-                verification_tool_blocked = _completed_tool_dependents(owner.id) if owner is not None else []
-                if owner is not None and verification_tool_blocked:
-                    stage_refusal = (TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE, (
-                        f"{TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE}: reopening upstream owner {owner.id!r} for "
-                        f"verification unit {subtask.id!r} would invalidate its completed TOOL dependent(s) "
-                        f"{verification_tool_blocked!r}, which are never run again; the owner was not reopened and "
-                        "the verification failure stands."))
-                    plan_recovery_events.append({
-                        "failed_subtask": subtask.id, "classification": "VERIFICATION_OWNER_RECOVERY",
-                        "reason_codes": [TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE],
-                        "blocked_owners": {owner.id: list(verification_tool_blocked)},
-                        "owner_recovery_passed": False,
-                    })
-                    deps.logger.warning("%s", stage_refusal[1])
-                    owner = None
-                if owner is not None:
+                # VERIFICATION-OWNER-REOPEN-SINGLE-OWNER-001 (K-B, Scenario-A run 6: the one reopened owner returned
+                # its file unchanged and the run ended although other legal repair sites existed). ONE failure episode:
+                # the owners are tried in the existing resolver's nearest-to-farthest order, each distinct eligible
+                # owner at most once, and the NEXT one only after the attempted owner's canonical typed unchanged stop
+                # with equal bytes (no retry of the same owner for model variance). The first accepted material change
+                # ends the search: the fold, the R4 invalidation and the verification rerun below, whatever that rerun
+                # then finds. A candidate that changed bytes and was refused ends the episode as it always did. An
+                # owner with a completed TOOL dependent is ineligible and never invoked (R4 preflight). No budget of
+                # its own: an owner the run's generation budget stops returns no typed unchanged stop, so nothing
+                # follows it.
+                reopen_completed = [sid for sid, stage_state in approved_stage_states.items()
+                                    if stage_state == deps.SubtaskStatus.COMPLETED.value]
+                episode_considered: List[str] = []           # invoked or ineligible: never considered twice
+                episode_blocked: Dict[str, List[str]] = {}   # ineligible owner -> its completed TOOL dependents
+                episode_invoked: List[str] = []
+                episode_unchanged: List[Dict[str, Any]] = [] # owners that produced no material repair, in order
+                episode_accepted: Optional[str] = None
+                episode_stop = VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER
+                # the ORIGINAL authoritative failure, read once: every owner of the episode receives exactly this
+                evidence = deps.verification_failure_evidence(call_result)
+                owner = _next_eligible_reopen_owner(subtask, reopen_completed, episode_considered, episode_blocked)
+                while owner is not None:
                     owner_files = sorted(pf.path for pf in owner.planned_files if pf.action != deps.FileAction.DELETE)
                     owner_position = order.index(owner.id) + 1 if owner.id in order else position
                     before = tuple(deps.read_file_revision(os.path.join(plan_workspace_path, path)) for path in owner_files)
-                    evidence = deps.verification_failure_evidence(call_result)
+                    # K-A: THIS owner's own review, only when it is about the bytes the owner has now.
+                    owner_review, owner_review_disposition = _fresh_advisory_review(owner)
+                    episode_invoked.append(owner.id)
                     deps.logger.warning(
                         "VERIFICATION_OWNER_RECOVERY_STARTED verification=%s owner=%s files=%s",
                         subtask.id, owner.id, owner_files,
@@ -3658,7 +3718,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         owner, owner_position, execution_role="verification_owner_recovery",
                         recovery_context=deps.verification_owner_recovery_context(
                             verification_subtask_id=subtask.id, owner_id=owner.id, owner_files=owner_files,
-                            evidence=evidence,
+                            evidence=evidence, advisory_review=owner_review,
+                            unchanged_owners=[dict(entry) for entry in episode_unchanged],
                         ),
                     )
                     after = tuple(deps.read_file_revision(os.path.join(plan_workspace_path, path)) for path in owner_files)
@@ -3682,8 +3743,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "ACCEPTED" if owner_accepted else "REJECTED", subtask.id, owner.id, after != before,
                         bool(owner_result.get("quality_gates_passed")), owner_undeclared,
                     )
-                    # The decision in the attempt-evidence store (LR-R1-M1): a rejected reopen is the run's
-                    # terminal cause (the verification failure stands and the loop stops below); an accepted
+                    # K-B: the ONLY outcome after which another owner may be asked - the unit's canonical typed
+                    # unchanged stop with no byte of the owner's files changed. Anything else that is not an
+                    # acceptance (changed bytes refused by a gate, scope or declared verification; a budget or
+                    # environment stop) ends the episode with the failure standing: changed bytes are not progress.
+                    owner_unchanged = bool(
+                        not owner_accepted
+                        and owner_result.get("no_progress_reason") == deps.VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
+                        and after == before
+                    )
+                    # The decision in the attempt-evidence store (LR-R1-M1): a rejected reopen leaves the verification
+                    # failure standing (the last rejected one of an episode is the run's terminal cause); an accepted
                     # one is followed by the verification rerun, whose own unit result then speaks.
                     from kriya.workflow.run_events import EventAuthority, RunEvent
 
@@ -3703,9 +3773,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "error": None if owner_accepted else (
                                 "the reopened owner produced no accepted change; the verification unit's "
                                 f"failure stands ({deps.VERIFICATION_RETRY_NO_CHANGE_POSSIBLE})"),
+                            # K-A / K-B: what this owner was shown and where it stands in the episode
+                            "advisory_review": owner_review_disposition,
+                            "episode_position": len(episode_invoked),
+                            "unchanged_owners_before": [entry["owner"] for entry in episode_unchanged],
+                            "owner_unchanged": owner_unchanged,
                         },
                     ))
                     if owner_accepted:
+                        episode_accepted, episode_stop = owner.id, VERIFICATION_OWNER_EPISODE_ACCEPTED
                         for path in owner_result.get("files") or []:
                             try:
                                 with open(os.path.join(plan_workspace_path, path), "r", encoding="utf-8",
@@ -3751,6 +3827,33 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                 "the current tree is the one to verify."
                             ),
                         )
+                        break   # K-B: an accepted material repair ends the owner search, whatever the rerun found
+                    if not owner_unchanged:
+                        episode_stop = VERIFICATION_OWNER_EPISODE_OWNER_STOPPED
+                        break
+                    episode_unchanged.append({"owner": owner.id, "files": owner_files})
+                    episode_stop = VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED
+                    owner = _next_eligible_reopen_owner(subtask, reopen_completed, episode_considered, episode_blocked)
+                if episode_blocked and not episode_invoked:
+                    # R4 preflight, as before K-B: no owner could be reopened without invalidating a COMPLETED TOOL
+                    # execution, so none was; the verification failure stands, typed.
+                    stage_refusal = (TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE, (
+                        f"{TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE}: reopening upstream owner(s) "
+                        f"{sorted(episode_blocked)!r} for verification unit {subtask.id!r} would invalidate their "
+                        f"completed TOOL dependent(s) {episode_blocked!r}, which are never run again; no owner was "
+                        "reopened and the verification failure stands."))
+                    deps.logger.warning("%s", stage_refusal[1])
+                    episode_stop = TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE
+                # The episode on the run result (plan_recovery_events): what was tried, in order, and how it ended.
+                plan_recovery_events.append({
+                    "failed_subtask": subtask.id, "classification": "VERIFICATION_OWNER_RECOVERY",
+                    "reason_codes": [episode_stop],
+                    "owners_invoked": list(episode_invoked),
+                    "unchanged_owners": [entry["owner"] for entry in episode_unchanged],
+                    "accepted_owner": episode_accepted,
+                    **({"blocked_owners": dict(episode_blocked)} if episode_blocked else {}),
+                    "owner_recovery_passed": episode_accepted is not None,
+                })
             subtask_call_results.append(call_result)
 
             # R2: the unit's deterministic gates, by the loop's one reading (an unperformed advisory review excuses
@@ -4394,6 +4497,15 @@ ADVISORY_REVIEW_NOT_PERFORMED = "ADVISORY_REVIEW_NOT_PERFORMED"
 # A stage could not be brought back to completed after an accepted upstream change: the same convergence state
 # repeated, or the run used up its owner-recovery cycles. needs_review, never success.
 ENFORCE_CONVERGENCE_NOT_REACHED = "ENFORCE_CONVERGENCE_NOT_REACHED"
+# K-A: why a reopened owner was, or was not, shown its own advisory review (verification.owner_recovery_* details).
+ADVISORY_REVIEW_INCLUDED = "ADVISORY_REVIEW_INCLUDED"
+ADVISORY_REVIEW_ABSENT = "ADVISORY_REVIEW_ABSENT"      # none recorded for this owner (never reviewed, refused, not performed)
+ADVISORY_REVIEW_STALE = "ADVISORY_REVIEW_STALE"        # recorded for other bytes than the owner's files have now
+# K-B: how one verification-owner episode ended (plan_recovery_events[].reason_codes of VERIFICATION_OWNER_RECOVERY).
+VERIFICATION_OWNER_EPISODE_ACCEPTED = "VERIFICATION_OWNER_EPISODE_ACCEPTED"
+VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED = "VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED"
+VERIFICATION_OWNER_EPISODE_OWNER_STOPPED = "VERIFICATION_OWNER_EPISODE_OWNER_STOPPED"
+VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER = "VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER"
 # A recovery was refused BEFORE its owner was reopened because the owner's change would invalidate a completed TOOL
 # execution, which is never run again. The TOOL stays completed, the owner unchanged, the original failure stands.
 TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE = "TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE"

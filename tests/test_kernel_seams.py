@@ -429,7 +429,8 @@ E11_CONTROLLER_NAMES: Dict[str, Tuple[str, str, Optional[str]]] = {
     'nearest_mutating_upstream_owner': ('plan_revision', 'def', "(plan: 'EngineeringPlan', subtask: 'Subtask', completed_ids: 'Sequence[str]') -> 'Optional[Subtask]'"),
     '_GATE_FAILURE_TYPES': ('owner_recovery', 'frozenset', None),
     'verification_failure_evidence': ('owner_recovery', 'def', "(call_result: 'Mapping[str, Any]') -> 'str'"),
-    'verification_owner_recovery_context': ('owner_recovery', 'def', "(*, verification_subtask_id: 'str', owner_id: 'str', owner_files: 'Sequence[str]', evidence: 'str') -> 'str'"),
+    # K-A / K-B (2026-11-11): two optional keyword arguments added (the owner's own fresh advisory review; the owners already reopened unchanged in this episode); the four original ones are unchanged
+    'verification_owner_recovery_context': ('owner_recovery', 'def', "(*, verification_subtask_id: 'str', owner_id: 'str', owner_files: 'Sequence[str]', evidence: 'str', advisory_review: 'str' = '', unchanged_owners: 'Sequence[Mapping[str, Any]]' = ()) -> 'str'"),
     'ArtifactOwnerResolutionBasis': ('owner_recovery', 'EnumType', None),
     'OwnerResolution': ('owner_recovery', 'type', None),
     '_successful_modifiers_in_execution_order': ('owner_recovery', 'def', "(path: 'str', order: 'List[str]', control_state: 'ControlState') -> 'List[str]'"),

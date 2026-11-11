@@ -455,6 +455,13 @@ R1_ENFORCE_ROW_ADDITIONS = {
 }
 
 
+# K-A / K-B (VERIFICATION-OWNER-REOPEN-ADVISORY-REVIEW-NOT-TRANSPORTED-001, VERIFICATION-OWNER-REOPEN-SINGLE-OWNER-001,
+# 2026-11-11): the ONE scenario whose golden those two changes re-recorded - the verification-only failure whose owner
+# is reopened and regenerates unchanged. The file it replaced is kept in PRE_KAKB_DIR; the delta is pinned below.
+PRE_KAKB_DIR = kg.GOLDEN_DIR.parent / "kernel_pre_kakb_owner_search"
+KAKB_RERECORDED = ("enforce_verification_only_failed",)
+
+
 def _extras(before: list, after: list) -> list:
     """The items of ``after`` that are not ``before``'s, when ``before`` is a subsequence of ``after`` (order kept);
     fails otherwise, so a removed, changed or reordered item can never pass as an addition."""
@@ -471,7 +478,10 @@ def _extras(before: list, after: list) -> list:
 @pytest.mark.parametrize("name", sorted(R1_ENFORCE_ROW_ADDITIONS))
 def test_an_enforce_golden_is_its_pre_r1_golden_plus_exactly_the_r1_additions(name):
     before = json.loads((PRE_R1_DIR / f"{name}.json").read_text(encoding="utf-8"))
-    after = json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    # the golden as R1 left it: the current file, or - for a scenario a LATER accepted change re-recorded again - the
+    # file that change replaced (the chain of references: pre-R1 -> R1 -> K-A/K-B -> current)
+    after_r1 = PRE_KAKB_DIR / f"{name}.json" if name in KAKB_RERECORDED else kg.GOLDEN_DIR / f"{name}.json"
+    after = json.loads(after_r1.read_text(encoding="utf-8"))
     truths, pointers = R1_ENFORCE_ROW_ADDITIONS[name]
     assert before != after and set(before) == set(after)
     for key in set(before) - {"evidence", "run_events", "result"}:
@@ -506,6 +516,44 @@ def test_an_enforce_golden_is_its_pre_r1_golden_plus_exactly_the_r1_additions(na
         assert (truth["status"], truth["verified"], truth["accepted"], truth["total"]) == ("OPEN_REQUIREMENTS", 0, 0, 1)
     else:
         assert "requirement_truth" not in values_after
+
+
+def test_the_reopen_golden_is_its_pre_kakb_golden_plus_exactly_the_review_transport_and_episode_delta():
+    """MEASURED content diff (kakb_golden_content_diff.txt): the reopened owner's Developer request now carries its own
+    fenced review, so that ONE request's size changes (prompt tokens 2399 -> 2634) in the four records that report it;
+    the rejected-reopen event gains its K-A/K-B fields; the result gains the episode. No record, event or key is added,
+    removed or reordered anywhere else, and no other scenario's golden changed (41 scenarios regenerated, 1 differed)."""
+    (name,) = KAKB_RERECORDED
+    before = json.loads((PRE_KAKB_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    after = json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    assert sorted(path.stem for path in PRE_KAKB_DIR.glob("*.json")) == sorted(KAKB_RERECORDED)
+    for key in set(before) - {"evidence", "run_events", "result"}:
+        assert before[key] == after[key], key
+
+    def label(record):
+        return record.get("event") or record["kind"]
+
+    changed_records = []
+    for store_before, store_after in zip(before["evidence"], after["evidence"], strict=True):
+        assert [label(r) for r in store_before["records"]] == [label(r) for r in store_after["records"]]   # same records, same order
+        changed_records += [label(a) for b, a in zip(store_before["records"], store_after["records"], strict=True) if b != a]
+    assert changed_records == ["model.result", "developer.prompt_composition", "generation.completed", "model.role_metrics",
+                               "verification.owner_recovery_rejected"]
+
+    changed_events = []
+    for row_before, row_after in zip(before["run_events"], after["run_events"], strict=True):
+        assert [e["kind"] for e in row_before["events"]] == [e["kind"] for e in row_after["events"]]
+        changed_events += [a["kind"] for b, a in zip(row_before["events"], row_after["events"], strict=True) if b != a]
+    assert changed_events == ["developer.prompt_composition", "generation.completed", "model.role_metrics"]
+
+    values_before, values_after = before["result"]["legacy_result"]["values"], after["result"]["legacy_result"]["values"]
+    assert _extras(before["result"]["legacy_result"]["keys"], after["result"]["legacy_result"]["keys"]) == ["plan_recovery_events"]
+    assert {k: v for k, v in values_after.items() if k != "plan_recovery_events"} == values_before
+    assert values_after["plan_recovery_events"] == [{
+        "failed_subtask": "s2", "classification": "VERIFICATION_OWNER_RECOVERY",
+        "reason_codes": ["VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED"], "owners_invoked": ["s1"],
+        "unchanged_owners": ["s1"], "accepted_owner": None, "owner_recovery_passed": False}]
+    assert (values_after["status"], values_after["quality_gates_passed"]) == ("failed", False)       # still the same truthful failure
 
 
 def test_the_pre_r1_reference_is_exactly_the_four_enforce_scenarios_and_no_longer_what_the_kernel_produces(tmp_path):
