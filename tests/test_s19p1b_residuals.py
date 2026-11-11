@@ -12,7 +12,7 @@ D. GUI Open Folder (`workspace.describe`, kriya/tools/git_metadata.describe_chec
 B. Kriya-source/installation trust is ROLE-based: exactly the call sites in INSTALLATION_STATE read Kriya's own checkout
    as operator-managed infrastructure; the same folder opened as a TARGET is refused at every real target entry.
    W3-2 follow-up (RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001, owner decision 2026-10-30): that exemption is ONLY the
-   content-filter judgment (`content_filters=False`); the `attr.tree` refusal is not role-based, so kriya_revision still
+   content-filter judgment (`content_filters=False`); the `attr.tree` refusal is not role-based, so read_kriya_source_identity still
    makes the inspection call, before its git calls. A site keeps its INSTALLATION_STATE row while it passes the opt-out.
 C. An operator (global/system) definition is trusted only when its ULTIMATE file is outside the repository: direct,
    transitive, relative, conditional (includeIf gitdir/onbranch/hasconfig) and symlinked includes all report the
@@ -478,7 +478,7 @@ _FILTER_CAPABLE_VERBS = {"status", "diff", "add", "commit", "checkout", "archive
                          "worktree"}
 _INSPECTIONS = {"refuse_repository_content_filters", "admit_repository_read"}
 UNINSPECTED_GIT = {
-    ("kriya/core/release_identity.py", "kriya_revision"): _INSTALLATION,
+    ("kriya/control/source_identity.py", "read_kriya_source_identity"): _INSTALLATION,
     ("kriya/repository/git.py", "_run"): "the inspection itself (config listing, rev-parse, ls-files, ls-tree, worktree list)",
     ("kriya/repository/git.py", "run"): "the inspection itself, with the caller's git and environment (_runner)",
     ("kriya/production_doctor.py", "_check_git_worktree"): "filter-free verbs only: rev-parse, worktree list (MEASURED)",
@@ -501,8 +501,9 @@ UNINSPECTED_GIT = {
 }
 # Exactly the call sites that read KRIYA'S OWN checkout as operator-managed application infrastructure, and why.
 INSTALLATION_STATE = {
-    ("kriya/core/release_identity.py", "kriya_revision"):
-        "the git revision/dirty flag of Kriya's own source (release identity, certification); its `status` CAN run a "
+    ("kriya/control/source_identity.py", "read_kriya_source_identity"):
+        "the git revision/dirty flag of Kriya's own source (run source identity; release identity and certification through "
+        "release_identity.kriya_revision, which delegates here: RUN-SOURCE-IDENTITY-001); its `status` CAN run a "
         "filter (MEASURED) and its content-filter judgment is not applied (`content_filters=False`): whoever can write that "
         "checkout's configuration can write Kriya's code. The attr.tree rule IS applied before its git calls "
         "(W3-2 follow-up, RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001)",
@@ -561,7 +562,7 @@ def test_the_installation_state_git_sites_are_exactly_these():
             uninspected[(relpath, name)] = sorted(v or "<callers>" for v in verbs)
     assert (sorted(set(uninspected) - set(UNINSPECTED_GIT)), sorted(set(UNINSPECTED_GIT) - set(uninspected))) == ([], []), uninspected
     assert {site for site, why in UNINSPECTED_GIT.items() if why == _INSTALLATION} <= set(INSTALLATION_STATE)
-    assert set(INSTALLATION_STATE) == {("kriya/core/release_identity.py", "kriya_revision"),
+    assert set(INSTALLATION_STATE) == {("kriya/control/source_identity.py", "read_kriya_source_identity"),
                                        ("kriya/distribution.py", "tracked_release_files")}
     assert set(INSTALLATION_STATE) <= functions                          # each is still a git site
 
@@ -582,20 +583,21 @@ def _exempting_calls():
 
 def test_the_content_filter_exemption_is_passed_only_by_the_installation_state_site_with_a_literal_false():
     """RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001: the inspection's content-filter opt-out is a role exemption. Exactly the
-    INSTALLATION_STATE call that inspects (kriya_revision) passes it, as the literal ``False`` (never a variable a target path could
+    INSTALLATION_STATE call that inspects (read_kriya_source_identity) passes it, as the literal ``False`` (never a variable a target path could
     reach), and the other call sites - every target-workspace entry - never pass the argument at all."""
     calls = _exempting_calls()
-    assert {(relpath, name) for relpath, name, _call in calls} == {("kriya/core/release_identity.py", "kriya_revision")}, calls
+    assert {(relpath, name) for relpath, name, _call in calls} == {("kriya/control/source_identity.py", "read_kriya_source_identity")}, calls
     assert all("content_filters=False" in call for _relpath, _name, call in calls), calls
     assert not any(relpath.startswith("kriya/repository/") for relpath, _name, _call in calls), "the authority must not exempt itself"
 
 
 def test_kriya_revision_inspects_attr_tree_before_its_first_git_call():
-    """The exempt inspection exists and precedes both evidence calls (`_command`) in kriya_revision's body."""
+    """The exempt inspection exists and precedes both evidence calls (`_command`) in the body of the one reader
+    (read_kriya_source_identity, which release_identity.kriya_revision delegates to)."""
     from tests.architecture.test_git_invocation_seam import _callee
 
-    tree = ast.parse((REPO / "kriya" / "core" / "release_identity.py").read_text(encoding="utf-8"))
-    function = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "kriya_revision")
+    tree = ast.parse((REPO / "kriya" / "control" / "source_identity.py").read_text(encoding="utf-8"))
+    function = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "read_kriya_source_identity")
     inspections = [c.lineno for c in ast.walk(function) if isinstance(c, ast.Call) and _callee(c) in _INSPECTIONS]
     commands = [c.lineno for c in ast.walk(function) if isinstance(c, ast.Call) and _callee(c) == "_command"]
     assert len(inspections) == 1 and len(commands) == 2 and inspections[0] < min(commands), (inspections, commands)
@@ -606,8 +608,9 @@ def test_an_installation_root_comes_only_from_the_installation():
     explicitly is one of these (a parameter forwarded unchanged, the doctor's own package root, the release tool's
     --source-root)."""
     names = {"kriya_revision", "release_identity", "release_candidate_identity", "tracked_release_files",
-             "check_distribution"}
-    positional = {"kriya_revision": 0, "tracked_release_files": 0, "check_distribution": 1}   # the source root's index
+             "check_distribution", "read_kriya_source_identity", "run_source_identity"}
+    positional = {"kriya_revision": 0, "tracked_release_files": 0, "check_distribution": 1,   # the source root's index
+                  "read_kriya_source_identity": 0, "run_source_identity": 0}
     explicit = set()
     for path in (REPO / "kriya").rglob("*.py"):
         relpath = str(path.relative_to(REPO))
@@ -629,6 +632,7 @@ def test_an_installation_root_comes_only_from_the_installation():
                     explicit.add((relpath, function.name, callee, ast.unparse(root)))
     assert explicit == {
         ("kriya/core/release_identity.py", "release_identity", "kriya_revision", "source_root"),      # its own parameter
+        ("kriya/core/release_identity.py", "kriya_revision", "read_kriya_source_identity", "source_root"),   # its own parameter, delegated
         ("kriya/core/release_candidate.py", "release_candidate_identity", "release_identity", "source_root"),
         ("kriya/distribution.py", "check_distribution", "tracked_release_files", "source_root"),
         ("kriya/distribution.py", "main", "check_distribution", "args.source_root"),                  # the release tool
@@ -640,7 +644,7 @@ def test_trust_is_never_decided_by_the_installation_path():
     installation-state call sites default to it, and the authority knows no installation path at all."""
     users = sorted(str(p.relative_to(REPO)) for p in (REPO / "kriya").rglob("*.py")
                    if "_SOURCE_ROOT" in p.read_text(encoding="utf-8"))
-    assert users == ["kriya/core/release_identity.py"]
+    assert users == ["kriya/control/source_identity.py"]
     authority = (REPO / "kriya" / "repository" / "git.py").read_text(encoding="utf-8")
     assert "__file__" not in authority and "release_identity" not in authority and "SOURCE_ROOT" not in authority
 
@@ -648,13 +652,15 @@ def test_trust_is_never_decided_by_the_installation_path():
 def test_kriya_s_own_checkout_opened_as_the_target_is_refused_like_any_repository(owner, monkeypatch):
     """The same folder in its two roles. As the TARGET (run entry, worktree creation, `kriya review`, GUI Open Folder)
     a repository-local executable filter is refused at every real entry and never runs; as Kriya's INSTALLATION
-    (release_identity.kriya_revision) it is read under the operator trust boundary - by role, not by path."""
+    (release_identity.kriya_revision -> source_identity.read_kriya_source_identity) it is read under the operator trust boundary -
+    by role, not by path."""
+    from kriya.control import source_identity
     from kriya.control.run_coordinator import begin_mutating_run
     from kriya.core import release_identity
     from kriya.repository.git import RepositoryContentFilterRefused
     from kriya.workflow import worktree
 
-    monkeypatch.setattr(release_identity, "_SOURCE_ROOT", str(owner))   # this folder IS the installation's checkout
+    monkeypatch.setattr(source_identity, "_SOURCE_ROOT", str(owner))   # this folder IS the installation's checkout
     marker = _planted(owner)
     for entry in (lambda: begin_mutating_run(str(owner)).__enter__(), lambda: worktree.create_git_worktree(str(owner))):
         with pytest.raises(RepositoryContentFilterRefused) as raised:
@@ -664,5 +670,5 @@ def test_kriya_s_own_checkout_opened_as_the_target_is_refused_like_any_repositor
     assert result.exit_code == 1 and f"{REFUSED}: " in result.output and prompts == []
     assert _describe(owner)["reason"].startswith(f"{REFUSED}: ")
     assert not marker.exists(), "a target entry ran the filter of Kriya's own checkout"
-    identity = release_identity.kriya_revision(release_identity._SOURCE_ROOT)
+    identity = release_identity.kriya_revision()                        # no root named: the (patched) installation root
     assert identity["revision"] == _setup(owner, "rev-parse", "HEAD").strip() and identity["dirty"] is True

@@ -34,6 +34,7 @@ from kriya.control.commit_state import (
 from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
+from kriya.control.source_identity import SourceIdentity, run_source_identity
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
 from kriya.foundation.human_wait import register_human_wait_scope
@@ -80,6 +81,9 @@ class RunContext:
     workspace_id: str
     base_revision: Optional[str]
     base_tree_hash: Optional[str]
+    # RUN-SOURCE-IDENTITY-001: the Kriya source that executes this run, read ONCE by begin_mutating_run (the only place a
+    # RunContext is built). Required: a context cannot exist without it. Evidence serializes this value and reads no git.
+    kriya_source: SourceIdentity
     _lease: _RunLease = field(repr=False, compare=False)
 
     @property
@@ -528,6 +532,7 @@ def begin_mutating_run(
             workspace_id=workspace_identity(canonical),
             base_revision=base_revision,
             base_tree_hash=base_tree_hash,
+            kriya_source=run_source_identity(),
             _lease=lease,
         )
         record = RunRecord.new(

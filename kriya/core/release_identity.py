@@ -5,7 +5,8 @@ combination of Kriya code and platform mechanism. This module records that
 combination and decides whether a recorded certification still describes
 the current host:
 
-- the Kriya git revision (and whether the checkout was dirty);
+- the Kriya git revision (and whether the checkout was dirty), read by the one STATE owner
+  ``kriya.control.source_identity``;
 - the PlatformServices provider identities and every capability's
   ENFORCED/ADVISORY/UNAVAILABLE status;
 - the containment backend (configured name, and the OCI runtime version
@@ -20,23 +21,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import platform
 import shutil
 import subprocess
 from typing import Any, Dict, List, Mapping, Optional
 
-from kriya.config.environment import child_environment
-from kriya.platform import git_argv, git_environment
+from kriya.control.source_identity import read_kriya_source_identity
 from kriya.platform.host_properties import UNAVAILABLE, os_and_architecture
 from kriya.platform.services import platform_services
-from kriya.repository.git import refuse_repository_content_filters
 
 RELEASE_IDENTITY_VERSION = 1
 CURRENT = "CURRENT"
 STALE = "STALE"
 _COMMAND_TIMEOUT_SECONDS = 10.0
-_SOURCE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _command(argv: List[str], cwd: Optional[str] = None, env: Optional[Mapping[str, str]] = None) -> Optional[str]:
@@ -50,35 +47,18 @@ def _command(argv: List[str], cwd: Optional[str] = None, env: Optional[Mapping[s
     return completed.stdout.strip() if completed.returncode == 0 else None
 
 
-def kriya_revision(source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
-    """The git revision of the Kriya source. Outside a checkout (an installed
-    wheel) the exact commit KRIYA-VERSION-001 embedded at build time stands in,
-    with its dirty flag (RELEASE-IDENTITY-WHEEL-001); UNAVAILABLE only when
-    neither exists. A checkout's identity is unchanged (git is still read).
+def kriya_revision(source_root: Optional[str] = None) -> Dict[str, Any]:
+    """The git revision of the Kriya source, in the release-facing ``{"revision", "dirty"}`` form. Outside a checkout (an
+    installed wheel) the exact commit KRIYA-VERSION-001 embedded at build time stands in, with its dirty flag
+    (RELEASE-IDENTITY-WHEEL-001); UNAVAILABLE only when neither exists.
 
-    INSTALLATION STATE (S19 P1b, owner decision B; tests/test_s19p1b_residuals.py INSTALLATION_STATE): this reads Kriya's
-    OWN source checkout as operator-managed application infrastructure, so the content-filter judgment is NOT applied to its
-    `status` (which can run a content filter) - whoever can write that checkout's configuration can already write Kriya's
-    code. The trust is the ROLE of this call, never the path: the same folder opened as a target workspace gets the
-    untrusted-repository policy (kriya.repository.git) at every target entry.
-
-    That exemption is only the content-filter policy. The W3-2 `attr.tree` rule is not role-based: an effective `attr.tree`
-    (any scope, the environment this call's git runs under included) redirects the attributes that decide the `dirty` flag
-    this identity certifies, so it raises the typed `RepositoryContentFilterRefused` (GIT_ATTR_TREE_CONFIGURED) BEFORE either git
-    call and no identity is returned (RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001, owner decision 2026-10-30)."""
-    if not os.path.exists(os.path.join(source_root, ".git")):
-        from kriya.foundation.build_info import UNKNOWN as UNKNOWN_BUILD
-        from kriya.foundation.build_info import embedded_build_info
-
-        embedded = embedded_build_info()
-        if embedded["commit"] != UNKNOWN_BUILD:
-            return {"revision": embedded["commit"], "dirty": embedded["dirty"]}
-        return {"revision": UNAVAILABLE, "dirty": None}
-    git_env = git_environment(child_environment())
-    refuse_repository_content_filters(source_root, env=git_env, timeout=_COMMAND_TIMEOUT_SECONDS, content_filters=False)
-    revision = _command(git_argv(["git", "rev-parse", "HEAD"]), cwd=source_root, env=git_env)
-    status = _command(git_argv(["git", "status", "--porcelain", "--untracked-files=no"]), cwd=source_root, env=git_env)
-    return {"revision": revision or UNAVAILABLE, "dirty": None if status is None else bool(status)}
+    This module reads no git itself (RUN-SOURCE-IDENTITY-001): the one trusted read of Kriya's own checkout - its
+    installation-state exemption and its `attr.tree` refusal, which still raises the typed
+    ``RepositoryContentFilterRefused`` here before any identity is returned - is
+    ``kriya.control.source_identity.read_kriya_source_identity``. ``source_root`` is a Kriya source / release-candidate
+    checkout named by the release authority, never a target workspace."""
+    identity = read_kriya_source_identity(source_root)
+    return {"revision": identity.revision or UNAVAILABLE, "dirty": identity.dirty}
 
 
 def containment_identity(backend: str) -> Dict[str, Any]:
@@ -90,7 +70,7 @@ def environment_identity() -> Dict[str, Any]:
     return {**os_and_architecture(), "python": platform.python_version()}
 
 
-def release_identity(containment_backend: str, *, source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
+def release_identity(containment_backend: str, *, source_root: Optional[str] = None) -> Dict[str, Any]:
     """The identity a release certification binds; ``digest`` covers every
     material field."""
     services = platform_services().identity()

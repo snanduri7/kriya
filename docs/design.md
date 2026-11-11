@@ -3471,7 +3471,11 @@ not a `ProjectService` method - it is no client operation, so `ProjectsPort` doe
 `kriya.application`; APPLICATION -> `kriya.repository.git` is a legal public edge) immediately before its own
 `git status` (the spawn stays in the CLI, so no access-site count moves) and refuses with
 `ApplicationRefusal(WORKSPACE_UNAVAILABLE, reason=<the repository code>)`. (B) Kriya-source trust is a ROLE: exactly
-`release_identity.kriya_revision` (its `status` can run a filter) and `distribution.tracked_release_files` (`ls-files`,
+`kriya.control.source_identity.read_kriya_source_identity` (its `status` can run a filter; since RUN-SOURCE-IDENTITY-001 the
+ONE reader of Kriya's own revision and dirty flag: `release_identity.kriya_revision` delegates to it, and
+`begin_mutating_run` calls its parameterless `run_source_identity()` once per top-level run and carries the value on the
+`RunContext`, from which `run.opened.kriya_build` records `commit` / `dirty` / `build_provenance: source_checkout` with
+`tree` left `UNKNOWN`) and `distribution.tracked_release_files` (`ls-files`,
 filter-free) read Kriya's own checkout as installation state, pinned with every other uninspected git function in
 `tests/test_s19p1b_residuals.py` (`INSTALLATION_STATE`, `UNINSPECTED_GIT`); the same checkout opened as the target is
 refused at the run entry, worktree creation, `kriya review` and Open Folder (MEASURED on a clone of the real checkout).

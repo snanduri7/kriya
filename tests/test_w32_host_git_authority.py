@@ -488,11 +488,12 @@ def test_release_identity_is_host_independent_and_still_sees_a_real_change(tmp_p
 # The W3-2 attr.tree rule is not role-based: no Git path whose output becomes certification evidence is exempt from it.
 
 class _IdentityEvents:
-    """One ordered log of every real git spawn and of every evidence-bearing ``release_identity._command`` call, each with the
-    environment it runs under, so a test can assert WHAT ran, in WHAT order and under WHICH environment."""
+    """One ordered log of every real git spawn and of every evidence-bearing ``_command`` call of the one reader
+    (``kriya.control.source_identity``, which ``release_identity.kriya_revision`` delegates to: RUN-SOURCE-IDENTITY-001), each with
+    the environment it runs under, so a test can assert WHAT ran, in WHAT order and under WHICH environment."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from kriya.core import release_identity as ri
+        from kriya.control import source_identity as ri
 
         self.events: List[tuple] = []
         real_run, real_command, log = subprocess.run, ri._command, self.events

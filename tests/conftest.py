@@ -142,6 +142,20 @@ def _isolated_kriya_state_dir(request, tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _pinned_run_source_identity(monkeypatch):
+    """RUN-SOURCE-IDENTITY-001 (owner ruling 2026-11-11, items 34-44): an ordinary test's run never inspects the live Kriya
+    checkout (MEASURED: 6 git spawns, about 0.15 s per top-level run, and a HEAD / dirty value that changes with every commit and
+    every tracked artifact a test run rewrites, which would move each run.opened digest the kernel goldens pin). The run-side
+    reader ``begin_mutating_run`` calls is replaced by the fixed "no source identity" value. TEST HARNESS ONLY: production has no
+    switch for this (pinned by tests/test_run_source_identity_001.py), and this pin is NOT evidence that the identity works -
+    that file's ``real_run_source_identity`` fixture undoes it and exercises the real reader on the real checkout."""
+    from kriya.control import run_coordinator, source_identity
+
+    unavailable = source_identity.SourceIdentity(None, None, source_identity.UNAVAILABLE)
+    monkeypatch.setattr(run_coordinator, "run_source_identity", lambda: unavailable)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_kriya_authority_home(request, tmp_path_factory, monkeypatch):
     """D2: the Kriya-owned authority home (SEC-009 approvals; the human-decision records) is a per-test temp dir, never the
     real ~/.kriya/authority. Exported through the environment, so CLI/waiter subprocesses a test starts inherit it. A test that

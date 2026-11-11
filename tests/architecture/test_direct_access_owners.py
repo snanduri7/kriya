@@ -91,7 +91,12 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.cli": (1, "M3", _M3 + " (git status of a file's repository)"),
         "kriya.code_intel.service": (1, "L2", _L2),
         "kriya.control.run_coordinator": (1, "M3", _M3 + " (_git_revision)"),
-        "kriya.core.release_identity": (2, "L2", _L2),
+        # RUN-SOURCE-IDENTITY-001 (owner ruling 2026-11-11, items 25-33): ONE new raw-spawn owner row. The git read of Kriya's own
+        # checkout moved from release_identity.kriya_revision to this STATE module (its git_argv row below moved with it, 2 -> 2);
+        # release_identity keeps its own row because its _command still runs `docker version`. So the raw-spawn OWNER count
+        # grows by one while the count of git source-identity implementations stays exactly one (tests/test_run_source_identity_001.py).
+        "kriya.control.source_identity": (2, "M3", _M3 + " (_command: rev-parse HEAD and status of Kriya's own checkout only)"),
+        "kriya.core.release_identity": (2, "L2", _L2 + " (docker version only since RUN-SOURCE-IDENTITY-001)"),
         "kriya.distribution": (2, "L2", _L2),
         "kriya.production_doctor": (5, "L2", _L2),
         "kriya.skills.run_shadow": (2, "M3", _M3 + " (the run-local skills shadow's read-only git probes and its index rollback)"),
@@ -106,7 +111,7 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.cli": (1, "M3", _M3 + " (not in M3's file list: added by A2)"),
         "kriya.code_intel.service": (1, "M3", _M3),
         "kriya.control.run_coordinator": (1, "M3", _M3),
-        "kriya.core.release_identity": (2, "M3", _M3 + " (not in M3's file list: added by A2)"),
+        "kriya.control.source_identity": (2, "M3", _M3 + " (moved count-neutral from kriya.core.release_identity: RUN-SOURCE-IDENTITY-001)"),
         "kriya.distribution": (1, "M3", _M3 + " (not in M3's file list: added by A2)"),
         "kriya.static_analysis.operator_scan": (1, "M3", _M3 + " (not in M3's file list: added by A2)"),
         "kriya.skills.run_shadow": (1, "M3", _M3 + " (the run-local skills shadow's git helper: rev-parse, check-ignore, reset of its own index entries)"),

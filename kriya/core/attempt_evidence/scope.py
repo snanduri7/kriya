@@ -272,6 +272,23 @@ def ensure_store(cfg: Any) -> None:
     emit("run.opened", _run_manifest(run.context))
 
 
+SOURCE_CHECKOUT = "source_checkout"   # == kriya.control.source_identity.SOURCE_CHECKOUT (EVIDENCE may not import it; pinned by test)
+
+
+def _with_source_identity(build: Dict[str, Any], source: Any) -> Dict[str, Any]:
+    """RUN-SOURCE-IDENTITY-001: ``kriya_build`` names the source that executes the run. ``source`` is the value
+    ``begin_mutating_run`` already computed and put on the RunContext; this recorder reads no git and computes nothing.
+    A git-backed checkout: its exact HEAD as ``commit``, its measured ``dirty`` flag, ``build_provenance:
+    source_checkout``, and ``tree`` UNKNOWN (the one read does not obtain a tree; none is inferred). A typed refusal:
+    the build report unchanged plus ``source_identity_unavailable: <reason code>``. Anything else: unchanged."""
+    from kriya.foundation.build_info import UNKNOWN
+
+    if getattr(source, "provenance", None) == SOURCE_CHECKOUT:
+        return {**build, "commit": source.revision, "tree": UNKNOWN, "dirty": source.dirty, "build_provenance": SOURCE_CHECKOUT}
+    reason = getattr(source, "reason_code", None)
+    return {**build, "source_identity_unavailable": reason} if reason else build
+
+
 def _run_manifest(context: Any) -> Dict[str, Any]:
     from kriya.foundation.build_info import version_report
 
@@ -279,6 +296,7 @@ def _run_manifest(context: Any) -> Dict[str, Any]:
         build = version_report()
     except Exception as error:  # build provenance is optional evidence
         build = {"unavailable": f"{type(error).__name__}: {error}"}
+    build = _with_source_identity(build, getattr(context, "kriya_source", None))
     return {
         "kriya_build": build,
         "workspace_identity": getattr(context, "workspace_id", None),
