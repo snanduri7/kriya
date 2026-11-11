@@ -1444,6 +1444,48 @@
     },
     {
      "attempt": null,
+     "content": {
+      "event": "sha256:ea96a152134ad20c"
+     },
+     "event": "requirement.truth",
+     "kind": "mirror.event",
+     "payload": "sha256:c48c079a204f10c7",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:9fb86ddfa48a3b9a"
+     },
+     "event": "evidence.attempt_store",
+     "kind": "mirror.event",
+     "payload": "sha256:e16eea7fec6bcb33",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
      "kind": "run.closed",
      "payload": "sha256:0f50e461b2149b91",
      "payload_keys": [
@@ -1707,6 +1749,7 @@
     "last_subtask_result",
     "plan_repair_attempts",
     "quality_gates_passed",
+    "requirement_truth",
     "requirements",
     "run_id",
     "static_analysis",
@@ -1892,6 +1935,22 @@
     },
     "plan_repair_attempts": 0,
     "quality_gates_passed": true,
+    "requirement_truth": {
+     "accepted": 0,
+     "status": "OPEN_REQUIREMENTS",
+     "total": 1,
+     "unresolved": [
+      {
+       "id": "REQ-1",
+       "outcome": "pending",
+       "text": {
+        "chars": 20,
+        "text": "sha256:f4791ae625dcc414"
+       }
+      }
+     ],
+     "verified": 0
+    },
     "requirements": {
      "closure_attempts": [],
      "digest": "77cd213c14a1f6c7e27bbaa0e8c4c773bf5700d3877909d662fd9563c46b9438",
@@ -2389,6 +2448,20 @@
      "authority": "advisory",
      "details": "sha256:a71db84cb960d13d",
      "kind": "requirement.verdicts",
+     "source": "workflow_controller.enforce"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:2321ff39eefd55d4",
+     "kind": "requirement.truth",
+     "source": "workflow_controller.enforce"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:31543d6a464ae7aa",
+     "kind": "evidence.attempt_store",
      "source": "workflow_controller.enforce"
     }
    ],

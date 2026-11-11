@@ -169,6 +169,27 @@
     {
      "attempt": null,
      "content": {
+      "event": "sha256:44e591a1ff8e5e91"
+     },
+     "event": "evidence.attempt_store",
+     "kind": "mirror.event",
+     "payload": "sha256:e16eea7fec6bcb33",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
       "event": "sha256:16e9b5103c0ed807"
      },
      "event": "model.role_metrics",
@@ -410,6 +431,13 @@
      "authority": "authoritative",
      "details": "sha256:65587dde84383dfd",
      "kind": "planning.failed",
+     "source": "workflow_controller.enforce"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:987ddf59703fae65",
+     "kind": "evidence.attempt_store",
      "source": "workflow_controller.enforce"
     },
     {

@@ -436,3 +436,82 @@ def test_without_the_harness_environment_the_golden_follows_the_machine(tmp_path
     assert _opened_build() == {"python": "3.14.7", "version": "9.9.9", "build_provenance": "embedded",
                                "commit": "a" * 40, "tree": "b" * 40, "dirty": False}
     assert form != _golden(INSTALL_SCENARIO)
+
+
+# --- TEST-KERNEL-GOLDEN-ENFORCE-FIVE-FAIL-AT-F384061-001: the R1 re-record, pinned as a delta ---------------------------
+# The four enforce goldens were re-recorded on 2026-11-11 after a bisect over ce1efb7..0401d22 (owner ruling): every
+# difference was introduced by 6d9bfe0 (ENFORCE-TERMINAL-REQUIREMENT-TRUTH-001, audit root R1) and is an ADDITION; R2
+# (9c7cf00) and R4 (0401d22) changed no golden byte. The files the goldens replaced are kept in PRE_R1_DIR as the
+# characterization of the kernel before R1: the test below proves each current golden is that file plus exactly R1's
+# documented additions - never a removal, a changed value or a reordering.
+PRE_R1_DIR = kg.GOLDEN_DIR.parent / "kernel_pre_r1_requirement_truth"
+# scenario -> (requirement.truth events, evidence.attempt_store events) the .enforce trace row gained. A run that never
+# had a requirement set (planning refused the plan) records the store pointer only: no truth is invented for it.
+R1_ENFORCE_ROW_ADDITIONS = {
+    "enforce_approval_refused": (1, 1),
+    "enforce_plan_invalid": (0, 1),
+    "enforce_success_with_verification_unit": (1, 1),
+    "enforce_verification_only_failed": (1, 1),
+}
+
+
+def _extras(before: list, after: list) -> list:
+    """The items of ``after`` that are not ``before``'s, when ``before`` is a subsequence of ``after`` (order kept);
+    fails otherwise, so a removed, changed or reordered item can never pass as an addition."""
+    extras, position = [], 0
+    for item in after:
+        if position < len(before) and item == before[position]:
+            position += 1
+        else:
+            extras.append(item)
+    assert position == len(before), "an item of the pre-R1 golden is missing, changed or out of order"
+    return extras
+
+
+@pytest.mark.parametrize("name", sorted(R1_ENFORCE_ROW_ADDITIONS))
+def test_an_enforce_golden_is_its_pre_r1_golden_plus_exactly_the_r1_additions(name):
+    before = json.loads((PRE_R1_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    after = json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    truths, pointers = R1_ENFORCE_ROW_ADDITIONS[name]
+    assert before != after and set(before) == set(after)
+    for key in set(before) - {"evidence", "run_events", "result"}:
+        assert before[key] == after[key], key                       # the scenario identity and every RunRecord: unchanged
+
+    # the evidence store: only mirrored events of the two R1 kinds were appended, nothing else moved
+    assert len(before["evidence"]) == len(after["evidence"])
+    added_records = []
+    for store_before, store_after in zip(before["evidence"], after["evidence"], strict=True):
+        assert {k: v for k, v in store_before.items() if k != "records"} == {k: v for k, v in store_after.items() if k != "records"}
+        added_records += _extras(store_before["records"], store_after["records"])
+    assert sorted((record["kind"], record["event"]) for record in added_records) == sorted(
+        [("mirror.event", "requirement.truth")] * truths + [("mirror.event", "evidence.attempt_store")] * pointers)
+
+    # the traces.db rows: the same two kinds, on the enforce controller's own row only
+    assert len(before["run_events"]) == len(after["run_events"])
+    added_events = []
+    for row_before, row_after in zip(before["run_events"], after["run_events"], strict=True):
+        assert {k: v for k, v in row_before.items() if k != "events"} == {k: v for k, v in row_after.items() if k != "events"}
+        added_events += _extras(row_before["events"], row_after["events"])
+    assert sorted(event["kind"] for event in added_events) == sorted(["requirement.truth"] * truths + ["evidence.attempt_store"] * pointers)
+    assert {event["source"] for event in added_events} == {"workflow_controller.enforce"}
+    assert [event["authority"] for event in added_events if event["kind"] == "requirement.truth"] == ["authoritative"] * truths
+
+    # the result: one new field, the truth beside the unchanged lifecycle status
+    values_before, values_after = before["result"]["legacy_result"]["values"], after["result"]["legacy_result"]["values"]
+    assert {k: v for k, v in before["result"].items() if k != "legacy_result"} == {k: v for k, v in after["result"].items() if k != "legacy_result"}
+    assert _extras(before["result"]["legacy_result"]["keys"], after["result"]["legacy_result"]["keys"]) == ["requirement_truth"] * truths
+    assert {k: v for k, v in values_after.items() if k != "requirement_truth"} == values_before
+    if truths:
+        truth = values_after["requirement_truth"]
+        assert (truth["status"], truth["verified"], truth["accepted"], truth["total"]) == ("OPEN_REQUIREMENTS", 0, 0, 1)
+    else:
+        assert "requirement_truth" not in values_after
+
+
+def test_the_pre_r1_reference_is_exactly_the_four_enforce_scenarios_and_no_longer_what_the_kernel_produces(tmp_path):
+    """Negative control: the kept reference is not a second accepted golden - the kernel no longer produces it."""
+    assert sorted(path.stem for path in PRE_R1_DIR.glob("*.json")) == sorted(R1_ENFORCE_ROW_ADDITIONS)
+    name = "enforce_plan_invalid"
+    form = _form(name, tmp_path)
+    assert form == _golden(name)
+    assert form != (PRE_R1_DIR / f"{name}.json").read_text(encoding="utf-8")
