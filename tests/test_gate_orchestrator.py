@@ -42,6 +42,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -206,6 +207,47 @@ def test_engine_gate_sequence(name, tmp_path, monkeypatch):
         monkeypatch.setenv(key, value)
     outcome = ENGINE_SCENARIOS[name](tmp_path)
     _compare(f"engine_{name}", _engine_form(outcome, tmp_path))
+
+
+DECLARED_GATE_PURPOSES = {"candidate_verification", "verification_only_unit", "named_test_closure_base_run",
+                          "named_test_closure_candidate_run"}
+
+
+def test_a_validator_gate_result_carries_its_declared_purpose_and_nothing_of_the_host(tmp_path, monkeypatch):
+    """GATE-ORCHESTRATOR-ENGINE-GOLDENS-PURPOSE-FIELD-001. The 11 engine goldens were red from c510568 (which added ``purpose``
+    to the validator-stage ``gate.result`` payload) until they were re-recorded: the cause was that intended field, NOT the
+    host (the old registry label said "host drift"; MEASURED: the stale digest equals the current payload minus ``purpose``).
+    This pins the field by value, so its removal fails here by name and not only as an opaque golden digest, and it is the
+    negative control against a host coupling of that field: the value is one of the closed labels an orchestrator declares in
+    code (``declares_gate_purpose``), identical on every host - never a path, an interpreter, a host name or an environment
+    value."""
+    import platform
+    import sys
+
+    from kriya.core.attempt_evidence import reader
+    from kriya.core.state_paths import ENV_STATE_DIR
+
+    for key, value in kg.GIT_ENV.items():
+        monkeypatch.setenv(key, value)
+    outcome = ENGINE_SCENARIOS["immediate_success"](tmp_path)
+    assert (getattr(outcome.result, "legacy_result", None) or {}).get("quality_gates_passed") is True
+    state_dir = os.environ[ENV_STATE_DIR]
+    payloads = [record["payload"] for run_id in reader.list_runs(state_dir) for record in reader.open_run(state_dir, run_id).records()
+                if record["kind"] == "gate.result" and (record.get("payload") or {}).get("stage") == "validator"]
+    # MEASURED on 1ecb201: the compile gate (and pom_validate) runs inside an orchestrator entry that declares a purpose; the
+    # `tests` gate.result of this scenario carries none ("absent = not recorded", kriya/tools/validate.py) and its golden digest
+    # never changed. Only the gates whose payload c510568 changed are pinned here.
+    payloads = [payload for payload in payloads if payload.get("gate") == "compile"]
+    assert payloads, "the scenario recorded no validator compile gate.result"
+    host_values = {sys.executable, os.path.realpath(sys.executable), platform.node(), str(tmp_path), os.path.expanduser("~")}
+    for payload in payloads:
+        assert payload["purpose"] == "candidate_verification" and payload["purpose"] in DECLARED_GATE_PURPOSES, payload
+        assert {"stage", "gate", "success", "purpose"} <= set(payload), sorted(payload)
+        assert payload["purpose"].isidentifier() and not any(host and host in payload["purpose"] for host in host_values)
+    declared = set()
+    for path in sorted((Path(__file__).resolve().parents[1] / "kriya").rglob("*.py")):
+        declared |= set(re.findall(r'(?:declares_gate_purpose|gate_purpose)\("([a-z_]+)"\)', path.read_text(encoding="utf-8")))
+    assert declared == DECLARED_GATE_PURPOSES, declared            # a new purpose is a literal label, added here deliberately
 
 
 def _static_analysis_outcome(tmp_path: Path, *, autonomous: bool, blocked: bool) -> "kg.Outcome":

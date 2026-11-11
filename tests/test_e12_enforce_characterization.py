@@ -387,17 +387,37 @@ def _request(we):
 
 # ============================================================================ enforce: contract admission and planning request
 
+# TEST-E12-TWO-ENFORCE-CHARACTERIZATION-FAIL-ON-BASELINE-001: since e4e2e48 the bare "Create a.py" is an ADMITTED goal (a
+# FILE_CREATION claim closed by repository evidence), so it can no longer stand for "a goal the contract cannot admit". The
+# behaviour claim below has no bound authority and stays unadmitted; "Create a.py" is kept as the admitted positive control.
+UNADMITTED_GOAL = "Create a.py with an add function"
+ADMITTED_GOAL = "Create a.py"
+
+
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_blocking_requirement_policy_refuses_an_unadmitted_goal_before_planning(tmp_path):
     """EP01 (the admission refusal skipped) / EP02 (the typed authority requests not sealed before the stop)."""
     we = _enforce_engine(tmp_path, requirement_unverified_policy="block")
-    result, calls = await _enforce(we, tmp_path, _plan_of(_unit("s1")))
+    result, calls = await _enforce(we, tmp_path, _plan_of(_unit("s1")), goal=UNADMITTED_GOAL)
     legacy = result.legacy_result
     assert (legacy["status"], legacy["failure_type"], legacy["reason_codes"]) == (
         "failure", "VERIFICATION_AUTHORITY", ["VERIFICATION_AUTHORITY_REQUIRED"])
     assert we.planner.run.await_count == 0 and calls == []
     assert legacy["authority_requests"] and os.path.isfile(legacy["authority_requests_path"])
+
+
+@pytest.mark.usefixtures("bound_workspace")
+@pytest.mark.asyncio
+async def test_a_blocking_requirement_policy_admits_a_file_creation_goal(tmp_path):
+    """Positive control of the refusal above (e4e2e48): "Create <path>." is a FILE_CREATION claim closed by repository evidence,
+    so the same blocking policy does NOT refuse it - the unit runs. Were the refusal above caused by the policy alone (and not
+    by the goal being unadmitted), this would be refused too."""
+    we = _enforce_engine(tmp_path, requirement_unverified_policy="block")
+    result, calls = await _enforce(we, tmp_path, _plan_of(_unit("s1")), goal=ADMITTED_GOAL)
+    legacy = result.legacy_result
+    assert legacy.get("failure_type") != "VERIFICATION_AUTHORITY" and "VERIFICATION_AUTHORITY_REQUIRED" not in (legacy.get("reason_codes") or [])
+    assert legacy["status"] == "success" and len(calls) == 1
 
 
 @pytest.mark.usefixtures("bound_workspace")
@@ -1974,9 +1994,24 @@ async def test_a_refused_contract_never_runs_its_bound_authority_at_baseline(tmp
     _with_authority(monkeypatch)
     baseline = MagicMock(return_value=_report())
     monkeypatch.setattr(wf, "run_contract_baseline", baseline)
-    result, _ = await _enforce(_enforce_engine(tmp_path), tmp_path, _plan_of(_unit("s1")))
+    result, _ = await _enforce(_enforce_engine(tmp_path), tmp_path, _plan_of(_unit("s1")), goal=UNADMITTED_GOAL)
     baseline.assert_not_called()
     assert "baseline_authority" not in result.legacy_result
+
+
+@pytest.mark.usefixtures("bound_workspace")
+@pytest.mark.asyncio
+async def test_an_admitted_contract_runs_its_bound_authority_at_baseline(tmp_path, monkeypatch):
+    """Positive control of the test above (e4e2e48): the admitted "Create a.py" contract (FILE_CREATION, CLOSABLE) with the same
+    bound authority DOES get its baseline run, exactly once - so "not called" above is caused by the refused admission."""
+    from kriya.workflow import workflow as wf
+    _with_authority(monkeypatch)
+    baseline = MagicMock(return_value=_report())
+    monkeypatch.setattr(wf, "run_contract_baseline", baseline)
+    await _enforce(_enforce_engine(tmp_path), tmp_path, _plan_of(_unit("s1")), goal=ADMITTED_GOAL)
+    baseline.assert_called_once()
+    (entry,) = baseline.call_args.args[1].entries
+    assert (entry.text, entry.status, entry.scope.claims) == (ADMITTED_GOAL, "CLOSABLE", ("FILE_CREATION",))
 
 
 @pytest.mark.usefixtures("bound_workspace")

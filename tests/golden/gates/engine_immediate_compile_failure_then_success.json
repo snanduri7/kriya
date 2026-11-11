@@ -52,7 +52,7 @@
    "decision": "REFUSED",
    "kind": "candidate.change",
    "path": "calc.py",
-   "payload": "sha256:578aadc8a5b78b98",
+   "payload": "sha256:8abedaa0bdfa353e",
    "unchanged": null
   },
   {
@@ -110,7 +110,7 @@
    "attempt": 3,
    "gate": "compile",
    "kind": "gate.result",
-   "payload": "sha256:3f8a7e12fcf24481",
+   "payload": "sha256:437e253104df1abe",
    "stage": "validator",
    "success": true
   },
