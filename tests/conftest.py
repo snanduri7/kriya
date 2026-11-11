@@ -141,6 +141,43 @@ def _isolated_kriya_state_dir(request, tmp_path_factory, monkeypatch):
                         lambda: str(state_dir / "no-historical-install" / "logs" / "traces.db"))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _docker_worker_contract_shim(tmp_path_factory):
+    """TEST-DOCKER-WORKER-CONTRACT-001 (tests/_docker_worker_contract.py): only when KRIYA_DOCKER_WORKER_CONTRACT is set, a recording
+    ``docker`` shim is first on PATH for this worker and every process it starts. Unset (the default): nothing happens."""
+    import _docker_worker_contract as contract
+
+    if not os.environ.get(contract.ENV_MODE):
+        yield None
+        return
+    saved = {name: os.environ.get(name) for name in ("PATH", contract.ENV_LOG)}
+    log = contract.install(str(tmp_path_factory.mktemp("docker-worker-contract")))
+    yield log
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
+@pytest.fixture(autouse=True)
+def _docker_starts_stay_on_the_docker_worker(request, _docker_worker_contract_shim):
+    """A test that started a real container - itself or through any subprocess - must be in the docker xdist group (``enforce`` fails it;
+    ``report:FILE`` only counts). Inactive unless the session installed the shim."""
+    yield
+    if _docker_worker_contract_shim is None:
+        return
+    import _docker_worker_contract as contract
+
+    mode = os.environ.get(contract.ENV_MODE, "")
+    starts = contract.starts_of(_docker_worker_contract_shim, request.node.nodeid)
+    grouped = _needs_real_docker(request.node)
+    contract.report(mode, request.node.nodeid, starts, grouped)
+    message = contract.violation(request.node.nodeid, starts, grouped)
+    if message and mode == "enforce":
+        pytest.fail(message)
+
+
 @pytest.fixture(autouse=True)
 def _pinned_run_source_identity(monkeypatch):
     """RUN-SOURCE-IDENTITY-001 (owner ruling 2026-11-11, items 34-44): an ordinary test's run never inspects the live Kriya

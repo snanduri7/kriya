@@ -16,6 +16,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
 from _chaos_harness import (
     CALC,
     CALC_WITH_SUB,
@@ -216,6 +217,20 @@ CRASH_SCRIPT = textwrap.dedent('''
 ''')
 
 
+def _docker_reachable() -> bool:
+    try:
+        return subprocess.run(["docker", "info"], capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+# TEST-DOCKER-WORKER-CONTRACT-001: the crash subprocess is a fresh Python process - the in-process containment stand-in of this file's
+# census rule does not exist in it, so its gates start REAL containers (MEASURED: `docker run` from a grandchild of the pytest worker).
+# The canonical docker gate puts these tests on the single docker worker (tests/conftest.py::_needs_real_docker); the scenario, its
+# assertions and the expected product behaviour are unchanged.
+REAL_DOCKER = pytest.mark.skipif(not _docker_reachable(), reason="docker CLI/daemon not available: the crash subprocess starts real containers")
+
+
 def _crash(tmp_path, crash_at):
     workspace = git_workspace(tmp_path, {"calc.py": CALC, "helper.py": HELPER})
     died = subprocess.run([sys.executable, "-c", CRASH_SCRIPT, str(workspace), crash_at, TESTS_DIR],
@@ -235,6 +250,7 @@ def _recovered(workspace, **kwargs):
     return report, records
 
 
+@REAL_DOCKER
 @chaos("D05")
 def test_termination_after_intent_before_the_first_byte(chaos_case, tmp_path):
     workspace = _crash(tmp_path, "before_first_byte")
@@ -253,6 +269,7 @@ def test_termination_after_intent_before_the_first_byte(chaos_case, tmp_path):
                        lifecycle=record.lifecycle_state.value, commit_result=record.commit_result)
 
 
+@REAL_DOCKER
 @chaos("D06")
 def test_termination_between_staged_replaces_needs_explicit_recovery(chaos_case, tmp_path):
     workspace = _crash(tmp_path, "between_replaces")
@@ -278,6 +295,7 @@ def test_termination_between_staged_replaces_needs_explicit_recovery(chaos_case,
                        commit_result=record.commit_result)
 
 
+@REAL_DOCKER
 @chaos("D07")
 def test_termination_after_the_source_write_before_record_settlement(chaos_case, tmp_path):
     workspace = _crash(tmp_path, "before_record_settle")
@@ -295,6 +313,7 @@ def test_termination_after_the_source_write_before_record_settlement(chaos_case,
                        lifecycle=record.lifecycle_state.value, terminal_status=record.terminal_status)
 
 
+@REAL_DOCKER
 @chaos("D08")
 def test_resume_from_an_uncertain_workspace_is_refused(chaos_case, tmp_path):
     workspace = _crash(tmp_path, "between_replaces")
