@@ -40,9 +40,32 @@ _TEST_FAILED = pytest.StashKey[bool]()
 _release_tree = shutil.rmtree  # captured at import: a test that patches ``shutil.rmtree`` (tests/test_oi142_gate_view.py) must not break the release of its directories
 
 
+# TEST-HARNESS-STATE-PATHNAME-REUSE-001: the next free number of each per-test directory prefix in THIS pytest session (one process: an xdist worker has its own base temp).
+_PER_TEST_DIR_SERIALS = {}
+
+
+def _session_unique_dir(basetemp, name):
+    """A new directory ``<basetemp>/<name><N>`` whose pathname was never handed out before in this session - also not after the earlier one was removed.
+
+    ``tmp_path_factory.mktemp(name)`` numbers by "highest existing + 1", so once a passed test's directory is released its NUMBER is handed out again: the same pathname is
+    deleted and recreated test after test. MEASURED 2026-11-11 (real Docker, serial): a state tree deleted right after a contained gate and recreated under the SAME pathname is
+    refused by the container backend as a bind source (`bind source path does not exist`: 29 of 30, 9 of 10, 8 of 10), a never-reused pathname is not (0 of 50). The product
+    itself never reuses a gate-view or venv-source pathname; the harness now follows the same rule. The name keeps the ``<name><N>`` form; N only ever grows."""
+    serial = _PER_TEST_DIR_SERIALS.get(name, 0)
+    while True:
+        path = basetemp / f"{name}{serial}"
+        serial += 1
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:      # a directory someone else made under this name (a kept failed test's, a direct mktemp): never shared, never reused
+            continue
+        _PER_TEST_DIR_SERIALS[name] = serial
+        return path
+
+
 def _per_test_dir(request, tmp_path_factory, name):
-    """``tmp_path_factory.mktemp(name)``, removed again when the test passed."""
-    path = tmp_path_factory.mktemp(name)
+    """A session-unique ``<name><N>`` directory under the base temp, removed again when the test passed (its pathname is never handed out again)."""
+    path = _session_unique_dir(tmp_path_factory.getbasetemp(), name)
 
     def _discard():
         if not request.node.stash.get(_TEST_FAILED, False):

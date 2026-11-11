@@ -22,7 +22,8 @@ CHAOS = ROOT / "tests" / "test_prd032_chaos_commit.py"
 def _fake_real_docker(tmp_path: Path) -> Path:
     real = tmp_path / "real" / "docker"
     real.parent.mkdir()
-    real.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$FAKE_DOCKER_ARGV"\ncat\nexit 7\n', encoding="utf-8")
+    # records its argv (one line per INVOCATION), copies stdin to stdout, writes an inherited variable to stderr, exits 7
+    real.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$FAKE_DOCKER_ARGV"\ncat\nprintf \'env=%s\' "$KRIYA_FAKE_INHERITED" >&2\nexit 7\n', encoding="utf-8")
     real.chmod(0o755)
     return real
 
@@ -39,7 +40,7 @@ def shimmed(tmp_path):
 
 
 def _docker(environ, test, *argv, through_a_child=False, stdin=""):
-    env = {**environ, "PYTEST_CURRENT_TEST": test}
+    env = {**environ, "PYTEST_CURRENT_TEST": test, "KRIYA_FAKE_INHERITED": "inherited-value"}
     command = ["docker", *argv]
     if through_a_child:        # the measured mechanism: the test starts Python, and THAT process starts the container
         command = [sys.executable, "-c", "import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:]).returncode)", *command]
@@ -48,11 +49,26 @@ def _docker(environ, test, *argv, through_a_child=False, stdin=""):
 
 def test_a_start_made_by_a_subprocess_of_the_test_is_attributed_to_the_test(shimmed):
     environ, log, argv_log = shimmed
-    done = _docker(environ, "tests/test_x.py::test_indirect (call)", "run", "--rm", "image", "true", through_a_child=True, stdin="payload")
-    assert done.returncode == 7 and done.stdout == "payload"                    # the real docker ran: same streams, same exit status
-    assert argv_log.read_text().splitlines() == ["run --rm image true"]         # ... with the unchanged argv
+    done = _docker(environ, "tests/test_x.py::test_indirect (call)", "run", "--rm", "-v", "/a b/src:/dst", "image", "true", through_a_child=True, stdin="payload")
+    # execution-transparent: the real docker ran ONCE (no retry) with the unchanged argv, the caller's stdin, stdout, stderr, environment and exit status
+    assert (done.returncode, done.stdout, done.stderr) == (7, "payload", "env=inherited-value")
+    assert argv_log.read_text().splitlines() == ["run --rm -v /a b/src:/dst image true"]
+    assert contract.launches(log) == [("tests/test_x.py::test_indirect (call)", "run", "run --rm -v /a b/src:/dst image true")]
     assert contract.starts_of(log, "tests/test_x.py::test_indirect") == ["run"]
     assert contract.starts_of(log, "tests/test_x.py::test_other") == []
+
+
+def test_a_refused_launch_is_passed_through_untouched_and_never_repeated(shimmed, tmp_path):
+    """The shim adds no behaviour of its own: a real docker that fails is run once, and its failure is the caller's to see."""
+    environ, log, argv_log = shimmed
+    for _ in range(3):
+        done = _docker(environ, "tests/test_x.py::test_refused (call)", "run", "--rm", "image")
+        assert done.returncode == 7 and done.stderr == "env=inherited-value"
+    assert len(argv_log.read_text().splitlines()) == 3 and contract.starts_of(log, "tests/test_x.py::test_refused") == ["run"] * 3
+    shim = (tmp_path / "shim" / "docker").read_text()
+    body = [line for line in shim.splitlines() if not line.startswith("#")]
+    assert body[-1].startswith("exec ") and body[-1].endswith(' "$@"') and sum(line.count("exec ") for line in body) == 1
+    assert not any(word in shim for word in ("sleep", "while", "until", "retry"))
 
 
 def test_only_container_starts_are_recorded_and_global_options_are_skipped(shimmed):

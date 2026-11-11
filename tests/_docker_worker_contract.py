@@ -10,7 +10,8 @@ and runs the real OCI backend. The containers were started by a GRANDCHILD of th
 WHAT THIS RECORDS: with ``KRIYA_DOCKER_WORKER_CONTRACT`` set, the session puts a shim named ``docker`` first on PATH. Kriya resolves the
 executable with ``shutil.which("docker")`` in whichever process builds the launch, and a child inherits PATH and ``PYTEST_CURRENT_TEST``,
 so a start made by any descendant of the test is attributed to the test. The shim appends one line (test, verb) for ``run`` / ``create`` /
-``start`` and then ``exec``s the real docker with the unchanged argv: same process, same streams, same exit status, same signals.
+``start`` (with the argv, so a census can read the bind sources) and then ``exec``s the real docker with the unchanged argv: same process,
+same environment, same streams, same exit status, same signals. It never retries, waits or alters a launch.
 
 WHAT IT DECIDES (tests/conftest.py::_docker_starts_stay_on_the_docker_worker): ``enforce`` fails a test that started a container without
 being in the docker group; ``report:FILE`` appends one JSON line per test that started containers (grouped or not) and fails nothing - the
@@ -35,7 +36,7 @@ _SHIM = """#!/bin/sh
 for word in "$@"; do
   case "$word" in
     -*) continue ;;
-    {verbs}) printf '%s\\t%s\\n' "${{PYTEST_CURRENT_TEST:-<no test>}}" "$word" >> "${{{log}:-/dev/null}}" ;;
+    {verbs}) printf '%s\\t%s\\t%s\\n' "${{PYTEST_CURRENT_TEST:-<no test>}}" "$word" "$*" >> "${{{log}:-/dev/null}}" ;;
   esac
   break
 done
@@ -72,10 +73,18 @@ def starts_of(log: Optional[str], nodeid: str) -> List[str]:
     found = []
     with open(log, "r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            current, _tab, verb = line.rstrip("\n").rpartition("\t")
+            current, verb = (line.rstrip("\n").split("\t") + [""])[:2]
             if current.startswith(nodeid + " ("):
                 found.append(verb)
     return found
+
+
+def launches(log: Optional[str]) -> List[tuple]:
+    """Every recorded start as (current test, verb, argv joined by spaces), in order - what a census reads the bind sources from."""
+    if not log or not os.path.exists(log):
+        return []
+    with open(log, "r", encoding="utf-8", errors="replace") as handle:
+        return [tuple((line.rstrip("\n").split("\t", 2) + ["", ""])[:3]) for line in handle if line.strip()]
 
 
 def violation(nodeid: str, starts: List[str], docker_grouped: bool) -> Optional[str]:

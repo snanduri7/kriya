@@ -422,7 +422,7 @@ def test_only_module_and_session_scoped_fixtures_call_mktemp_directly_everything
         '_authority_isolation.py:"kriya-authority-session"',                       # session-scoped
         'conftest.py:"kriya-logs"',                                                # session-scoped
         'conftest.py:"cwd"',                                                       # released through _RELEASE_AFTER_PASS
-        'conftest.py:name',                                                        # _per_test_dir: released on pass
+        'conftest.py:"docker-worker-contract"',                                    # session-scoped, only with KRIYA_DOCKER_WORKER_CONTRACT set (TEST-DOCKER-WORKER-CONTRACT-001)
         'test_greenfield_direct_plan_runtime.py:"direct"',                         # module-scoped approved_run
         'test_prd034_python_wheels.py:"venv"',                                     # module-scoped fresh_venv
     ]), callers
