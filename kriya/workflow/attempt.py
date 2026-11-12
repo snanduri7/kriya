@@ -267,7 +267,6 @@ from kriya.workflow.suite_attribution import (
     post_environment_identity,
 )
 from kriya.workflow.toolchain import (
-    _check_java_toolchain_mismatch,
     _resolve_java_home_override,
     toolchain_declaration_mutable,
 )
@@ -1179,7 +1178,7 @@ def _load_verification_inputs_digest() -> Any:
 def _gate_deps() -> "gate_orchestrator.GateDeps":
     """The moved gate code's collaborators (kriya/workflow/gate_orchestrator.py), resolved through this module NOW
     (at call time), so a test patch of any of these names here (``extract_target_test``, ``find_runnable_test_files``,
-    ``_check_java_toolchain_mismatch``, ``_resolve_java_home_override``, ``_judge_candidate_suite``,
+    ``_resolve_java_home_override``, ``_judge_candidate_suite``,
     ``_approve_and_execute_runtime_verification``, ``_execute_managed_service_verification``, ``time``, ...) reaches
     the moved gates exactly as it reached the bodies when they lived here."""
     return gate_orchestrator.GateDeps(
@@ -1188,7 +1187,6 @@ def _gate_deps() -> "gate_orchestrator.GateDeps":
         load_run_self_correction_loop=_load_run_self_correction_loop, load_run_repair_loop=_load_run_repair_loop,
         load_verification_inputs_digest=_load_verification_inputs_digest,
         extract_target_test=extract_target_test, find_runnable_test_files=find_runnable_test_files,
-        _check_java_toolchain_mismatch=_check_java_toolchain_mismatch,
         _resolve_java_home_override=_resolve_java_home_override, _judge_candidate_suite=_judge_candidate_suite,
         _approve_and_execute_runtime_verification=_approve_and_execute_runtime_verification,
         _execute_managed_service_verification=_execute_managed_service_verification,
@@ -1257,11 +1255,11 @@ def _runtime_deps() -> "runtime_verification.RuntimeDeps":
     """The moved runtime-verification code's collaborators (kriya/workflow/runtime_verification.py), resolved through this
     module NOW (at call time), so a test patch of any of these names here (``run_managed_service_verification``,
     ``_resolve_run_command``, ``_approve_runtime_commands``, ``_prepare_finite_command_runtime_artifacts``,
-    ``_check_java_toolchain_mismatch``, ``_resolve_java_home_override``, ``time``, ``logger``, ...) reaches the moved code
+    ``_resolve_java_home_override``, ``time``, ``logger``, ...) reaches the moved code
     exactly as it reached the bodies when they lived here."""
     return runtime_verification.RuntimeDeps(
         logger=logger, time=time, run_managed_service_verification=run_managed_service_verification,
-        _resolve_run_command=_resolve_run_command, _check_java_toolchain_mismatch=_check_java_toolchain_mismatch,
+        _resolve_run_command=_resolve_run_command,
         _resolve_java_home_override=_resolve_java_home_override, _approve_runtime_commands=_approve_runtime_commands,
         _prepare_finite_command_runtime_artifacts=_prepare_finite_command_runtime_artifacts,
         _validate_and_convert_managed_service_contract=_validate_and_convert_managed_service_contract,

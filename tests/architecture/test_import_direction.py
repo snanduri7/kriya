@@ -419,7 +419,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.test_delta", "kriya.code_intel.parsing"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.test_delta", "kriya.tools.test_execution"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.toolchain", "kriya.capabilities"): ("P2", _P2),  # non-public EXECUTION module
-    ("kriya.workflow.toolchain", "kriya.platform.toolchain_locator"): ("P2", _P2),  # non-public PLATFORM module
     ("kriya.workflow.toolchain", "kriya.tools.toolchain_identity"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.triage", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.validation_baseline", "kriya.tools.test_execution"): ("P2", _P2),  # non-public EXECUTION module

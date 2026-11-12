@@ -1,4 +1,10 @@
-"""JDK/JAVA_HOME toolchain detection and correction for the Java/Maven retry loop - version mismatches, JDK-incompatible JVM flags, missing build manifests. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
+"""Java toolchain facts and corrections for the generation workflow. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization).
+
+TOOLCHAIN-HOST-PROBE-AUTHORITY-001 (owner ruling 2026-11-12, Scenario-A run 7): project-controlled execution is contained (mandatory), and the JDK a
+candidate is compiled, tested and run under is the one decision of ``kriya.tools.toolchain_identity`` (the project's own declaration -> a versioned
+image, attested at launch). Nothing in this module reads the HOST's ``java`` / ``mvn``: the host probe (``kriya.tools.validate.check_java_toolchain``)
+is a host diagnostic of ``kriya doctor`` only. Run 7 measured why: the host's Homebrew Maven ran on JDK 26, every gate ran in the JDK 17 image, and
+every Developer prompt said "Target JVM ... JDK 26"."""
 
 import logging
 import os
@@ -6,38 +12,12 @@ import re
 from typing import Any, Iterable, List, Optional, Tuple
 
 from kriya.capabilities import BUILD_ADAPTERS
-from kriya.platform.toolchain_locator import jdk_home_for_version as _resolve_jdk_home_for_version
 
 logger = logging.getLogger(__name__)
 
 
-def _check_java_toolchain_mismatch(stack: str) -> Optional[str]:
-    """Toolchain preflight: the first time a generation run's detected stack is
-    known to be 'java', checks whether 'java' and 'mvn' resolve to different JDK
-    major versions - a mismatch a human would otherwise only discover after a
-    wasted retry budget (see classify_environment_failure/the Quality Gates
-    circuit breaker), or not at all if this particular goal never happens to
-    exercise the version-sensitive flag. Returns None for any non-java stack (a
-    Python/Ruby goal never pays for this) or when no mismatch is found."""
-    if stack != "java":
-        return None
-    from kriya.tools.validate import check_java_toolchain
-    toolchain = check_java_toolchain()
-    if not toolchain["mismatch"]:
-        return None
-    return (
-        f"'java' resolves to JDK {toolchain['java_version']} but 'mvn' will "
-        f"build/run against JDK {toolchain['mvn_java_version']} - a JVM startup "
-        "flag correct for one may be invalid or fatal under the other. Run "
-        "`kriya doctor` for details."
-    )
-
-
-_JAVA_VERSION_MENTION_PATTERN = re.compile(r"\bjava\s+(\d{1,2})\b", re.IGNORECASE)
-
-
 def resolve_run_java_home_override(stack: Optional[str], goal: Optional[str]) -> Optional[str]:
-    """The JDK home a run's Maven calls are forced under, or None: ``_resolve_java_home_override(goal)`` for a Java stack with a goal, nothing
+    """The JDK home a run's toolchain selection is forced under, or None: ``_resolve_java_home_override(goal)`` for a Java stack with a goal, nothing
     otherwise. WAVE8 OI-97: the ONE resolution shared by the environment IDENTITY (``resume_fingerprints.toolchain_fingerprint``) and by every
     validator that EXECUTES under it (the candidate gates and the PRE-mutation baseline), so an identity can never record an override that a run did
     not execute under."""
@@ -47,37 +27,16 @@ def resolve_run_java_home_override(stack: Optional[str], goal: Optional[str]) ->
 
 
 def _resolve_java_home_override(goal: str) -> Optional[str]:
-    """When 'java' and 'mvn' resolve to different JDK major versions AND the
-    goal explicitly states a target Java version matching the 'java' side of
-    that mismatch (not 'mvn's), derives that JDK's real home directory so
-    PolymorphicValidator can force every Maven subprocess call to actually
-    build/run under it via JAVA_HOME - the same mechanism Maven's own
-    launcher script already uses to decide which JDK to run itself under.
+    """The goal-stated JDK handed to the canonical toolchain owner (``resolve_toolchain_selection(java_home_override=...)``). Always None today.
 
-    Motivated by a real, live-confirmed gap: 'maven.compiler.source/target'
-    in pom.xml controls what Java LANGUAGE version javac targets, not which
-    JDK 'mvn' itself actually runs under - those are independent, and a
-    goal explicitly saying "targeting Java 17" has no way to make Maven
-    actually honor that if the machine's 'mvn' defaults to a different,
-    genuinely incompatible JDK (confirmed live: JDK 26 permanently removed
-    the Security Manager, breaking a Qpid Broker-J API call with no
-    connection to anything the generated code controls).
-
-    Deliberately narrow, matching this session's own established pattern for
-    fixes like this: only activates for a real, detected mismatch where the
-    goal names a version matching the SIDE OF THE MISMATCH THAT'S ALREADY
-    CORRECT ('java', confirmed to already resolve to what's wanted) - never
-    guesses at a version the goal doesn't state, never overrides a mismatch
-    the goal doesn't actually care about, and does nothing at all on a
-    single-JDK machine (nothing to reconcile)."""
-    from kriya.tools.validate import check_java_toolchain
-    toolchain = check_java_toolchain()
-    if not toolchain["mismatch"]:
-        return None
-    m = _JAVA_VERSION_MENTION_PATTERN.search(goal)
-    if not m or m.group(1) != toolchain["java_version"]:
-        return None
-    return _resolve_jdk_home_for_version(toolchain["java_version"])
+    It used to be derived from the HOST: when the host's ``java`` and ``mvn`` ran different JDK majors and the goal text named the ``java`` side's
+    version, that host JDK's home was returned, and under containment its ``release`` file then moved the contained image. So the same goal on the
+    same repository selected a different image depending on how the operator's machine happened to be set up (TOOLCHAIN-HOST-PROBE-AUTHORITY-001).
+    That host authority is removed. No host-independent authority for a goal-stated Java version exists yet (registered ownership gap
+    GOAL-STATED-JAVA-VERSION-TOOLCHAIN-AUTHORITY-001): the project's own declaration selects the toolchain, as it already did on every machine
+    whose host tools agreed. The seam itself is kept: whatever is returned here still reaches the canonical owner and its conflict rules."""
+    del goal
+    return None
 
 
 def _goal_or_repo_targets_java(goal: str, workspace_path: str) -> bool:
@@ -109,32 +68,28 @@ def _goal_or_repo_targets_java(goal: str, workspace_path: str) -> bool:
 
 
 def _java_toolchain_fact(goal: str, workspace_path: str) -> Optional[str]:
-    """Surfaces the actual, resolved target JVM as a concrete fact for the
-    Planner/Architect/Developer prompts - not a warning like
-    _check_java_toolchain_mismatch(), just ground truth. Skill rules that are
-    genuinely JDK-version-conditional (e.g. a startup flag required on one JDK
-    range and fatal on another) are otherwise unverifiable at generation time:
-    the model has no way to reason about "is my applicable range satisfied"
-    without knowing the actual number. Confirmed as a real gap during
-    golden-use-case validation - a skill rule correct for JDK 17.0.10-23
-    (-Djava.security.manager=allow) was silently wrong on JDK 24+ (JEP 486
-    removed the Security Manager entirely), and nothing in the prompt ever told
-    the model what JDK it was actually generating for. Prefers the JDK 'mvn'
-    itself will build/run against (what a generated app's exec:java/exec:exec
-    invocation actually executes under) over plain 'java', falling back to
-    'java' if mvn isn't present. Returns None if neither tool is found, OR if
-    _goal_or_repo_targets_java() finds no real evidence this generation is
-    actually about Java - a non-Java project never pays for or sees this
-    (the check this docstring always claimed, but didn't actually enforce
-    until the fix documented on _goal_or_repo_targets_java above)."""
+    """The JDK this project's compile, test and runtime gates run under, as a fact for the Planner/Architect/Developer prompts - or None.
+
+    Skill rules that are JDK-version-conditional (a startup flag required on one JDK range and fatal on another) cannot be applied without the
+    number, so the prompt states it. The number is the CONTAINED execution JDK and comes only from the canonical owner
+    (``toolchain_identity.declared_java_execution_identity``: the project's own build declaration -> the versioned image the gates use). It is
+    stated only when the tree already declares it. Before that (a new project whose build file is not written yet, or one that declares no version)
+    nothing is said: neither the host's JDK nor a default is a fact about this project's execution (TOOLCHAIN-HOST-PROBE-AUTHORITY-001).
+    None as well when ``_goal_or_repo_targets_java()`` finds no evidence that this generation is about Java, and when the declaration cannot be
+    resolved (the gates raise that typed, with the reason; a prompt line is not the place to report it)."""
     if not _goal_or_repo_targets_java(goal, workspace_path):
         return None
-    from kriya.tools.validate import check_java_toolchain
-    toolchain = check_java_toolchain()
-    version = toolchain["mvn_java_version"] or toolchain["java_version"]
-    if not version:
+    from kriya.tools.toolchain_identity import ToolchainResolutionError, declared_java_execution_identity
+    try:
+        identity = declared_java_execution_identity(workspace_path)
+    except ToolchainResolutionError:
         return None
-    return f"Target JVM (resolved on this machine via 'mvn'/'java'): JDK {version}."
+    if identity is None:
+        return None
+    return (
+        f"Target JVM (the contained JDK Kriya's compile, test and runtime gates run this project under, selected from "
+        f"{identity.requirement_source}): JDK {identity.runtime_version}."
+    )
 
 
 # Small, extensible table of (JVM flag substring, min JDK major version it's
@@ -152,69 +107,22 @@ _JDK_INCOMPATIBLE_JVM_FLAGS: List[Tuple[str, int, str]] = [
 ]
 
 
-def _strip_jdk_incompatible_jvm_flags(
-    content: str, java_home_override: Optional[str] = None,
-) -> Tuple[Optional[str], Optional[str]]:
-    """Deterministically strips a JVM flag from the worktree's pom.xml
-    exec-maven-plugin <argument> list when it's known to be fatal on the
-    actually-resolved target JDK, right before the run-verification gate
-    actually executes the app - the correction of last resort for a mistake
-    the model keeps making even with everything it needs to avoid it.
+def _strip_jdk_incompatible_jvm_flags(content: str, contained_jdk_major: Optional[int]) -> Tuple[Optional[str], Optional[str]]:
+    """Strips a JVM flag from the candidate's pom.xml exec-maven-plugin ``<argument>`` list when it is known to be fatal on the JDK the candidate
+    is actually run under - the correction of last resort for a mistake the model kept making with the rule and the fact both in its prompt
+    (confirmed live 2026-08-07, skills/qpid).
 
-    Confirmed live, 2026-08-07: skills/qpid/rules.txt already states this
-    exact JDK-version-conditional rule correctly ("on JDK 24+, DO NOT pass
-    this flag... check the Target JVM fact given in this prompt"), and
-    _java_toolchain_fact() (above) already correctly surfaces that exact
-    fact in the prompt - `active_skills` confirmed both were active, the
-    fact was present, and the model still added the forbidden flag on every
-    attempt of a real batch run. A case where deterministic tooling is the
-    right lever, not more prompting (see the durable lesson on file about
-    this) - mirrors _resolve_run_command()'s existing pattern of
-    deterministically correcting a known-wrong invocation detail rather
-    than asking the model to get it right.
+    ``contained_jdk_major`` is the major version of the candidate's CONTAINED toolchain identity (the validator's ``toolchain_identity``, the one
+    owner). The caller resolves it; this function never asks the host which JDK its ``mvn`` runs on (TOOLCHAIN-HOST-PROBE-AUTHORITY-001: that
+    answer decided a transform of a candidate that never runs on the host). None (identity not resolvable here) changes nothing.
 
-    java_home_override, when given, is the JDK home _resolve_java_home_override()
-    already resolved for this run - pass it through rather than letting this
-    function re-derive the target independently. Confirmed live, 2026-08-07:
-    without this, the function called check_java_toolchain() fresh and used
-    mvn's UNMODIFIED default JDK (26 on the validation machine) to decide
-    what to strip, even on a run where JAVA_HOME was already being forced
-    onto JDK 17 for every Maven subprocess - two independent "what JDK is
-    this?" computations that can disagree about the one that actually
-    matters (the JDK the subprocess will really run under). Harmless that
-    time (the flag is optional either way on JDK 17), but not guaranteed to
-    stay harmless. When set, the override's JDK IS toolchain['java_version']
-    by construction (_resolve_java_home_override only ever overrides onto
-    the 'java' side of a detected mismatch), so that's used instead of
-    mvn_java_version.
-
-    Best-effort and silent on any I/O problem - this is a defensive
-    correction, not a required step, and must never itself break a run that
-    would otherwise be fine. Returns a human-readable note describing what
-    was stripped (for logging/toolchain_warning), or None if nothing
-    needed correcting."""
-    # FILE-INTEGRITY-CONTRACT-001: a pure transform of pom.xml text,
-    # (corrected content, note) or (None, None). It never writes; the attempt
-    # applies it as a candidate mutation, before any verification gate.
-    # The flags are checked first: resolving the toolchain spawns java/mvn.
-    if not any(flag in content for flag, _jdk, _reason in _JDK_INCOMPATIBLE_JVM_FLAGS):
-        return None, None
-    try:
-        from kriya.tools.validate import check_java_toolchain
-        toolchain = check_java_toolchain()
-        version_str = (
-            toolchain["java_version"] if java_home_override
-            else toolchain["mvn_java_version"] or toolchain["java_version"]
-        )
-        if not version_str:
-            return None, None
-        resolved_major = int(version_str)
-    except Exception as e:
-        logger.debug(f"_strip_jdk_incompatible_jvm_flags failed (non-fatal, skipping): {e}")
+    A pure transform of pom.xml text (FILE-INTEGRITY-CONTRACT-001): (corrected content, note) or (None, None). It never writes; the attempt
+    applies it as a candidate mutation, before any verification gate."""
+    if contained_jdk_major is None:
         return None, None
     notes = []
     for flag, min_forbidden_jdk, reason in _JDK_INCOMPATIBLE_JVM_FLAGS:
-        if resolved_major < min_forbidden_jdk or flag not in content:
+        if contained_jdk_major < min_forbidden_jdk or flag not in content:
             continue
         pattern = re.compile(rf"[ \t]*<argument>\s*{re.escape(flag)}\s*</argument>[ \t]*\n?")
         new_content, count = pattern.subn("", content)
@@ -222,61 +130,15 @@ def _strip_jdk_incompatible_jvm_flags(
             content = new_content
             notes.append(
                 f"Stripped '{flag}' from pom.xml before running - {reason} "
-                f"(resolved target: JDK {resolved_major})."
+                f"(contained execution JDK {contained_jdk_major})."
             )
     return (content, " ".join(notes)) if notes else (None, None)
 
 
-def _pin_exec_plugin_executable_to_resolved_jdk(
-    content: str, java_home_override: Optional[str],
-) -> Tuple[Optional[str], Optional[str]]:
-    """Pins exec-maven-plugin's <executable> (the exec:exec goal only -
-    exec:java always runs inside Maven's own already-started JVM and ignores
-    <executable>/<arguments> entirely, using <mainClass>/systemProperties
-    instead) to the ABSOLUTE path of the JDK Kriya's own verification
-    actually used, whenever a java_home_override is active - without this,
-    the delivered project carries zero record of which JDK it was actually
-    verified under.
-
-    Found live, 2026-08-11 (kriya-staged-protocol-ignite-qpid): Runtime
-    Verification reported PASSED because Kriya forces JAVA_HOME onto the
-    goal-stated target JDK for its OWN subprocess calls only
-    (_resolve_java_home_override) - that override is completely invisible in
-    the delivered pom.xml, which still has a bare <executable>java</executable>
-    (resolved via PATH at whatever JDK is default for WHOEVER runs it later,
-    which has no reason to match what Kriya used). Confirmed live: on a
-    machine where 'mvn' itself defaults to a different, genuinely
-    incompatible JDK (JDK 26, which removed the Security Manager entirely and
-    broke a real Qpid Broker-J API the generated app depends on), the exact
-    same pom.xml Kriya had just verified crashed immediately the moment it was
-    run outside Kriya's own JAVA_HOME-overridden subprocess environment -
-    "Runtime Verification PASSED" was only ever true inside Kriya's own
-    execution context, not for a human re-running the identical command
-    afterward. This is the general, durable fix; stripping the one flag that
-    happened to be the FIRST symptom (_strip_jdk_incompatible_jvm_flags above)
-    would not have caught the SECOND, deeper incompatibility this same drift
-    exposed once the flag was gone.
-
-    Only activates when java_home_override is set (nothing to reconcile
-    without a detected java/mvn mismatch in the first place) and
-    <executable> is still the bare, unpinned "java" - never overwrites a
-    value the model or a prior pass already pinned deliberately. Best-effort
-    and silent on any I/O problem, same discipline as
-    _strip_jdk_incompatible_jvm_flags - a defensive correction, never allowed
-    to break a run that would otherwise be fine."""
-    # FILE-INTEGRITY-CONTRACT-001: a pure transform, like the one above.
-    if not java_home_override:
-        return None, None
-    resolved_java = os.path.join(java_home_override, "bin", "java")
-    pattern = re.compile(r"<executable>\s*java\s*</executable>")
-    new_content, count = pattern.subn(f"<executable>{resolved_java}</executable>", content, count=1)
-    if not count:
-        return None, None
-    return new_content, (
-        f"Pinned exec-maven-plugin's <executable> to {resolved_java} - the JDK this "
-        "run's verification actually used - so the delivered project runs consistently "
-        "later regardless of the default JDK on whoever runs it."
-    )
+def pom_names_a_jdk_conditional_flag(content: str) -> bool:
+    """Whether the pom text carries any flag of ``_JDK_INCOMPATIBLE_JVM_FLAGS``: the cheap test that decides whether the contained toolchain
+    identity has to be resolved for ``_strip_jdk_incompatible_jvm_flags`` at all."""
+    return any(flag in content for flag, _jdk, _reason in _JDK_INCOMPATIBLE_JVM_FLAGS)
 
 
 def toolchain_declaration_mutable(

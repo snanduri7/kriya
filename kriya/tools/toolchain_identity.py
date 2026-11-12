@@ -182,6 +182,18 @@ def _java_identity(version: int, source: str, build_tool: Optional[str], build_v
     return ToolchainIdentity("java", "jdk", str(version), build_tool, build_version, image, source)
 
 
+def declared_java_execution_identity(workspace_path: str) -> Optional[ToolchainIdentity]:
+    """The contained Java toolchain the project's OWN build declaration selects, or None when nothing in the tree declares a Java version
+    (no build file, or a build file without a version). TOOLCHAIN-HOST-PROBE-AUTHORITY-001: this is what a statement about the execution JVM
+    may be made from BEFORE a validator exists (the Developer/Planner environment fact). It never substitutes ``_DEFAULT_JAVA`` and never reads
+    the host: an undeclared project has no known execution JDK yet, and saying nothing is the truthful answer. A declaration that cannot be
+    resolved raises the same typed ``ToolchainResolutionError`` the gates raise."""
+    declared, source, build_tool, build_version = _java_declaration(workspace_path)
+    if declared is None:
+        return None
+    return _java_identity(declared, source, build_tool, build_version)
+
+
 def _resolve_java(workspace_path: str) -> ToolchainIdentity:
     version, source, build_tool, build_version = _java_declaration(workspace_path)
     return _java_identity(version or _DEFAULT_JAVA, source, build_tool, build_version)

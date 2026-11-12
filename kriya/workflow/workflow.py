@@ -367,22 +367,13 @@ from kriya.workflow.terminal_commit import (
     materialize_candidate,
 )
 from kriya.workflow.toolchain import (
-    _check_java_toolchain_mismatch as _check_java_toolchain_mismatch,  # E5: the terminal regression moved; tests import it from here
-)
-from kriya.workflow.toolchain import (
     _goal_or_repo_targets_java as _goal_or_repo_targets_java,
 )
 from kriya.workflow.toolchain import (
     _java_toolchain_fact as _java_toolchain_fact,
 )
 from kriya.workflow.toolchain import (
-    _pin_exec_plugin_executable_to_resolved_jdk as _pin_exec_plugin_executable_to_resolved_jdk,
-)
-from kriya.workflow.toolchain import (
     _resolve_java_home_override as _resolve_java_home_override,  # E5: the terminal regression moved; tests import it from here
-)
-from kriya.workflow.toolchain import (
-    _resolve_jdk_home_for_version as _resolve_jdk_home_for_version,
 )
 from kriya.workflow.toolchain import (
     _strip_jdk_incompatible_jvm_flags as _strip_jdk_incompatible_jvm_flags,

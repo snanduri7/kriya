@@ -5,9 +5,9 @@ Moved verbatim from ``kriya/workflow/attempt.py``:
 - the verification-tree binding taken before the first gate (``_bind_verification_tree``, the staged-bytes check
   ``_require_worktree_matches_candidate`` and the LR-R1-M1 ``candidate.change`` record ``_record_candidate_change``,
   FILE-INTEGRITY-CONTRACT-001);
-- the candidate validator and the one-time JVM toolchain preflight (``_new_candidate_validator``,
-  ``_resolve_candidate_toolchain``: the java/mvn mismatch warning and the goal-stated JDK's JAVA_HOME override, applied
-  to every attempt's new validator), the candidate's own pom.xml corrections (``_apply_candidate_pom_corrections``,
+- the candidate validator and the run's goal-stated JDK (``_new_candidate_validator``,
+  ``_resolve_candidate_toolchain``: resolved once per run and applied to every attempt's new validator; no host java/mvn
+  check, TOOLCHAIN-HOST-PROBE-AUTHORITY-001), the candidate's own pom.xml corrections (``_apply_candidate_pom_corrections``,
   ``apply_pre_review_candidate_corrections``);
 - the POM validation gate (``_run_pom_validation_gate``), the executing candidate gates through
   ``candidate_gates_succeeded`` (``_run_executing_candidate_gates``: compile, contract feedback, tests, the test
@@ -30,7 +30,7 @@ re-export) so a test patch on ``kriya.workflow.attempt`` keeps intercepting the 
 ``GateDeps``, resolved through ``kriya.workflow.attempt`` when the forwarder runs: every name the bodies looked up that
 attempt.py defines (its helpers, the moved siblings' forwarders), every name tests patch on ``kriya.workflow.attempt``
 (``tests/architecture/test_patch_points.py::PATCH_POINTS``: ``extract_target_test``, ``find_runnable_test_files``,
-``_check_java_toolchain_mismatch``, ``_resolve_java_home_override``, ``_judge_candidate_suite``, the runtime and
+``_resolve_java_home_override``, ``_judge_candidate_suite``, the runtime and
 managed-service seams), attempt.py's ``logger`` and ``time``, and the names of the kernel's all-import cycle
 (``suite_attribution``'s scopes, ``context_budget.request_capacity``; ``self_correction`` and ``retry_strategy``
 through loaders called where the bodies imported them). Names of modules outside that cycle (none of them reaches
@@ -87,7 +87,7 @@ from kriya.workflow.obligations import ObligationAuthority, ObligationKind, Obli
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.test_delta import TEST_EXECUTION_EVIDENCE_INDETERMINATE, judge_test_delta
-from kriya.workflow.toolchain import _pin_exec_plugin_executable_to_resolved_jdk, _strip_jdk_incompatible_jvm_flags
+from kriya.workflow.toolchain import _strip_jdk_incompatible_jvm_flags, pom_names_a_jdk_conditional_flag
 from kriya.workflow.verification_authority import deterministic_sequence_kind
 from kriya.workflow.verification_coordinator import VerificationCoordinator, VerificationRequest
 from kriya.workflow.worktree import repository_content_paths
@@ -122,7 +122,6 @@ class GateDeps:
     # names tests patch on kriya.workflow.attempt (PATCH_POINTS)
     extract_target_test: Callable[..., Any]
     find_runnable_test_files: Callable[..., Any]
-    _check_java_toolchain_mismatch: Callable[..., Any]
     _resolve_java_home_override: Callable[..., Any]
     _judge_candidate_suite: Callable[..., Any]
     _approve_and_execute_runtime_verification: Callable[..., Any]
@@ -189,6 +188,22 @@ class GateDeps:
     find_ungrounded_java_child_process_tests: Callable[..., Any]
 
 
+def _contained_jdk_major(deps: GateDeps, state: RunState, ctx: AttemptCtx) -> Optional[int]:
+    """The major version of the JDK this candidate's gates run under: the candidate validator's own ``toolchain_identity`` (built the way every gate
+    builds it, the run's goal-stated override applied). None when the identity cannot be resolved here - the gates raise that typed right after."""
+    from kriya.tools.containment import BackendUnavailableError
+
+    try:
+        validator = deps._new_candidate_validator(ctx)
+        validator.java_home_override = state.java_home_override
+        identity = validator.toolchain_identity
+    except BackendUnavailableError:
+        return None
+    if identity is None or identity.language != "java":
+        return None
+    return int(identity.runtime_version)
+
+
 def _apply_candidate_pom_corrections(
     deps: GateDeps, state: RunState, ctx: AttemptCtx, compile_known_files: List[str],
 ) -> None:
@@ -222,18 +237,15 @@ def _apply_candidate_pom_corrections(
     if main_class is not None:
         corrected = main_class
         corrections.append("exec_main_class")
-    notes = []
-    for name, transform in (("jdk_incompatible_jvm_flags", _strip_jdk_incompatible_jvm_flags),
-                            ("exec_executable_pinned_to_resolved_jdk", _pin_exec_plugin_executable_to_resolved_jdk)):
-        transformed, note = transform(corrected, state.java_home_override)
+    # TOOLCHAIN-HOST-PROBE-AUTHORITY-001: a JDK-conditional flag is judged against the candidate's CONTAINED toolchain identity (the validator's,
+    # the one owner), resolved only when the pom names such a flag. The host's java/mvn decide nothing about a candidate that never runs on the host.
+    if pom_names_a_jdk_conditional_flag(corrected):
+        transformed, note = _strip_jdk_incompatible_jvm_flags(corrected, _contained_jdk_major(deps, state, ctx))
         if transformed is not None:
             corrected = transformed
-            corrections.append(name)
-            notes.append(note)
-    if notes:
-        joined = " ".join(notes)
-        deps.logger.warning(f"JVM preflight: {joined}")
-        state.toolchain_warning = f"{state.toolchain_warning} {joined}" if state.toolchain_warning else joined
+            corrections.append("jdk_incompatible_jvm_flags")
+            deps.logger.warning(f"JVM preflight: {note}")
+            state.toolchain_warning = f"{state.toolchain_warning} {note}" if state.toolchain_warning else note
     if not corrections:
         return
     data = snapshot.encode(corrected)
@@ -486,19 +498,16 @@ def _new_candidate_validator(deps: GateDeps, ctx: AttemptCtx) -> Any:
 
 
 def _resolve_candidate_toolchain(deps: GateDeps, state: RunState, ctx: AttemptCtx, validator: Any) -> None:
-    """The one-time toolchain preflight and the JAVA_HOME override, applied to this attempt's validator. Extracted unchanged from the executing tail (no candidate code runs here)."""
+    """The run's goal-stated JDK (resolved once per run), applied to this attempt's validator; no candidate code runs here. It carries no host java/mvn check
+    (TOOLCHAIN-HOST-PROBE-AUTHORITY-001): the validator's contained toolchain identity is the only authority for the JDK a candidate runs under."""
     if not state.toolchain_checked:
         state.toolchain_checked = True
-        state.toolchain_warning = deps._check_java_toolchain_mismatch(validator.stack)
-        if state.toolchain_warning:
-            deps.logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
         if validator.stack == "java":
             state.java_home_override = deps._resolve_java_home_override(ctx.goal)
             if state.java_home_override:
                 deps.logger.warning(
-                    "JVM toolchain enforcement: forcing Maven subprocess calls to "
-                    f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
-                    "version doesn't match what 'mvn' resolves to by default here."
+                    "JVM toolchain selection: the goal-stated JDK "
+                    f"{state.java_home_override} is handed to the contained toolchain selection."
                 )
     # Constructed fresh above (a new validator every attempt) - re-apply
     # the one-time-resolved override every time, not just when it was

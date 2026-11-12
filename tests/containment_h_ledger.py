@@ -48,7 +48,7 @@ def _e(premise, unreachable, semantic=(), why="", passes_unskipped=False):
 PY_GATE = "tests/test_contained_python_test_gate_001.py::"
 D2 = "tests/test_d2_authority_namespace.py::"
 GATE = "tests/test_gate_orchestrator.py::"
-PREFLIGHT = GATE + "test_the_toolchain_preflight_runs_once_and_its_override_reaches_every_attempts_validator"
+PREFLIGHT = GATE + "test_the_goal_stated_jdk_is_resolved_once_and_reaches_every_attempts_validator"   # renamed with TOOLCHAIN-HOST-PROBE-AUTHORITY-001: the kept seam, no host probe
 IDENT = "tests/test_prd011_toolchain_identity.py::"
 GOAL_JDK = IDENT + "test_goal_stated_jdk_assigned_after_construction_selects_the_contained_image"
 HOST_JDK_REUSED = IDENT + "test_selected_host_jdk_version_is_reused_for_containment"
@@ -199,7 +199,7 @@ LEDGER: Dict[str, Entry] = {
         "a pyproject without dependencies never creates a venv (host)", [VALIDATOR, OPT_OUT], [VENV_PYTEST]),
     "tests/test_workflow.py::test_workflow_applies_java_home_override_to_maven_subprocess": _e(
         "a goal-stated JDK reaches the host Maven subprocess", [VALIDATOR, OPT_OUT],
-        [GOAL_JDK, "tests/test_workflow.py::test_resolve_java_home_override_resolves_when_goal_matches_java_side"]),
+        [GOAL_JDK, "tests/test_toolchain_host_probe_authority_001.py::test_the_canonical_seam_for_a_goal_stated_jdk_is_kept"]),   # the host-derived resolution is removed (TOOLCHAIN-HOST-PROBE-AUTHORITY-001); the seam into the canonical owner stays
     # the static-analysis host provider: the pinned HOST semgrep scanning a candidate. Static analysis always runs contained in a digest-pinned image; the host provider branch is unreachable.
     "tests/test_prd032_chaos_static_analysis.py::test_a_nosemgrep_suppression_in_the_candidate_never_hides_a_finding": _e(
         "the pinned HOST semgrep scans a candidate carrying `// nosemgrep` and the suppressed finding still blocks (chaos E08)", [MANDATE, SA_NO_HOST],

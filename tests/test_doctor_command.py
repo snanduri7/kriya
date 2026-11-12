@@ -102,14 +102,10 @@ def test_doctor_exits_nonzero_when_embedding_connection_fails(tmp_path):
 
 
 def test_doctor_warns_on_java_mvn_version_mismatch_without_failing(tmp_path):
-    """Regression test: 'mvn' can silently resolve a different JDK than plain
-    'java' (e.g. a Homebrew mvn install defaulting JAVA_HOME to its own,
-    possibly newer, openjdk) - confirmed as a real, silent failure mode during
-    golden-use-case validation (a JVM startup flag correct for the JDK 'java'
-    resolved was fatal under the JDK 'mvn' actually built/ran against). This
-    must surface as a [WARNING] (not silently ignored), but must NOT fail
-    `doctor`'s own exit code - same severity convention as the existing
-    configured-model-not-on-server warning."""
+    """The HOST's 'mvn' can run on a different JDK than the host's plain 'java' (a Homebrew mvn defaults JAVA_HOME to its own, possibly newer,
+    openjdk). `doctor` reports that as a [WARNING] without failing its exit code - and, since TOOLCHAIN-HOST-PROBE-AUTHORITY-001 (owner ruling
+    2026-11-12, Scenario-A run 7: host java 21, host mvn 26, every gate in the JDK 17 image), it says plainly that these are HOST tools which a
+    contained Kriya run does not use. The old advice ("Pin JAVA_HOME ... before running generate/fix") claimed the opposite and is gone."""
     cfg = _cfg(tmp_path)
 
     mock_response = MagicMock()
@@ -123,14 +119,18 @@ def test_doctor_warns_on_java_mvn_version_mismatch_without_failing(tmp_path):
          patch("urllib.request.urlopen", return_value=mock_response), \
          patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", return_value=[0.1] * 384), \
          patch("kriya.tools.validate.check_java_toolchain", return_value={
-             "java_found": True, "java_version": "17",
+             "java_found": True, "java_version": "21",
              "mvn_found": True, "mvn_java_version": "26",
              "mismatch": True,
          }):
         res = runner.invoke(main, ["doctor"])
 
-    assert "[WARNING]" in res.output
-    assert "DIFFERENT major" in res.output
+    out = " ".join(res.output.split())
+    assert "Checking HOST Java/Maven tools (host diagnostic; contained Kriya runs do not use them):" in out
+    assert "HOST 'java' resolves to JDK 21" in out and "HOST 'mvn' builds/runs against JDK 26" in out
+    assert "[WARNING] HOST 'java' (JDK 21) and HOST 'mvn' (JDK 26) resolve to DIFFERENT major versions" in out
+    assert "It does NOT change a Kriya run" in out
+    assert "Pin JAVA_HOME" not in out
     assert res.exit_code == 0
 
 
@@ -156,7 +156,7 @@ def test_doctor_skips_toolchain_section_cleanly_when_neither_found(tmp_path):
          }):
         res = runner.invoke(main, ["doctor"])
 
-    assert "Checking Java/Maven toolchain" not in res.output
+    assert "Checking HOST Java/Maven tools" not in res.output and "HOST" not in res.output
     assert res.exit_code == 0
 
 

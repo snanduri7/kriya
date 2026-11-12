@@ -471,36 +471,33 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
         errors_found = True
 
-    # 3. Check Java/Maven toolchain resolution (only relevant if either is
-    # installed - not every Kriya project is Java-based, so finding neither is
-    # not an error, just skipped). 'mvn' can silently resolve a different JVM
-    # than plain 'java' does (e.g. a Homebrew mvn install defaulting JAVA_HOME
-    # to its own, possibly newer, openjdk) - a real, silent failure mode
-    # confirmed live during golden-use-case validation: JVM startup flags
-    # correct for the JDK 'java' resolves can be fatal under the JDK 'mvn'
-    # actually builds/runs against, with zero indication why short of manually
-    # comparing `java -version` against `mvn -version`'s own report.
+    # 3. The HOST's Java/Maven tools (only when either is installed - not every Kriya project is Java-based, so finding neither is skipped, not an
+    # error). A host diagnostic only (TOOLCHAIN-HOST-PROBE-AUTHORITY-001): Kriya compiles, tests and runs a project CONTAINED, under the JDK image
+    # selected from the project's own build declaration, so neither host tool builds or runs a Kriya candidate and this section says nothing about
+    # the JDK a run executes under. It still matters to the operator: a host 'mvn' can run on a different JVM than plain 'java' (a Homebrew mvn
+    # defaults JAVA_HOME to its own, possibly newer, openjdk), which bites when the SAME project is built by hand outside Kriya.
     from kriya.tools.validate import check_java_toolchain
     toolchain = check_java_toolchain()
     if toolchain["java_found"] or toolchain["mvn_found"]:
-        click.echo("\nChecking Java/Maven toolchain:")
+        click.echo("\nChecking HOST Java/Maven tools (host diagnostic; contained Kriya runs do not use them):")
         if toolchain["java_found"]:
-            click.echo(f"  - 'java' resolves to JDK {toolchain['java_version']}")
+            click.echo(f"  - HOST 'java' resolves to JDK {toolchain['java_version']}")
         if toolchain["mvn_found"]:
-            click.echo(f"  - 'mvn' will build/run against JDK {toolchain['mvn_java_version']}")
+            click.echo(f"  - HOST 'mvn' builds/runs against JDK {toolchain['mvn_java_version']}")
         if toolchain["mismatch"]:
             click.secho(
-                f"  - [WARNING] 'java' (JDK {toolchain['java_version']}) and 'mvn' "
+                f"  - [WARNING] HOST 'java' (JDK {toolchain['java_version']}) and HOST 'mvn' "
                 f"(JDK {toolchain['mvn_java_version']}) resolve to DIFFERENT major "
-                "versions. JVM startup flags tuned for one may be invalid or fatal "
-                "under the other (e.g. -Djava.security.manager=allow is required on "
-                "17.0.10+ but a hard VM-startup error on 24+, which removed the "
-                "Security Manager entirely). Pin JAVA_HOME to the version your "
-                "project targets before running `generate`/`fix` on a Java project.",
+                "versions. This affects builds you run by hand on this machine: JVM "
+                "startup flags tuned for one may be invalid or fatal under the other "
+                "(e.g. -Djava.security.manager=allow is a hard VM-startup error on 24+). "
+                "It does NOT change a Kriya run: `generate`/`fix` build and run a Java "
+                "project in the container image selected from the project's own "
+                "declaration (pom.xml / build.gradle).",
                 fg="yellow"
             )
         else:
-            click.secho("  - [SUCCESS] No version mismatch detected.", fg="green")
+            click.secho("  - [SUCCESS] No HOST version mismatch detected.", fg="green")
 
     # Optional, Java-only - a missing jdtls is never an error, just a
     # capability Kriya proceeds without (LSP grounding degrades cleanly to

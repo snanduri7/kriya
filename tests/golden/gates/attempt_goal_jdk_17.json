@@ -58,7 +58,7 @@
   "ledger": null,
   "plan_scope_conflict": null,
   "toolchain_checked": true,
-  "toolchain_warning": "'java' resolves to JDK 17 but 'mvn' will build/run against JDK 26 - a JVM startup flag correct for one may be invalid or fatal under the other. Run `kriya doctor` for details.",
+  "toolchain_warning": null,
   "validated_file_revisions": {
    "src/main/java/org/example/App.java": "28332c34a2ae63d8ae476d582c1e1968f17ca62431a403d56af94c82caa1db18"
   },

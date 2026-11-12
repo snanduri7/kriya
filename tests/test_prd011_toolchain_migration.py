@@ -130,7 +130,6 @@ async def test_authorized_migration_run_executes_its_gates_in_the_target_image(t
         return ProcessResult(returncode=0, stdout="", stderr="", timeout=False)
 
     monkeypatch.setattr("kriya.tools.validate.ProcessController.run", run)
-    monkeypatch.setattr("kriya.workflow.attempt._check_java_toolchain_mismatch", lambda stack: None)
     cfg = _run_cfg()
     engine = _engine(cfg, [{"filepath": "pom.xml", "content": _pom(21)},
                            {"filepath": "src/main/java/App.java", "content": "public class App {}"}])
@@ -174,7 +173,6 @@ async def test_scoped_run_needing_another_jdk_stops_before_any_candidate_command
     requires Java 21 on a Java 17 repository: typed stop, nothing executed."""
     (tmp_path / "pom.xml").write_text(_pom(17))
     monkeypatch.setattr("kriya.workflow.attempt._resolve_java_home_override", lambda goal: _jdk_home(tmp_path, 21))
-    monkeypatch.setattr("kriya.workflow.attempt._check_java_toolchain_mismatch", lambda stack: None)
     ran = []
     monkeypatch.setattr(
         "kriya.tools.validate.ProcessController.run",

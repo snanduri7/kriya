@@ -1001,15 +1001,12 @@ def _toolchain(mismatch: bool, *, checked: bool = False) -> Callable[[_AttemptRu
 
 
 async def _directly_with_toolchain(run: _AttemptRun) -> None:
+    """The HOST probe is scripted and traced: TOOLCHAIN-HOST-PROBE-AUTHORITY-001 - the direct path must never ask it, so a
+    ``toolchain_probe`` entry in a golden trace would be the defect."""
     def probe():
         run.trace.append({"toolchain_probe": True})
         return run.toolchain
-
-    def home(version):
-        run.trace.append({"jdk_home_for": version})
-        return "/opt/jdk-17"
-    with patch("kriya.tools.validate.check_java_toolchain", side_effect=probe), \
-            patch("kriya.workflow.toolchain._resolve_jdk_home_for_version", side_effect=home):
+    with patch("kriya.tools.validate.check_java_toolchain", side_effect=probe):
         await _directly(run)
 
 
@@ -1568,7 +1565,6 @@ def test_the_runtime_seams_are_resolved_through_the_attempt_module(tmp_path):
             patch.object(attempt, "_resolve_run_command", spy("resolve", attempt._resolve_run_command)), \
             patch.object(attempt, "_prepare_finite_command_runtime_artifacts",
                          spy("prepare", attempt._prepare_finite_command_runtime_artifacts)), \
-            patch.object(attempt, "_check_java_toolchain_mismatch", spy("toolchain", attempt._check_java_toolchain_mismatch)), \
             patch.object(attempt, "_resolve_java_home_override", spy("java_home", attempt._resolve_java_home_override)), \
             patch.object(attempt, "_validate_and_convert_managed_service_contract",
                          spy("admission", attempt._validate_and_convert_managed_service_contract)), \
@@ -1577,8 +1573,8 @@ def test_the_runtime_seams_are_resolved_through_the_attempt_module(tmp_path):
             patch.object(attempt, "time", _Clock()):
         run.call(both_paths)
     # approve-and-execute and direct: the review, the subject's and the executor's resolution, the preparation; the
-    # direct path's toolchain preflight (python: no JAVA_HOME); the managed-service admission
-    assert seen.count("approve") == 2 and seen.count("prepare") == 2 and seen.count("toolchain") == 1, seen
+    # goal-stated JDK is not resolved for a python stack; the managed-service admission
+    assert seen.count("approve") == 2 and seen.count("prepare") == 2, seen
     assert seen.count("resolve") == 8 and "java_home" not in seen and seen.count("admission") == 1, seen
     assert seen.count("managed") == 1, seen       # the direct path hands a managed service over by the attempt name
     timings = run.state.validator_timings         # the direct path's run and the managed service, timed on attempt's clock

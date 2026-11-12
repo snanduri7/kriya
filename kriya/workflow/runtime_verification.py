@@ -35,7 +35,7 @@ on ``kriya.workflow.attempt`` keeps intercepting the moved code. What arrives in
 ``kriya.workflow.attempt`` when a forwarder runs: every name the bodies looked up that attempt.py defines (its helpers,
 the moved siblings' forwarders), every name tests patch on ``kriya.workflow.attempt``
 (``tests/architecture/test_patch_points.py::PATCH_POINTS``: ``run_managed_service_verification``, ``_resolve_run_command``,
-``_check_java_toolchain_mismatch``, ``_resolve_java_home_override``, ``time``, the review, preparation, admission and
+``_resolve_java_home_override``, ``time``, the review, preparation, admission and
 managed-service seams), attempt.py's ``logger``, the names of the kernel's all-import cycle (``verifier_evidence``,
 ``skill_extraction``, ``context_budget.request_capacity``; ``core.llm``, ``self_correction`` and ``skills.skill``
 through loaders called where the bodies imported them) and ``kriya.tools.service_runtime``'s names. Names of modules
@@ -117,7 +117,6 @@ class RuntimeDeps:
     # names tests patch on kriya.workflow.attempt (PATCH_POINTS)
     run_managed_service_verification: Callable[..., Any]
     _resolve_run_command: Callable[..., Any]
-    _check_java_toolchain_mismatch: Callable[..., Any]
     _resolve_java_home_override: Callable[..., Any]
     _approve_runtime_commands: Callable[..., Any]
     _prepare_finite_command_runtime_artifacts: Callable[..., Any]
@@ -1509,16 +1508,12 @@ async def _execute_runtime_verification_directly(
 
     if not state.toolchain_checked:
         state.toolchain_checked = True
-        state.toolchain_warning = deps._check_java_toolchain_mismatch(validator.stack)
-        if state.toolchain_warning:
-            deps.logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
         if validator.stack == "java":
             state.java_home_override = deps._resolve_java_home_override(ctx.goal)
             if state.java_home_override:
                 deps.logger.warning(
-                    "JVM toolchain enforcement: forcing Maven subprocess calls to "
-                    f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
-                    "version doesn't match what 'mvn' resolves to by default here."
+                    "JVM toolchain selection: the goal-stated JDK "
+                    f"{state.java_home_override} is handed to the contained toolchain selection."
                 )
     validator.java_home_override = state.java_home_override
 

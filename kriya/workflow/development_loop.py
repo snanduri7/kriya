@@ -86,7 +86,6 @@ from kriya.workflow.stage_apply import (
 from kriya.workflow.stage_context import StageContext, StageDeps
 from kriya.workflow.test_delta import executed_test_identities
 from kriya.workflow.toolchain import (
-    _check_java_toolchain_mismatch,
     _resolve_java_home_override,
     toolchain_declaration_mutable,
 )
@@ -1077,16 +1076,12 @@ def run_terminal_regression(ctx: StageContext, deps: StageDeps, run: Development
 
     if not state.toolchain_checked:
         state.toolchain_checked = True
-        state.toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
-        if state.toolchain_warning:
-            logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
         if validator.stack == "java":
             state.java_home_override = _resolve_java_home_override(goal)
             if state.java_home_override:
                 logger.warning(
-                    "JVM toolchain enforcement: forcing Maven subprocess calls to "
-                    f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
-                    "version doesn't match what 'mvn' resolves to by default here."
+                    "JVM toolchain selection: the goal-stated JDK "
+                    f"{state.java_home_override} is handed to the contained toolchain selection."
                 )
     validator.java_home_override = state.java_home_override
 

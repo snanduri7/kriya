@@ -602,18 +602,11 @@ class PolymorphicValidator:
         # dependency removal that ISN'T backed by a resolved, goal-explicit
         # migration.
         self.authorized_dependency_removals = frozenset(authorized_dependency_removals or ())
-        # When set (kriya/workflow/workflow.py's _resolve_java_home_override),
-        # forces every subprocess this validator launches (mvn compile/test/exec,
-        # javac fallback) to run under this specific JDK home via the JAVA_HOME
-        # env var - the same mechanism Maven's own launcher script already uses
-        # to decide which JDK to run itself under. Closes a real gap: the
-        # 'maven.compiler.source/target' pom.xml settings control what Java
-        # LANGUAGE version javac targets, not which actual JDK 'mvn' runs under
-        # - those are independent, and a machine with more than one JDK
-        # installed can easily have 'mvn' default to a different, genuinely
-        # incompatible one (confirmed live: JDK 26 removed the Security Manager
-        # entirely, breaking a Qpid Broker-J API call no goal-stated Java
-        # version could have anticipated).
+        # The goal-stated JDK handed to the canonical toolchain owner
+        # (kriya/workflow/toolchain.py::_resolve_java_home_override ->
+        # resolve_toolchain_selection): under containment it can only move the
+        # selected IMAGE, under that owner's authority and conflict rules; it
+        # is never an environment variable of a contained command.
         # MA4.4 (control-plane implementation plan) - audit-only. See
         # _run_cmd_with_timeout below; never consulted for enforcement.
         self.execution_policy = ExecutionPolicy()
@@ -2998,7 +2991,11 @@ def check_java_toolchain() -> Dict[str, Any]:
     D2 S4: both probes run in a Kriya-created EMPTY directory, never in the process's inherited cwd. That cwd is the target repository
     whenever Kriya is started inside it, and ``mvn -version`` loads the project's ``.mvn/jvm.config`` (and ``maven.config``) from it - a project
     ``-javaagent:`` there ran as host code during a toolchain probe (MEASURED 2026-10-25). The probes read no project input, so they are
-    host infrastructure, not a workload; the operator's own environment (MAVEN_OPTS, JAVA_TOOL_OPTIONS, PATH) still applies."""
+    host infrastructure, not a workload; the operator's own environment (MAVEN_OPTS, JAVA_TOOL_OPTIONS, PATH) still applies.
+
+    TOOLCHAIN-HOST-PROBE-AUTHORITY-001 (owner ruling 2026-11-12): a HOST diagnostic. Its one consumer is ``kriya doctor``. It decides nothing about a
+    run: project-controlled execution is contained, and the JDK a candidate runs under is ``kriya.tools.toolchain_identity``'s decision. No workflow
+    module may call it (tests/test_toolchain_host_probe_authority_001.py)."""
     result: Dict[str, Any] = {
         "java_found": False,
         "java_version": None,

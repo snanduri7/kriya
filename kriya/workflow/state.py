@@ -703,15 +703,18 @@ class GenerationState:
     # (kriya/workflow/diagnosis_codes.py). Read only by the evidence recorder;
     # never a decision input (structural test).
     stop_reason_evidence: Optional[StopReasonEvidence] = None
-    # Toolchain preflight (_check_java_toolchain_mismatch) runs at most once per
-    # generation run, the first time a PolymorphicValidator confirms the stack
-    # is 'java' - toolchain_checked gates that, toolchain_warning persists into
-    # the final result regardless of pass/fail.
+    # toolchain_checked: the run's goal-stated JDK (java_home_override below) is
+    # resolved at most once per generation run, the first time a
+    # PolymorphicValidator confirms the stack is 'java'. toolchain_warning: the
+    # notes of deterministic JVM corrections of the candidate's pom (judged
+    # against the CONTAINED toolchain identity); it persists into the final
+    # result regardless of pass/fail. Neither carries a host java/mvn check
+    # (TOOLCHAIN-HOST-PROBE-AUTHORITY-001).
     toolchain_checked: bool = False
     toolchain_warning: Optional[str] = None
-    # See _resolve_java_home_override for when this gets set - threaded into
-    # every PolymorphicValidator construction so a detected, goal-relevant JDK
-    # mismatch actually gets corrected for real subprocess calls.
+    # See _resolve_java_home_override - threaded into every PolymorphicValidator
+    # construction, where the canonical toolchain owner (and its conflict
+    # rules) receives it.
     java_home_override: Optional[str] = None
     # One jdtls process for this whole generation run (lazily started on first
     # real need, kept alive across retries, shut down at run end) - None until

@@ -34,7 +34,7 @@
   "overall_attempt_passed": true,
   "quality_gates_passed": true,
   "terminal_regression_passed": true,
-  "toolchain_warning": "'java' resolves to JDK 17 but 'mvn' will build/run against JDK 26 - a JVM startup flag correct for one may be invalid or fatal under the other. Run `kriya doctor` for details."
+  "toolchain_warning": null
  },
  "sequence": [
   {

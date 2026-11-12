@@ -1798,7 +1798,7 @@ On by default in the packaged config (`autonomy.spec_compliance_enabled: true` i
 
 Optimize your local inference engine (Ollama, LM Studio, etc.) to get maximum speed out of Mixtures-of-Experts (MoE) and large reasoning models:
 *   **Lock Memory (`mlock`)**: Set `OLLAMA_MLOCK=1` in your environment. This pins the model weights in your Unified Memory, avoiding swap delays when switching expert branches.
-*   **Pin Thread Count**: `kriya doctor` checks directory/LLM/embedding connectivity and (if Java/Maven are present) toolchain version consistency, but it does not detect CPU cores. Check your system's physical performance-core count yourself (e.g. via `sysctl -n hw.perflevel0.physicalcpu` on Apple Silicon) and pin your inference engine's thread count to match (e.g., 8 threads for M1 Max).
+*   **Pin Thread Count**: `kriya doctor` checks directory/LLM/embedding connectivity and (if Java/Maven are present) whether the HOST's `java` and `mvn` run the same JDK major version (a host diagnostic for builds you run by hand: a Kriya run builds and runs a Java project in the container image selected from the project's own declaration, not with the host tools), but it does not detect CPU cores. Check your system's physical performance-core count yourself (e.g. via `sysctl -n hw.perflevel0.physicalcpu` on Apple Silicon) and pin your inference engine's thread count to match (e.g., 8 threads for M1 Max).
 *   **Context Size**: Ollama defaults to `num_ctx: 2048` or `4096`. Kriya sends each model's `context_window` as `num_ctx` on every request, so set `context_window` to the window you want served (e.g. `32768`); a separate `extra_body.options.num_ctx` is optional and, when present, wins.
 
 ---

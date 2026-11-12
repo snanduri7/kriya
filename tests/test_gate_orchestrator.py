@@ -373,8 +373,9 @@ class _MavenOracle:
 
 
 def _jvm_run(tmp_path: Path, *, autonomous: bool, target: str = APP, oracle: Any = None) -> Dict[str, Any]:
-    """A Maven project through the real legacy pipeline: 'java' resolves to JDK 17 and 'mvn' to JDK 26 (the
-    toolchain probe scripted), the goal states Java 17, the first Developer answer does not compile."""
+    """A Maven project through the real legacy pipeline: the HOST's 'java' is JDK 17 and its 'mvn' JDK 26 (the host
+    probe scripted and recorded - TOOLCHAIN-HOST-PROBE-AUTHORITY-001: a run must never ask it), the goal states
+    Java 17, the first Developer answer does not compile."""
     from _scripted_run import engine, git_workspace
 
     from kriya.tools.validate import PolymorphicValidator
@@ -422,26 +423,20 @@ def _jvm_run(tmp_path: Path, *, autonomous: bool, target: str = APP, oracle: Any
     llm.complete = complete
     oracle = oracle if oracle is not None else _MavenOracle()   # Slice F: a case may script what the mvn process answers
     probes: List[str] = []
-    homes: List[str] = []
 
     def probe():
         probes.append("check_java_toolchain")
         return {"java_found": True, "java_version": "17", "mvn_found": True, "mvn_java_version": "26",
                 "mismatch": True}
-
-    def home(version):
-        homes.append(version)
-        return JDK17
     with patch.object(PolymorphicValidator, "_run_maven_cmd", lambda self, goals, cwd, *a, **k: oracle(self, goals, cwd, *a, **k)), \
-            patch("kriya.tools.validate.check_java_toolchain", side_effect=probe), \
-            patch("kriya.workflow.toolchain._resolve_jdk_home_for_version", side_effect=home):
+            patch("kriya.tools.validate.check_java_toolchain", side_effect=probe):
         result = asyncio.run(WorkflowController(eng).execute(
             migration_mode="legacy", goal=JVM_GOAL if target == APP else "Name the project app in pom.xml.",
             workspace_path=str(workspace),
             approval_callback=MagicMock(return_value=True)))
     return {"outcome": kg.Outcome(result=result, workspace=str(workspace), cfg=_cfg,
                                   volatile_keys=("effective_config_fingerprint",)),
-            "maven": oracle.calls, "probes": probes, "homes": homes, "developer_calls": len(developer_calls)}
+            "maven": oracle.calls, "probes": probes, "developer_calls": len(developer_calls)}
 
 
 @pytest.mark.parametrize("autonomous", [True, False], ids=["immediate", "deferred"])
@@ -455,6 +450,8 @@ def test_engine_a_written_pom_is_validated_before_it_is_built(tmp_path, monkeypa
     assert legacy["quality_gates_passed"] is True
     goals = [call["goals"][0] for call in run["maven"]]
     assert goals.index("validate") < goals.index("clean")
+    assert run["probes"] == []                                                  # the host's java/mvn are never asked
+    assert {call["java_home_override"] for call in run["maven"]} == {None}      # and select nothing for the candidate
     _compare(f"engine_pom_written_{'immediate' if autonomous else 'deferred'}",
              _engine_form(run["outcome"], tmp_path, maven=run["maven"]))
 
@@ -1194,9 +1191,7 @@ def test_attempt_pre_review_corrections(tmp_path):
                                     "  </properties>\n</project>")
     files = {"pom.xml": POM, "src/main/java/org/example/App.java": APP_BASE}
     app_main = APP_GOOD.replace("public static int mul", "public static void main(String[] args) {}\n    public static int mul")
-    with patch("kriya.tools.validate.check_java_toolchain", return_value={
-            "java_found": True, "java_version": "17", "mvn_found": True, "mvn_java_version": "26", "mismatch": True}), \
-            patch("kriya.workflow.toolchain._resolve_jdk_home_for_version", return_value=JDK17):
+    with patch("kriya.tools.validate.check_java_toolchain", side_effect=AssertionError("the host probe is not a run input")):
         form = run_gates(tmp_path, case, script=script, files=files,
                          candidate={"pom.xml": pom, "src/main/java/org/example/App.java": app_main},
                          state=_state("pom.xml", "src/main/java/org/example/App.java"),
@@ -1231,18 +1226,19 @@ def _toolchain(mismatch: bool):
             "mvn_java_version": "26" if mismatch else "17", "mismatch": mismatch}
 
 
-@pytest.mark.parametrize("mismatch,goal", [(True, JVM_GOAL), (True, "Add mul to App.java."), (False, JVM_GOAL)],
-                         ids=["mismatch_goal_states_17", "mismatch_goal_states_none", "no_mismatch"])
-def test_the_toolchain_preflight_runs_once_and_its_override_reaches_every_attempts_validator(tmp_path, mismatch, goal):
-    """OI-28: the first candidate-gate validator of a run checks java vs mvn once (``toolchain_checked``); a mismatch
-    is a warning on the state; a goal stating the 'java' side's version resolves that JDK's home as the JAVA_HOME
-    override; every later attempt's NEW validator gets the same override re-applied without probing again. The
-    override is resolved from ``ctx.goal`` (the grounding goal differs here and states no version)."""
-    probes: List[str] = []
+@pytest.mark.parametrize("goal_jdk,host_mismatch", [(JDK17, True), (JDK17, False), (None, True), (None, False)],
+                         ids=["goal_jdk_17_host_split", "goal_jdk_17_host_coherent", "goal_jdk_none_host_split", "goal_jdk_none_host_coherent"])
+def test_the_goal_stated_jdk_is_resolved_once_and_reaches_every_attempts_validator(tmp_path, goal_jdk, host_mismatch):
+    """OI-28, corrected by TOOLCHAIN-HOST-PROBE-AUTHORITY-001: the first candidate-gate validator of a run resolves the
+    goal-stated JDK once (``toolchain_checked``), through the attempt module's ``_resolve_java_home_override`` (the seam
+    that feeds the canonical toolchain owner), from ``ctx.goal`` (the grounding goal differs here); every later
+    attempt's NEW validator gets the same value re-applied without resolving again. The HOST's java/mvn are not asked
+    and add no warning: the same form is recorded whether the host tools agree or not (one golden per goal JDK)."""
+    resolved: List[str] = []
 
-    def probe():
-        probes.append("probe")
-        return _toolchain(mismatch)
+    def resolve(goal):
+        resolved.append(goal)
+        return goal_jdk
 
     async def case(state, ctx, script):
         await _executing(state, ctx, script)
@@ -1250,30 +1246,30 @@ def test_the_toolchain_preflight_runs_once_and_its_override_reaches_every_attemp
         await _executing(state, ctx, script)
     script = _Script(stack="java")
     files = {"pom.xml": POM, APP: APP_BASE}
-    with patch("kriya.tools.validate.check_java_toolchain", side_effect=probe), \
-            patch("kriya.workflow.toolchain._resolve_jdk_home_for_version", side_effect=lambda v: f"/opt/jdk-{v}"):
+    host_probe = MagicMock(return_value=_toolchain(host_mismatch))
+    with patch("kriya.tools.validate.check_java_toolchain", host_probe), \
+            patch("kriya.workflow.attempt._resolve_java_home_override", side_effect=resolve):
         form = run_gates(tmp_path, case, script=script, files=files, candidate={APP: APP_GOOD}, state=_state(APP),
-                         ctx_overrides=dict(goal=goal, grounding_goal="Add mul to App.java (no version stated).",
+                         ctx_overrides=dict(goal=JVM_GOAL, grounding_goal="Add mul to App.java (no version stated).",
                                             established_files=[]))
-    expected_home = JDK17 if (mismatch and goal == JVM_GOAL) else None
     gates = [entry for entry in form["validators"] if entry["call"] in ("compile", "tests")]
     assert {entry["validator"] for entry in gates} == {0, 1}            # a new validator per attempt
-    assert [entry["java_home_override"] for entry in gates] == [expected_home] * len(gates)
-    assert form["state"]["toolchain_checked"] is True and form["state"]["java_home_override"] == expected_home
-    assert probes == ["probe", "probe"]   # once for the warning, once for the override: on the first attempt only
-    assert bool(form["state"]["toolchain_warning"]) is mismatch
-    _compare(f"attempt_toolchain_{'mismatch' if mismatch else 'match'}_{'17' if goal == JVM_GOAL else 'none'}", form)
+    assert [entry["java_home_override"] for entry in gates] == [goal_jdk] * len(gates)
+    assert form["state"]["toolchain_checked"] is True and form["state"]["java_home_override"] == goal_jdk
+    assert resolved == [JVM_GOAL]                  # once per run, from ctx.goal
+    assert host_probe.call_count == 0 and form["state"]["toolchain_warning"] is None
+    _compare(f"attempt_goal_jdk_{'17' if goal_jdk else 'none'}", form)
 
 
-def test_the_toolchain_preflight_is_skipped_for_a_non_java_stack(tmp_path):
-    probes: List[str] = []
-
+def test_the_goal_stated_jdk_is_not_resolved_for_a_non_java_stack(tmp_path):
     async def case(state, ctx, script):
         await _executing(state, ctx, script)
-    with patch("kriya.tools.validate.check_java_toolchain", side_effect=lambda: probes.append("probe")), \
-            patch("kriya.workflow.toolchain._resolve_jdk_home_for_version", side_effect=AssertionError("no JDK")):
+    host_probe = MagicMock(side_effect=AssertionError("the host probe is not a run input"))
+    with patch("kriya.tools.validate.check_java_toolchain", host_probe), \
+            patch("kriya.workflow.attempt._resolve_java_home_override", side_effect=AssertionError("not a Java stack")):
         form = run_gates(tmp_path, case, script=_Script(stack="python"), ctx_overrides=dict(goal=JVM_GOAL))
-    assert probes == [] and form["state"]["toolchain_checked"] is True and form["state"]["java_home_override"] is None
+    assert host_probe.call_count == 0
+    assert form["state"]["toolchain_checked"] is True and form["state"]["java_home_override"] is None
 
 
 # ----------------------------------------------------------------------------- the verification-tree binding
@@ -1429,5 +1425,5 @@ def test_the_gates_log_through_the_attempt_modules_logger(tmp_path, caplog):
         run_gates(tmp_path, case, script=_Script(stack="java"), files={"pom.xml": POM, APP: APP_BASE},
                   candidate={APP: APP_GOOD}, state=_state(APP), cfg=_config(),
                   ctx_overrides=dict(goal=JVM_GOAL, established_files=[]))
-    gate_records = [r for r in caplog.records if r.getMessage().startswith(("Quality Gates:", "Toolchain preflight"))]
+    gate_records = [r for r in caplog.records if r.getMessage().startswith("Quality Gates:")]
     assert gate_records and {r.name for r in gate_records} == {"kriya.workflow.attempt"}

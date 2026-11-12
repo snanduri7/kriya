@@ -42,7 +42,6 @@ KINDS: Dict[Tuple[str, str], str] = {
     (A, '_approve_and_execute_runtime_verification'): 'async function',
     (A, '_approve_runtime_commands'): 'async function',
     (A, '_build_targeted_retry_prompt'): 'function',
-    (A, '_check_java_toolchain_mismatch'): 'function',
     (A, '_code_intelligence_for'): 'function',
     (A, '_developer_request_profile'): 'function',
     (A, '_ensure_generation_time_budget'): 'function',
@@ -176,7 +175,7 @@ KINDS: Dict[Tuple[str, str], str] = {
 # scenario -> the module-attribute patch targets its run must call through the patched module
 CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "legacy_success": (
-        (A, "_check_java_toolchain_mismatch"), (A, "_developer_request_profile"), (A, "_ensure_generation_time_budget"),
+        (A, "_developer_request_profile"), (A, "_ensure_generation_time_budget"),
         (A, "_enter_developer_model"),
         # E14 characterization (MEASURED: these two are reached by every scripted attempt; the other two it patches are not)
         (A, "_fallback_routing"), (A, "_has_authoritative_full_source"),

@@ -56,7 +56,6 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E8 (guard): 2 -> 2: the toolchain preflight's load moved to gate_orchestrator and reads GateDeps (one load in
     # attempt._gate_deps); the verification-only/runtime path keeps its own.
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the direct path's preflight through this name).
-    (A, '_check_java_toolchain_mismatch'): P(3, 'kriya.workflow.toolchain', ((A, 2),), ()),
     # E14 characterization (tests/test_e14_characterization.py, written before the moves): +1 site, the dynamic proof that a patch of this
     # name reaches both the CandidateDeps and the GenerationDeps field.
     (A, '_code_intelligence_for'): P(3, A, ((A, 2),), ()),
@@ -464,8 +463,12 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # (run_generation_workflow, patched at the documented seam like the other real-unit enforce harnesses): W 102 -> 103.
     # Baseline-13 E12 correction (2026-11-11, tests/test_e12_enforce_characterization.py::test_an_admitted_contract_runs_its_bound_authority_at_baseline,
     # the admitted positive control of the refused-contract pin; no new row): +1 W (run_contract_baseline): W 103 -> 104.
-    assert totals == {A: 113, W: 104, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
-    assert len(PATCH_POINTS) == 135  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
+    # TOOLCHAIN-HOST-PROBE-AUTHORITY-001 (2026-11-12, run-7 finding R7-A): the row A._check_java_toolchain_mismatch is gone with the
+    # function (the workflow no longer asks the host's java/mvn; 3 patch sites): A 113 -> 110, rows 135 -> 134. A._resolve_java_home_override
+    # keeps its row and its count (two host-authority tests removed from tests/test_workflow.py, two controls of the kept seam added to
+    # tests/test_gate_orchestrator.py).
+    assert totals == {A: 110, W: 104, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    assert len(PATCH_POINTS) == 134  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)
