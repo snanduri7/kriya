@@ -145,4 +145,12 @@ def test_no_production_module_knows_the_tripwire():
     for root in ("kriya", "plugins"):
         for path in (ROOT / root).rglob("*.py"):
             text = path.read_text(encoding="utf-8")
-            assert contract.ENV_MODE not in text and contract.ENV_LOG not in text and "_docker_worker_contract" not in text, path
+            assert contract.ENV_MODE not in text and contract.ENV_LOG not in text and contract.ENV_KEEP not in text and "_docker_worker_contract" not in text, path
+
+
+def test_the_log_is_copied_out_only_when_asked(tmp_path):
+    log = tmp_path / "starts.log"
+    log.write_text("tests/x.py::t (call)\trun\trun image\n")
+    assert contract.keep(str(log), {}) is None and contract.keep(None, {contract.ENV_KEEP: str(tmp_path / "kept")}) is None
+    kept = contract.keep(str(log), {contract.ENV_KEEP: str(tmp_path / "kept"), "PYTEST_XDIST_WORKER": "gw3"})
+    assert kept and os.path.basename(kept).startswith("starts.gw3.") and contract.launches(kept) == [("tests/x.py::t (call)", "run", "run image")]

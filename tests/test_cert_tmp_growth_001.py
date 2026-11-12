@@ -57,7 +57,8 @@ def test_a_passed_test_leaves_no_per_test_directory_and_a_failed_one_keeps_them_
     (tmp_path / "t").mkdir()
     completed, _, _ = _sample_run(tmp_path, "sample_tmp_retention.py", certification=False)
     assert completed.returncode == 1 and "2 failed, 3 passed" in completed.stdout, completed.stdout[-1500:]
-    bases = sorted((tmp_path / "t").glob("pytest-of-*/pytest-[0-9]*"))
+    # TEST-HARNESS-SESSION-BASE-PATHNAME-REUSE-001: the base now lives under the invocation's unique root (<TMPDIR>/kriya-pytest-*/)
+    bases = sorted((tmp_path / "t").glob("kriya-pytest-*/pytest-of-*/pytest-[0-9]*"))
     assert len(bases) == 1, "the failed test keeps the base temp directory"
     # ``mktemp`` numbers each directory and keeps one ``<name>current`` symlink per prefix; only the numbered directories are per-test state
     names = sorted(entry.name for entry in bases[0].iterdir() if entry.name[-1].isdigit())

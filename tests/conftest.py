@@ -176,6 +176,7 @@ def _docker_worker_contract_shim(tmp_path_factory):
     saved = {name: os.environ.get(name) for name in ("PATH", contract.ENV_LOG)}
     log = contract.install(str(tmp_path_factory.mktemp("docker-worker-contract")))
     yield log
+    contract.keep(log)
     for name, value in saved.items():
         if value is None:
             os.environ.pop(name, None)
@@ -827,6 +828,90 @@ def _certification_mode(config):
     return config.getoption("--certification") or os.environ.get("KRIYA_CERTIFICATION") == "1"
 
 
+# TEST-HARNESS-SESSION-BASE-PATHNAME-REUSE-001: every pytest invocation gets a base directory whose pathname can never recur.
+# pytest's own base is ``<temp root>/pytest-of-<user>/pytest-<N>`` with N = highest existing + 1, and a fully passing session removes
+# its base, so the NEXT invocation is handed the same pathname (MEASURED 2026-11-11: three consecutive sessions on pytest-6539; the
+# fully refused container sessions ran on such a recycled name). Here the temp root itself is a ``tempfile.mkdtemp`` directory - a
+# random name, never derived from what exists - and pytest builds its usual tree beneath it (xdist workers included: popen-gwN lives
+# under the controller's base). Whether this removes the backend's bind-source refusals is decided by the qualification, not asserted here.
+SESSION_ROOT_PREFIX = "kriya-pytest-"
+_SESSION_ROOT_MAX_AGE_SECONDS = 3 * 24 * 3600
+_SESSION_ROOT = [None]   # this invocation's unique root (the controller's; None in an xdist worker or with an explicit --basetemp)
+
+
+def _allocate_session_root(parent=None):
+    """A new, empty, uniquely named directory for one pytest invocation (``tempfile.mkdtemp``: the name is random, so deleting an
+    earlier root can never make its pathname come back)."""
+    return tempfile.mkdtemp(prefix=SESSION_ROOT_PREFIX, dir=parent)
+
+
+def _sweep_stale_session_roots(parent, now, max_age=_SESSION_ROOT_MAX_AGE_SECONDS):
+    """Remove the session roots of long-finished invocations that were kept (a failed session keeps its base for diagnosis), so they
+    do not pile up. Only this harness's own names, only when older than ``max_age``; a removed root's name is never handed out again."""
+    removed = []
+    try:
+        entries = sorted(os.listdir(parent))
+    except OSError:
+        return removed
+    for entry in entries:
+        path = os.path.join(parent, entry)
+        try:
+            stale = entry.startswith(SESSION_ROOT_PREFIX) and os.path.isdir(path) and not os.path.islink(path) and now - os.path.getmtime(path) > max_age
+        except OSError:
+            continue
+        if stale:
+            _release_tree(path, ignore_errors=True)
+            removed.append(path)
+    return removed
+
+
+def _use_a_session_unique_base(config):
+    """Make pytest create its base temp under a fresh unique root, once, in the controller. A worker's base is given by its controller;
+    an explicit ``--basetemp`` is the caller's own choice of pathname. ``PYTEST_DEBUG_TEMPROOT`` is pytest's standard temp-root knob: it
+    is set only around the creation of the base and restored at once (nothing a test starts inherits it); a value the caller exported is
+    honoured as the PARENT of the unique root."""
+    factory = getattr(config, "_tmp_path_factory", None)
+    if hasattr(config, "workerinput") or config.option.basetemp is not None or factory is None:
+        return None
+    import time
+
+    given = os.environ.get("PYTEST_DEBUG_TEMPROOT")
+    parent = given or tempfile.gettempdir()
+    _sweep_stale_session_roots(parent, time.time())
+    root = _allocate_session_root(parent)
+    os.environ["PYTEST_DEBUG_TEMPROOT"] = root
+    try:
+        factory.getbasetemp()
+    finally:
+        if given is None:
+            del os.environ["PYTEST_DEBUG_TEMPROOT"]
+        else:
+            os.environ["PYTEST_DEBUG_TEMPROOT"] = given
+    _SESSION_ROOT[0] = root
+    return root
+
+
+def _release_session_root(root):
+    """After the session: pytest has removed the base of a fully passing session; the now useless unique root goes too. A kept base
+    (a failed test's directories) keeps its root. Nothing here can make a pathname recur."""
+    import glob
+
+    if root and not glob.glob(os.path.join(root, "pytest-of-*", "pytest-[0-9]*")):
+        _release_tree(root, ignore_errors=True)
+
+
+def pytest_report_header(config):
+    if _SESSION_ROOT[0] is None:
+        return None
+    return f"kriya session base: {config._tmp_path_factory.getbasetemp()}"
+
+
+def pytest_unconfigure(config):
+    root, _SESSION_ROOT[0] = _SESSION_ROOT[0], None
+    _release_session_root(root)
+
+
+@pytest.hookimpl(trylast=True)   # after pytest's own tmpdir plugin created the factory this reads
 def pytest_configure(config):
     from _certification import load_allowlist
     from _chaos_report import RESULTS
@@ -836,6 +921,7 @@ def pytest_configure(config):
     config.stash[_CERTIFICATION_CASES] = []
     # A malformed allowlist fails certification up front, never later.
     config.stash[_ALLOWLIST] = load_allowlist() if _certification_mode(config) else ()
+    _use_a_session_unique_base(config)
 
 
 def pytest_sessionstart(session):

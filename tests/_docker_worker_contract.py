@@ -30,6 +30,7 @@ from typing import List, Optional
 
 ENV_MODE = "KRIYA_DOCKER_WORKER_CONTRACT"          # "enforce" | "report:<file>"
 ENV_LOG = "KRIYA_TEST_DOCKER_STARTS_LOG"           # the shim's append-only log (set by install)
+ENV_KEEP = "KRIYA_DOCKER_WORKER_CONTRACT_KEEP"     # optional directory: each worker's log is copied there when its session ends (a passing session removes its base temp)
 START_VERBS = ("run", "create", "start")
 _SHIM = """#!/bin/sh
 # tests/_docker_worker_contract.py: record a container start, then become the real docker.
@@ -64,6 +65,17 @@ def install(directory: str, environ=os.environ) -> Optional[str]:
     environ["PATH"] = directory + os.pathsep + environ.get("PATH", "")
     environ[ENV_LOG] = log
     return log
+
+
+def keep(log: Optional[str], environ=os.environ) -> Optional[str]:
+    """Copy this worker's log to ``$KRIYA_DOCKER_WORKER_CONTRACT_KEEP`` (evidence for a census / qualification); the copy's path or None."""
+    directory = environ.get(ENV_KEEP)
+    if not directory or not log or not os.path.exists(log):
+        return None
+    os.makedirs(directory, exist_ok=True)
+    target = os.path.join(directory, f"starts.{environ.get('PYTEST_XDIST_WORKER', 'main')}.{os.getpid()}.log")
+    shutil.copyfile(log, target)
+    return target
 
 
 def starts_of(log: Optional[str], nodeid: str) -> List[str]:
