@@ -4,7 +4,7 @@ MEASURED in run 8 (records seq 204-209): after the typed stop `CONTAINMENT_SETUP
 triage tier sent the docker error and the unit's source excerpts to the model, and the diagnosis record said `attribution_kind: SOURCE_DEFECT`.
 Pre-fix characterization (passes on ff23469): ~/kriya-evidence/product-72h-confidence/run8-gaps-2026-11-12/r8b/.
 
-The rule now: a typed infrastructure stop is INFRASTRUCTURE_DEFECT (the existing kind), which the retry strategy already routes to a
+The rule now: a typed containment setup stop is INFRASTRUCTURE_DEFECT (the existing kind), which the retry strategy already routes to a
 deterministic no-file attribution without any model call. Candidate failures keep their attribution, the triage tier included.
 """
 from unittest.mock import AsyncMock
@@ -67,23 +67,24 @@ async def test_a_containment_setup_stop_makes_no_model_call_and_blames_no_source
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_type", sorted(INFRASTRUCTURE_STOP_FAILURE_TYPES))
-async def test_every_typed_infrastructure_stop_bypasses_source_attribution(tmp_path, failure_type):
+async def test_a_containment_stop_raised_as_a_gate_failure_bypasses_source_attribution_too(tmp_path):
     state, ctx = _two_file_attempt(tmp_path)
 
     should_break = await handle_attempt_failure(
-        state, ctx, QualityGateFailure(Failure(type=failure_type, message=f"{failure_type}: stopped", raw_output="stopped")))
+        state, ctx, QualityGateFailure(Failure(type="containment_setup_failed", message="CONTAINMENT_SETUP_FAILED: stopped", raw_output="stopped")))
 
     assert state.environment_failure is not None
     _assert_infrastructure_stop(state, ctx, should_break)
 
 
-def test_the_infrastructure_stop_types_are_a_closed_table_and_candidate_types_are_not_in_it():
-    assert INFRASTRUCTURE_STOP_FAILURE_TYPES == frozenset({"containment_setup_failed", "internal_framework_error", "time_budget_exhausted"})
-    for failure_type in INFRASTRUCTURE_STOP_FAILURE_TYPES:
-        assert classify_failure_attribution(failure_type, "x") is FailureAttributionKind.INFRASTRUCTURE_DEFECT
-    for candidate_type in ("compile", "run_verification", "general_error", "static_analysis_blocked", "goal_spec_compliance"):
-        assert classify_failure_attribution(candidate_type, "x") is FailureAttributionKind.SOURCE_DEFECT
+def test_the_infrastructure_stop_types_are_a_closed_table_of_the_measured_type_only():
+    """Only what run 8 measured. The two other operational stops keep the label the kernel goldens pin
+    (INFRA-STOP-ATTRIBUTION-SOURCE-DEFECT-LABEL-001, open); candidate types are never in the table."""
+    assert INFRASTRUCTURE_STOP_FAILURE_TYPES == frozenset({"containment_setup_failed"})
+    assert classify_failure_attribution("containment_setup_failed", "x") is FailureAttributionKind.INFRASTRUCTURE_DEFECT
+    for unchanged in ("internal_framework_error", "time_budget_exhausted", "compile", "run_verification", "general_error",
+                      "static_analysis_blocked", "goal_spec_compliance"):
+        assert classify_failure_attribution(unchanged, "x") is FailureAttributionKind.SOURCE_DEFECT
     assert classify_failure_attribution("test", "x") is FailureAttributionKind.TEST_DEFECT
 
 

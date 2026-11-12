@@ -46,14 +46,13 @@ class FailureAttributionKind(str, Enum):
     INFRASTRUCTURE_DEFECT = "INFRASTRUCTURE_DEFECT"
 
 
-# ENV-FAILURE-TRIAGE-MODEL-CALL-001 (Scenario-A run 8): the typed stops no source file can own. MEASURED: after CONTAINMENT_SETUP_FAILED (docker did
+# ENV-FAILURE-TRIAGE-MODEL-CALL-001 (Scenario-A run 8): the typed stop no source file can own. MEASURED: after CONTAINMENT_SETUP_FAILED (docker did
 # not start the registry proxy) the default below called the failure a SOURCE_DEFECT, so the retry strategy went on to source attribution and sent the
-# docker error with the unit's source excerpts to a model ("which file is responsible"). They are owned by the control plane: the existing
+# docker error with the unit's source excerpts to a model ("which file is responsible"). Containment is owned by the control plane: the existing
 # INFRASTRUCTURE_DEFECT routing records a deterministic attribution with no file and makes no model call.
-#   containment_setup_failed  - containment refused or could not be established (kriya/workflow/recovery_coordinator.py)
-#   internal_framework_error  - an internal Kriya exception ("not a generated-application defect")
-#   time_budget_exhausted     - the run's generation deadline
-INFRASTRUCTURE_STOP_FAILURE_TYPES = frozenset({"containment_setup_failed", "internal_framework_error", "time_budget_exhausted"})
+# Only the measured type is here. internal_framework_error and time_budget_exhausted take the same default and are NOT changed: their attribution
+# fields are pinned by kernel goldens and no model call was measured for them (INFRA-STOP-ATTRIBUTION-SOURCE-DEFECT-LABEL-001, open).
+INFRASTRUCTURE_STOP_FAILURE_TYPES = frozenset({"containment_setup_failed"})
 
 
 def classify_failure_attribution(type_: str, message: str = "") -> FailureAttributionKind:
