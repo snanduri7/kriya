@@ -541,6 +541,10 @@ class GenerationState:
     # passed (those files never get copied to workspace_path - only ever lived
     # in the worktree, which gets git-clean'd on failure).
     final_attempt_contents: Dict[str, str] = field(default_factory=dict)
+    # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001: the stopping unit's exact staged candidate
+    # (verifier_replay.RefusedCandidate), captured with final_attempt_contents when the caller asked for it
+    # (capture_refused_candidate). In memory only: never persisted, never part of a trace or a checkpoint.
+    refused_candidate: Optional[Any] = None
     # Which retry mode the most recent run_attempt() call actually used -
     # "targeted"/"missing_files"/"fallback_targeted"/"full_set". Set at the
     # very start of run_attempt(), from the same derivation the caller needs

@@ -1622,6 +1622,10 @@ class AttemptContext:
     # The enforce controller's owner reopen (verification_owner_recovery): read by
     # workflow.py's no-change settlement (an identical regeneration is a stop).
     reopened_owner: bool = False
+    # Verifier replay (kriya/workflow/verifier_replay.py): the handle whose files replace generation on attempt 1, and whether a
+    # stopping unit keeps its refused candidate for the enforce loop.
+    carried_candidate: Optional[Any] = None
+    capture_refused_candidate: bool = False
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
     # Gap B (2026-10-15): see defer_execution_until_source_review. The caller that runs the post-approval phase sets the first; run_attempt fills the second (the held
@@ -2570,6 +2574,24 @@ async def _run_deferred_executing_gates(
     return await gate_orchestrator._run_deferred_executing_gates(_gate_deps(), state, ctx, skipping_candidate_gates, tree_binding, active_code_context)
 
 
+def _require_the_staged_candidate_is_the_carried_one(state: GenerationState, ctx: "AttemptContext") -> None:
+    """A replayed verifier is only what it claims to be if the bytes candidate authority staged are the carried ones, path for path. Anything
+    else (a transform, a newline change, a file that was not written) is refused before any gate: the unit stops typed
+    (VERIFIER_REPLAY_BYTES_MISMATCH) and the enforce loop regenerates the consumer instead."""
+    from kriya.workflow.retry_strategy import NO_PROGRESS_STOP_KEY
+    from kriya.workflow.verifier_replay import REPLAY_BYTES_MISMATCH, staged_bytes_mismatch
+
+    wrong = staged_bytes_mismatch(ctx.carried_candidate, state.candidate_digests, state.all_files_written)
+    if not wrong:
+        return
+    message = (f"{REPLAY_BYTES_MISMATCH}: the staged candidate is not the carried verifier ({', '.join(wrong)}); it is not replayed "
+               "and nothing was executed.")
+    failure = Failure(type="verifier_replay_refused", message=message, raw_output=message, attempt=state.attempt_number,
+                      diagnostics={"reason_code": REPLAY_BYTES_MISMATCH, "paths": wrong, NO_PROGRESS_STOP_KEY: REPLAY_BYTES_MISMATCH})
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 @_attempt_evidence_boundary
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """Runs one Developer + Quality Gates attempt. Mutates state in place
@@ -2684,6 +2706,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         and state.attempt_number == 1
     )
     skipping_candidate_gates = bool(reusing_candidate and ctx.resume_plan.skip_candidate_gates)
+    replaying_verifier = bool(ctx.carried_candidate is not None and state.attempt_number == 1 and not reusing_candidate)
     # PRV-06 completion (2026-08-29, "MA8.1 <-> MA9 composition and
     # AttemptContext correctness"): a defensive baseline, not the real fix
     # (see the MA9-coordinated branch below, which now assigns a real,
@@ -2714,6 +2737,27 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             state.restore_gate_outcomes(list(ctx.resume_state.get("gate_outcomes") or state.gate_outcomes),
                                         source="resume_checkpoint")
         state.model_hops = list(ctx.resume_state.get("model_hops") or state.model_hops)
+        model_override = None
+        base_url_override = None
+        api_key_override = None
+        extra_body_override = None
+    elif replaying_verifier:
+        # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001: the consumer's refused candidate is the verifier of an upstream
+        # owner's repair. Its exact files are staged through the same write path as model output; no Developer request is made.
+        # Every candidate gate runs (nothing of the earlier invocation's evidence is carried), and so do review and approval.
+        logger.info(
+            "Replaying the carried verifier candidate (%s) instead of generating: an upstream owner was repaired and this unit's "
+            "own earlier candidate is what checks that repair.", ", ".join(sorted(ctx.carried_candidate.candidate.paths)),
+        )
+        files = ctx.carried_candidate.generated_files()
+        state.record_event(RunEvent(
+            kind="verifier.replayed", attempt=state.attempt_number, source="attempt.run_attempt",
+            authority=EventAuthority.AUTHORITATIVE,
+            message="the unit's earlier refused candidate was staged again byte for byte; no Developer request was made",
+            details={"paths": sorted(ctx.carried_candidate.candidate.paths), "digests": ctx.carried_candidate.expected_digests(),
+                     "refused_by_failure": ctx.carried_candidate.candidate.failure_digest,
+                     "plan_hash": ctx.carried_candidate.plan_hash},
+        ))
         model_override = None
         base_url_override = None
         api_key_override = None
@@ -4039,6 +4083,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # after the atomic candidate batch so no quality gate can observe a partial
     # model response.  This remains much cheaper than dependency resolution and
     # compilation, and a failed attempt is discarded by the worktree lifecycle.
+    if replaying_verifier:
+        _require_the_staged_candidate_is_the_carried_one(state, ctx)
     tree_binding = _bind_verification_tree(state, ctx)
     defer_executing_gates = defer_execution_until_source_review(state, ctx)
     if not defer_executing_gates:

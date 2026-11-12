@@ -58,6 +58,14 @@ from kriya.workflow.resume_support import (
     TOOL_STARTED_NOT_DURABLE,
 )
 from kriya.workflow.subtask_executor import plannable_tool_names
+from kriya.workflow.verifier_replay import (
+    DEPENDENT_VERIFICATION_PENDING_CONTEXT,
+    REPLAY_BYTES_MISMATCH,
+    ReplayHandle,
+    failure_identity,
+    replay_facts_block,
+)
+from kriya.workflow.verifier_replay import goal_digest as replay_goal_digest
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport
 
 
@@ -1789,6 +1797,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             recovery_context: str = "",
             execution_role: str = "planned",
             grounded_locations: Sequence[Mapping[str, Any]] = (),
+            carried_candidate: Optional[ReplayHandle] = None,
         ) -> Dict[str, Any]:
             target_goal = deps.build_subtask_goal_text(
                 target, target_position, total, plan=plan, grounding_goal=goal,
@@ -1892,6 +1901,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 ),
                 grounding_goal=goal,
                 migration_resolution=migration_resolution,
+                # Verifier replay (kriya/workflow/verifier_replay.py): a unit that owns files hands its refused candidate back when
+                # it stops, and a consumer retry may carry that candidate in instead of generating.
+                capture_refused_candidate=bool(target.planned_files),
+                carried_candidate=carried_candidate,
                 strict_dependency_index=bool(
                     process_profiles is not None
                     and getattr(process_profiles, "enabled", False) is True
@@ -1911,7 +1924,42 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )
             _record_advisory_review(target, unit_result)
+            _keep_replay_handle(target, unit_result)
             return unit_result
+
+        # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001: at most ONE run-local handle per unit - its latest refused
+        # candidate, bound to the identities it was refused under. In memory only. Replaced by the unit's next refusal, dropped when
+        # the unit's invocation leaves none (it passed, or nothing exact could be captured) and when its recovery episode ends.
+        replay_handles: Dict[str, ReplayHandle] = {}
+
+        def _keep_replay_handle(target: Subtask, unit_result: Any) -> None:
+            refused = unit_result.pop("refused_candidate", None) if isinstance(unit_result, dict) else None
+            if refused is None:
+                replay_handles.pop(target.id, None)
+                return
+            replay_handles[target.id] = ReplayHandle(
+                run_id=run_id, plan_hash=current_plan_hash, unit_id=target.id, goal_digest=replay_goal_digest(goal),
+                verification_contract_digest=verification_contract.digest, candidate=refused,
+            )
+
+        def _replayable_handle(target: Subtask) -> Tuple[Optional[ReplayHandle], Optional[str]]:
+            """(the unit's handle when it may be replayed now, else None; why not). Existing canonical identities only."""
+            handle = replay_handles.get(target.id)
+            if handle is None:
+                return None, None
+            refusal = handle.refusal(
+                run_id=run_id, plan_hash=current_plan_hash, unit_id=target.id, goal_digest=replay_goal_digest(goal),
+                verification_contract_digest=verification_contract.digest,
+                planned_paths=[pf.path for pf in target.planned_files],
+            )
+            if refusal is not None:
+                replay_handles.pop(target.id, None)
+                return None, refusal
+            return handle, None
+
+        def _dependent_failure_identity(unit_result: Mapping[str, Any]) -> Optional[str]:
+            last = unit_result.get("last_failure") or {}
+            return failure_identity(last.get("type"), last.get("raw_output")) if last else None
 
         # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001: each verification-only unit starts ONE owner-reopen
         # episode per run (the bound), whatever its owners then produce. VERIFICATION-OWNER-REOPEN-SINGLE-OWNER-001
@@ -2856,6 +2904,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # own comment right below); boundedness comes from each
             # requirement's own attempt count (via the ledger's history()),
             # not from a blanket "this owner already ran once" guard.
+            dependent_verification_facts: Dict[str, str] = {}     # owner id -> the deterministic facts of its last disproved repair
+            owners_disproved_in_episode: set = set()              # owners whose current result this episode moved to NEEDS_REVIEW
             for _owner_recovery_cycle in range(deps._MAX_PLAN_SCOPE_REVISION_ATTEMPTS):
                 # General Obligation-Centric Recovery Execution (2026-08-30):
                 # generalizes MA8.1's owner-recovery loop from exactly-one-
@@ -3273,6 +3323,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "OWNER_RECOVERY_STARTED requirement_id=%s owner=%s generation=%d",
                         candidate_requirement_id, owner_id, generation,
                     )
+                    if owner_id in dependent_verification_facts:
+                        # what the dependent verification established about this owner's PREVIOUS repair in this episode
+                        recovery_context = recovery_context + "\n\n" + dependent_verification_facts[owner_id]
                     # Recovery Execution Contract (PRV-06, 2026-08-29): seed
                     # the no-progress baseline from the file's CURRENT
                     # (pre-recovery) content the FIRST time this (plan,
@@ -3425,6 +3478,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # always be a real dict, never None.
                 acceptance_precheck: Optional[bool] = None
                 consumer_invoked_this_cycle = False
+                verifier_replayed = False                              # the consumer step replayed its carried verifier
+                previous_dependent_failure: Optional[str] = None       # identity of the dependent failure before that step
                 plan_recovery_accepted: Optional[bool] = None
                 # Every reopened owner was MAY_CHANGE and none changed a recovery target: nothing new exists for
                 # the consumer to be retried against, and the original failure stands. A typed stop - never a
@@ -3478,16 +3533,43 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "CONSUMER_RETRY_STARTED subtask=%s plan_id=%s owners=%s",
                             subtask.id, exec_plan.id, owners_repaired,
                         )
-                        call_result = await _invoke_bounded_subtask(
-                            subtask, position,
-                            recovery_context=(
-                                "--- upstream recovery completed ---\n"
-                                f"Upstream owner(s) {owners_repaired} were repaired and "
-                                "re-verified. Re-run this consumer against the updated "
-                                "workspace."
-                            ),
-                            execution_role="consumer_retry",
-                        )
+                        # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001. The owners are only LOCALLY accepted here;
+                        # this consumer run is what verifies their repair, and it is told exactly that. When the consumer's own
+                        # refused candidate is still valid under the current plan and contract it is replayed (no Developer call):
+                        # the artifact that disproved the owner is the one that checks its repair. Otherwise the consumer is
+                        # generated again, as before.
+                        pending_context = DEPENDENT_VERIFICATION_PENDING_CONTEXT.format(owners=owners_repaired)
+                        previous_dependent_failure = _dependent_failure_identity(call_result)
+                        replay_handle, replay_refusal = _replayable_handle(subtask)
+                        if replay_refusal is not None:
+                            deps.logger.info(
+                                "VERIFIER_REPLAY_REFUSED subtask=%s reason=%s - the consumer is generated again.",
+                                subtask.id, replay_refusal,
+                            )
+                        if replay_handle is not None:
+                            deps.logger.info(
+                                "VERIFIER_REPLAY_STARTED subtask=%s plan_id=%s paths=%s",
+                                subtask.id, exec_plan.id, sorted(replay_handle.candidate.paths),
+                            )
+                            replay_result = await _invoke_bounded_subtask(
+                                subtask, position, recovery_context=pending_context,
+                                execution_role="verifier_replay", carried_candidate=replay_handle,
+                            )
+                            if replay_result.get("no_progress_reason") == REPLAY_BYTES_MISMATCH:
+                                # the staged bytes were not the carried ones: nothing ran; this is not a verification result
+                                replay_handles.pop(subtask.id, None)
+                                deps.logger.warning(
+                                    "VERIFIER_REPLAY_REFUSED subtask=%s reason=%s - the consumer is generated again.",
+                                    subtask.id, REPLAY_BYTES_MISMATCH,
+                                )
+                            else:
+                                call_result = replay_result
+                                verifier_replayed = True
+                        if not verifier_replayed:
+                            call_result = await _invoke_bounded_subtask(
+                                subtask, position, recovery_context=pending_context,
+                                execution_role="consumer_retry",
+                            )
                         consumer_invoked_this_cycle = True
                         # MA8.1 (PRV-06, 2026-08-29) / Recovery Execution
                         # Contract Invariant 3 (2026-08-29): the obligation's
@@ -3597,14 +3679,34 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # carried-forward (VERIFY) or unchanged MAY_CHANGE owner did not run again and stays queued.
                     owner_has_result = any(prior.subtask_id == owner_id for prior in subtask_results)
                     if record["owner_reran"] and (plan_recovery_accepted or consumer_invoked_this_cycle):
-                        # (the consumer is reached only after every group was locally accepted; when its retry then
-                        # fails, each owner's own work stays reported as it always was - see the note below)
                         convergence_reentry.discard(owner_id)
-                        if not owner_has_result:
-                            subtask_results.append(deps.SubtaskResult(
+                        # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001: the owner's CURRENT result follows the
+                        # dependent verification, the one authority that settles this recovery (plan_recovery_accepted).
+                        # Settled: COMPLETED. Disproved (the consumer ran and failed): NEEDS_REVIEW - a repair its own gates
+                        # accepted and its dependent verifier refused is not completed work. Earlier attempts' records are
+                        # untouched; only the current result of the reopened owner moves.
+                        owner_current = (
+                            deps.SubtaskResult(
                                 subtask_id=owner_id, status=deps.SubtaskStatus.COMPLETED,
                                 execution_method=deps.ExecutionMethod.MODEL.value, error=None,
-                            ))
+                            ) if plan_recovery_accepted else deps.SubtaskResult(
+                                subtask_id=owner_id, status=deps.SubtaskStatus.NEEDS_REVIEW,
+                                execution_method=deps.ExecutionMethod.MODEL.value,
+                                error="the dependent verification refused this owner's repair",
+                                reason_codes=("PLAN_RECOVERY_OWNER_FAILED",),
+                            )
+                        )
+                        if owner_has_result:
+                            for result_index, prior_result in enumerate(subtask_results):
+                                if prior_result.subtask_id == owner_id:
+                                    subtask_results[result_index] = owner_current
+                                    break
+                        else:
+                            subtask_results.append(owner_current)
+                        if plan_recovery_accepted:
+                            owners_disproved_in_episode.discard(owner_id)
+                        else:
+                            owners_disproved_in_episode.add(owner_id)
                     elif not consumer_invoked_this_cycle and not owner_has_result:
                         # the downgrade below replaces an entry; a stale one was removed, so there is one to replace
                         subtask_results.append(deps.SubtaskResult(
@@ -3654,7 +3756,32 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     recovery_plan_generation_by_subtask.get(subtask.id, 0) + 1
                 )
                 if plan_recovery_accepted:
+                    replay_handles.pop(subtask.id, None)       # the episode settled: nothing left to replay
+                    # An owner an EARLIER cycle of this episode left disproved and this cycle did not run again (a carried-forward
+                    # or unchanged participant): the dependent verification that just passed ran against its current bytes too.
+                    for result_index, prior_result in enumerate(subtask_results):
+                        if prior_result.subtask_id in owners_disproved_in_episode:
+                            subtask_results[result_index] = deps.SubtaskResult(
+                                subtask_id=prior_result.subtask_id, status=deps.SubtaskStatus.COMPLETED,
+                                execution_method=deps.ExecutionMethod.MODEL.value, error=None,
+                            )
+                    owners_disproved_in_episode.clear()
                     break
+                if consumer_invoked_this_cycle:
+                    current_dependent_failure = _dependent_failure_identity(call_result)
+                    for record in invoked_group_records:
+                        if not record["owner_reran"]:
+                            continue
+                        repair_paths = sorted(record["required_owner_files"])
+                        dependent_verification_facts[record["owner_id"]] = replay_facts_block(
+                            owner_id=record["owner_id"],
+                            repair_changed=bool(set(repair_paths) & set(record["owner_result"].get("files") or [])),
+                            repair_digests={
+                                path: deps.read_file_revision(os.path.join(plan_workspace_path, path)) for path in repair_paths
+                            },
+                            verifier_paths=[pf.path for pf in subtask.planned_files], replayed=verifier_replayed,
+                            previous_failure=previous_dependent_failure, current_failure=current_dependent_failure,
+                        )
                 if not consumer_invoked_this_cycle:
                     # The plan never reached the consumer (a group failed
                     # locally, or the plan-level acceptance precheck
@@ -3663,10 +3790,37 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # original single-owner "not owner_local_accepted"
                     # branch's own unconditional break.
                     break
-                scope_conflict = call_result.get("plan_scope_conflict") or {}
+                next_scope_conflict = call_result.get("plan_scope_conflict") or {}
+                last_dependent_failure = call_result.get("last_failure") or {}
+                if (
+                    not next_scope_conflict and verifier_replayed and last_dependent_failure
+                    and not call_result.get("environment_failure")
+                ):
+                    # The replayed verifier failed WITHOUT naming the owner again (a compile or linkage error, another
+                    # exception, an assertion in its own file). The owner's repair is still not verified, and the verifier is
+                    # not this run's to rewrite: no canonical contract changed, so it stays valid. The new deterministic gate
+                    # output replaces the earlier evidence and goes back to the same owner(s) - never to a regeneration.
+                    next_scope_conflict = {
+                        **scope_conflict,
+                        "failure_type": last_dependent_failure.get("type"),
+                        "reason": (
+                            f"the replayed dependent verifier of {subtask.id} failed its "
+                            f"{last_dependent_failure.get('type')} gate against the repaired owner; the failure differs from "
+                            "the one that reopened the owner, and the verifier itself was not changed"
+                        ),
+                        "raw_evidence": last_dependent_failure.get("raw_output") or last_dependent_failure.get("message") or "",
+                        "grounded_locations": [],
+                        "verifier_replay_failure": True,
+                    }
+                    deps.logger.warning(
+                        "VERIFIER_REPLAY_FAILED_DIFFERENTLY subtask=%s failure_type=%s - evidence against the owner repair; the "
+                        "verifier is not regenerated.", subtask.id, last_dependent_failure.get("type"),
+                    )
+                scope_conflict = next_scope_conflict
                 if not scope_conflict:
                     break
                 continue
+            replay_handles.pop(subtask.id, None)   # the recovery episode of this stage is over (settled, refused or exhausted)
             # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001 (BACKEND-FINAL-CLOSURE-005, measured on
             # P4-T4): a verification-only unit that fails and cannot change its own inputs used to end the run
             # right there (LR-R1-P4's truthful terminal) - but the unit whose work it judged never heard of the

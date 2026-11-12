@@ -559,6 +559,8 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
         strict_spec_compliance=strict_spec_compliance,
         execution_scope=execution_scope,
         reopened_owner=reopened_owner,
+        carried_candidate=ctx.carried_candidate,
+        capture_refused_candidate=ctx.capture_refused_candidate,
         grounding_goal=grounding_goal,
         exit_authority_goal=(
             (work_unit.authoritative_goal if work_unit is not None else None) or grounding_goal or ""

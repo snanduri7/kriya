@@ -176,5 +176,7 @@ def test_inventory_counts_the_design_relies_on():
     # derivation failed before the commit, ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED, a deterministic quality-gate stop).
     # 0a188e9 (effective-argv authority): one more typed stop (runtime_verification._assert_effective_argv: EFFECTIVE_ARGV_NOT_RESOLVED / EFFECTIVE_ARGV_INTERPRETER_MISMATCH,
     # a verification_infrastructure_failure, nothing executed).
-    assert records == 97, records
+    # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001 (2026-11-12): one more typed stop (attempt._require_the_staged_candidate_is_the_carried_one:
+    # VERIFIER_REPLAY_BYTES_MISMATCH, a verifier_replay_refused failure before any gate, nothing executed).
+    assert records == 98, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

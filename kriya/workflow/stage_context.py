@@ -418,6 +418,8 @@ class StageContext:
     strict_spec_compliance: bool = False
     execution_scope: str = ""
     reopened_owner: bool = False
+    carried_candidate: Any = None            # verifier_replay.ReplayHandle or None (see run_generation_workflow)
+    capture_refused_candidate: bool = False
     migration_resolution: Any = None
     obligation_ledger: Any = None          # the caller's ledger (None: the loop creates the run's own)
     completed_subtask_ids: Optional[FrozenSet[str]] = None

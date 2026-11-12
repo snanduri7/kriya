@@ -241,6 +241,12 @@ def _capture_final_contents_and_remove_sandbox(state: GenerationState, ctx: Any,
                 state.final_attempt_contents[filepath] = fh.read()
         except Exception as exc:
             logger.debug("Failed to capture final content of %r before %s: %s", worktree_file, cleanup, exc)
+    if getattr(ctx, "capture_refused_candidate", False):
+        # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001: the exact staged candidate, kept in memory only, for the enforce
+        # loop's verifier replay (kriya/workflow/verifier_replay.py). None unless every written file is captured exactly.
+        from kriya.workflow.verifier_replay import capture_refused_candidate
+
+        state.refused_candidate = capture_refused_candidate(state, ctx.worktree_path)
     remove_git_worktree(ctx.workspace_path, ctx.worktree_path)
 
 

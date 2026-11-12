@@ -1294,18 +1294,23 @@ async def test_a_failed_consumer_retry_never_closes_the_cross_owner_obligation(t
                patch(f"{C}.save_approved_plan", side_effect=lambda ws, pid, doc: saved.append(doc) or trail.append(doc)),
                patch(f"{C}.save_control_state",
                      side_effect=lambda ws, cs: persisted.append(cs) or trail.append(cs) or real_save_cs(ws, cs))])
+    # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001 (owner ruling 2026-11-12, items 30-31, 42): the reopened owner's CURRENT
+    # result no longer stays "completed" after the consumer's retry disproved its repair. Its state and its plan-document stage already
+    # said needs_review (asserted below, unchanged); its result now says so too, and the loop's one lifecycle rule (_lifecycle_of: any
+    # needs_review result) therefore ends the plan needs_review, where it used to end "failed" beside a "completed" owner.
     assert [d["lifecycle_state"] for d in saved] == ["approved", "in_progress", "in_progress", "in_progress",
-                                                     "recovering", "in_progress", "needs_review", "failed", "failed"]
+                                                     "recovering", "in_progress", "needs_review", "failed", "needs_review"]
     recovering = [d for d in saved if d["lifecycle_state"] == "recovering"]
     assert [d["stage_states"] for d in recovering] == [{"s0": "in_progress", "s1": "pending"}]
-    assert [d["stage_states"]["s0"] for d in saved if d["lifecycle_state"] == "needs_review"] == ["needs_review"]
+    assert [d["stage_states"]["s0"] for d in saved if d["lifecycle_state"] == "needs_review"] == ["needs_review", "needs_review"]
     recovering_at = next(i for i, item in enumerate(trail) if isinstance(item, dict)
                          and item["lifecycle_state"] == "recovering")
     assert dict(trail[recovering_at + 1].subtask_states) == {"s0": "in_progress", "s1": "pending"}
     assert result.control_state.subtask_states["s0"] == "needs_review"
     kinds = [(r.kind, r.status) for r in records if r.kind == ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT]
     assert kinds and (ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT, ObligationStatus.SATISFIED) not in kinds
-    assert result.legacy_result["status"] == "failed"
+    assert result.legacy_result["status"] == "needs_review"      # was "failed": see the lifecycle note above
+    assert ("s0", "needs_review") in [(r.subtask_id, r.status.value) for r in result.subtask_results]
 
 
 @pytest.mark.usefixtures("bound_workspace")

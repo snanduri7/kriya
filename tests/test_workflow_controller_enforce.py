@@ -3946,12 +3946,14 @@ async def test_enforce_recovery_plan_all_groups_pass_locally_but_consumer_still_
     for owner_id in ("s1", "s2"):
         owner_result = next(item for item in result.subtask_results if item.subtask_id == owner_id)
         # Neither owner's OWN local gate failed - only the plan-level
-        # acceptance (the consumer's own retry) rejected the whole plan, so
-        # the FINAL reported subtask_results entries stay whatever each
-        # owner's own earlier successful pass already recorded (COMPLETED),
-        # never forced to NEEDS_REVIEW - matching the pre-existing
-        # single-owner precedent this generalizes.
-        assert owner_result.status == SubtaskStatus.COMPLETED
+        # acceptance (the consumer's own retry) rejected the whole plan.
+        # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001 (owner
+        # ruling 2026-11-12, items 30-31, 42; Scenario-A run 7): this used to
+        # leave each owner's result COMPLETED - a repair its dependent
+        # verification had just refused. The owner's CURRENT result now
+        # follows that verification: NEEDS_REVIEW, PLAN_RECOVERY_OWNER_FAILED.
+        assert owner_result.status == SubtaskStatus.NEEDS_REVIEW
+        assert owner_result.reason_codes == ("PLAN_RECOVERY_OWNER_FAILED",)
 
 
 @pytest.mark.asyncio

@@ -301,6 +301,10 @@ def completed_result(
              "raw_output": str(state.last_failure.raw_output or "")[-4000:]}
             if state.last_failure is not None and not quality_passed else None
         ),
+        # Verifier replay: the stopping unit's exact staged candidate, only when the caller asked for it and only as an in-memory
+        # object (the enforce loop removes this key from the result before anything can serialize it).
+        **({"refused_candidate": state.refused_candidate}
+           if state.refused_candidate is not None and not quality_passed else {}),
         "retry_progress": state.retry_progress_summary(),
         # PRD-029: the ContractRegistry transition committed with this
         # run's source (None when no contract changed).

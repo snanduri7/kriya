@@ -35,13 +35,17 @@ class Run:
     gate_outcomes: List[Any] = field(default_factory=list)                                # every gate outcome recorded on the generation state (what runs.gate_outcomes persists)
     grader_prompts: List[str] = field(default_factory=list)                               # user prompts sent to the run-verification grader (the captured-output evidence it judged)
     builds: List[Any] = field(default_factory=list)                                       # ("compile"|"tests", on_build() result) for every build/test gate execution, in order
+    developer_calls: List[Optional[str]] = field(default_factory=list)                    # the unit of EVERY Developer request, in order (a replayed verifier makes none)
 
 
 def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, str]], goal: str = "Change the page size", mode: str = "human-in-the-loop",
                 answer: Any = True, run_verification: bool = False, judge_reply: Optional[Dict[str, Any]] = None,
                 base_files: Optional[Dict[str, str]] = None, app_output: str = "ok\n", callback: Optional[Callable] = None,
                 record_steps: bool = False, on_execute: Optional[Callable[[Any], None]] = None, on_build: Optional[Callable[[], Any]] = None,
-                run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None, init_git: bool = True) -> Run:
+                run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None, init_git: bool = True,
+                on_tests: Optional[Callable[[Any], Dict[str, Any]]] = None) -> Run:
+    """``units``: a source may be a callable (called once per Developer request of that unit). ``on_tests(validator)``: the tests gate's answer for that
+    validator's tree (default: PASSING)."""
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -79,7 +83,8 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
         if "File List Planner" in first:
             content = '{"files": ["%s"]}' % path
         elif "Developer Agent" in first:
-            content = sentinel(path, analysis="edit.", content=source)
+            run.developer_calls.append(active.get("id"))
+            content = sentinel(path, analysis="edit.", content=source() if callable(source) else source)
         elif "Run Verification Judge" in first:
             run.judge_calls.append(active.get("id"))
             content = json.dumps(judge_reply or {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None,
@@ -116,9 +121,9 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
         run.builds.append(("compile", on_build() if on_build is not None else None))
         return {"success": True, "output": "ok"}
 
-    def test_gate(*_a, **_k):
+    def test_gate(validator, *_a, **_k):
         run.builds.append(("tests", on_build() if on_build is not None else None))
-        return PASSING
+        return on_tests(validator) if on_tests is not None else PASSING
 
     real_record = GenerationState.record_event
     real_gate = GenerationState.record_gate_outcome

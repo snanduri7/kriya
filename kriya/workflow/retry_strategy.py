@@ -444,6 +444,35 @@ def _admit_verification_only_retry(state: GenerationState, ctx, failure: Failure
                  VERIFICATION_RETRY_NO_CHANGE_POSSIBLE, state.attempt_number)
 
 
+def _stop_after_a_failed_verifier_replay(state: GenerationState, ctx, failure: Failure) -> None:
+    """ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001: a unit that replayed its carried verifier (attempt 1, no Developer call) and
+    failed a gate stops there. Its next attempt would be a Developer repair of the carried files - the unit rewriting the verifier of an
+    upstream owner's repair because that repair did not pass it. Whatever the failure is (the same one, a compile error, another exception),
+    it is evidence about the owner's repair for the enforce loop; it is never this unit's licence to change the verifier. An existing typed
+    route decided first is left alone: an environment stop, a plan-scope conflict, another no-progress terminal."""
+    from kriya.workflow.verifier_replay import VERIFIER_REPLAY_FAILED
+
+    if getattr(ctx, "carried_candidate", None) is None or state.attempt_number != 1:
+        return
+    if state.environment_failure or state.plan_scope_conflict is not None or state.no_progress_terminated:
+        return
+    state.no_progress_terminated = True
+    state.no_progress_reason = VERIFIER_REPLAY_FAILED
+    state.record_event(RunEvent(
+        kind="retry.no_progress_terminal",
+        attempt=state.attempt_number,
+        source="retry_strategy._stop_after_a_failed_verifier_replay",
+        authority=EventAuthority.ADVISORY,
+        message=(f"{VERIFIER_REPLAY_FAILED}: the replayed verifier failed its {failure.type} gate; the unit may not rewrite a carried "
+                 "verifier, so no further attempt is made and the failure goes back to the owner recovery."),
+        details={"reason_code": VERIFIER_REPLAY_FAILED, "classification": state.last_progress_classification, "limit": None,
+                 "last_vector_digest": (state.last_progress_vector.digest()
+                                        if state.last_progress_vector is not None else None),
+                 "declared_by": failure.type},
+    ))
+    logger.error("Quality Gates stopped - %s (replayed verifier, %s gate).", VERIFIER_REPLAY_FAILED, failure.type)
+
+
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
     """Called from workflow.py's `except Exception as e:` after a failed
     run_attempt() call. Mutates state (error_context, last_implicated_files/
@@ -1597,3 +1626,4 @@ async def _record_attempt_failure(
         state.record_gate_outcome(failure.to_gate_outcome())
     _admit_verification_only_retry(state, ctx, failure)
     _apply_declared_no_progress_stop(state, failure)
+    _stop_after_a_failed_verifier_replay(state, ctx, failure)
