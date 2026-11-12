@@ -1691,6 +1691,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         subtask_results: List[SubtaskResult] = []
         subtask_call_results: List[Dict[str, Any]] = []
         knowledge_gap_break: Optional[Dict[str, Any]] = None
+        # ENFORCE-TERMINAL-ENV-REASON-LOST-001: the unit whose own result stopped the run (its id and that result); the terminal aggregation
+        # reads a typed stop from it.
+        terminal_unit_stop: Optional[Dict[str, Any]] = None
         # MA8.1 completion (2026-08-29 v2 design review): "Requirement-
         # scoped repeated owner recovery." A live PRV-06 run proved a bare
         # owner-id set (reopen each owner at most once per run) is the
@@ -4055,7 +4058,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 elif scope_conflict:
                     error = deps.subtask_scope_conflict_report(scope_conflict)[0]
                 else:
-                    error = f"subtask did not pass Quality Gates (status={call_result.get('status')!r})"
+                    error = unit_stop_message(call_result)
             elif undeclared_files:
                 error = (
                     f"subtask wrote file(s) outside its own declared planned_files scope: "
@@ -4131,6 +4134,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             control_state = _persist_control_state(control_state)
 
             if not passed:
+                if not quality_gates_passed:
+                    # The unit's OWN result ends the run (a unit whose gates passed and that the controller refused - an undeclared file, an
+                    # unmet verification - is typed by the controller above and is not this). The loop always ends here: see the break below.
+                    terminal_unit_stop = {"subtask_id": subtask.id, "call_result": call_result}
                 deps.logger.warning(
                     f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} "
                     f"({position}/{total}) - did not pass Quality Gates."
@@ -4563,6 +4570,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
              if result.get("plan_scope_conflict")),
             None,
         )
+        # ENFORCE-TERMINAL-ENV-REASON-LOST-001 (run 8): the stopping unit's typed stop is the terminal's cause. MEASURED: the unit result said
+        # containment_setup_failed with its CONTAINMENT_SETUP_FAILED reason, this aggregate carried neither, and the `.enforce` row said only
+        # `failed`. A plan-scope conflict keeps its own terminal (below); a knowledge gap and a commit failure set theirs above.
+        typed_stop = (
+            unit_typed_stop(terminal_unit_stop["call_result"])
+            if terminal_unit_stop is not None and scope_conflict_result is None and knowledge_gap_break is None else None
+        )
+        if typed_stop is not None and "failure_type" not in aggregated:
+            aggregated["failure_type"] = typed_stop[0]
+            aggregated["terminal_cause"] = {
+                "subtask_id": terminal_unit_stop["subtask_id"], "failure_category": typed_stop[0], "reason": typed_stop[1],
+            }
         if scope_conflict_result is not None:
             aggregated["failure_type"] = "PLANNING_ERROR"
             aggregated["recovery"] = "PLAN_REPAIR"
@@ -4644,6 +4663,28 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 # of what each MODEL unit committed to this run's candidate (ControlState.subtask_written_files - the evidence the
 # planned-read view (subtask_executor.reads_candidate_view), owner resolution (owner_recovery) and the abandoned-plan
 # quarantine (resume_support) read).
+
+_TERMINAL_REASON_MAX_CHARS = 2000
+
+
+def unit_typed_stop(result: Mapping[str, Any]) -> Optional[Tuple[str, str]]:
+    """``(failure_category, reason)`` of a unit result that ended on a TYPED stop: it names its category AND carries the stop's own reason
+    (``environment_failure`` - CONTAINMENT_SETUP_FAILED, the generation budget, a provider contract, ...). None for an ordinary gate failure,
+    which has a category but no such reason: the terminal then reports its lifecycle status, as before."""
+    category, reason = result.get("failure_category"), result.get("environment_failure")
+    if not isinstance(category, str) or not category or not isinstance(reason, str) or not reason:
+        return None
+    return category, reason[:_TERMINAL_REASON_MAX_CHARS]
+
+
+def unit_stop_message(result: Mapping[str, Any]) -> str:
+    """Why a unit that did not pass its gates stopped, for its SubtaskResult and the controller's log: the typed stop when the unit result has
+    one. Run 8 printed ``(status=None)`` - a key no unit result carries - in front of a typed containment failure."""
+    typed = unit_typed_stop(result)
+    if typed is not None:
+        return f"subtask did not pass Quality Gates ({typed[0]}): {typed[1]}"
+    return f"subtask did not pass Quality Gates (status={result.get('status')!r})"
+
 
 ADVISORY_REVIEW_NOT_PERFORMED = "ADVISORY_REVIEW_NOT_PERFORMED"
 
