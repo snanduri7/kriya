@@ -22,6 +22,8 @@ selected by production config resolution.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 import os
 import re
@@ -29,7 +31,7 @@ import stat
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Sequence, Tuple
 
 from kriya.tools.sandbox import build_restricted_env, resource_plan
 
@@ -87,6 +89,48 @@ class BackendUnavailableError(ContainmentSetupError):
     """The configured containment backend is missing, rejected the
     profile, or is otherwise unable to establish the controls the profile
     requires."""
+
+
+# CONTAINMENT-PROXY-START-TIMEOUT-ORPHAN-001 (Scenario-A run 8, 2026-11-12). MEASURED: Docker Desktop held the registry proxy's start request 31.1 s
+# (its file-share layer was still releasing the previous gate container's bind mounts; the daemon's own share was 69 ms), the 20 s client call gave up,
+# and the start was served afterwards. A client-side timeout of `docker start` is therefore INDETERMINATE, not a failure: the SAME container is observed
+# until it runs, fails, or the launch's own deadline (below) ends. Two typed reasons, because the two ends differ: the container failed, or time ran out.
+PROXY_START_FAILED = "CONTAINMENT_PROXY_START_FAILED"
+PROXY_START_TIMEOUT = "CONTAINMENT_PROXY_START_TIMEOUT"
+PROXY_START_REASON_CODES = frozenset({PROXY_START_FAILED, PROXY_START_TIMEOUT})
+
+
+class ProxyStartError(BackendUnavailableError):
+    """The registry proxy of a `DEPENDENCY_REGISTRY_ONLY` launch did not start. ``reason_code`` is one of PROXY_START_REASON_CODES.
+    ``cleanup_failures`` names what the teardown of the proxy container and its network could NOT remove (empty = both are gone); it is
+    part of the message, so a leftover is never reported as a clean stop."""
+
+    def __init__(self, reason_code: str, detail: str, cleanup_failures: Sequence[str] = ()) -> None:
+        self.reason_code = reason_code
+        self.detail = detail
+        self.cleanup_failures = tuple(cleanup_failures)
+        leftover = f" [CLEANUP INCOMPLETE: {'; '.join(self.cleanup_failures)}]" if self.cleanup_failures else ""
+        super().__init__(f"{reason_code}: {detail}{leftover}")
+
+
+# The deadline of the launch being prepared: the caller's own `timeout` of ProcessController.run()/run_async(), counted from the moment preparation
+# starts. It is the ONE bound a backend may wait under for something it cannot decide at once (an indeterminate proxy start); no backend owns a longer
+# one. None (a managed service, an MCP server, a direct `prepare()` call) = there is no such bound, so a backend waits for nothing.
+_LAUNCH_DEADLINE: "contextvars.ContextVar[Optional[float]]" = contextvars.ContextVar("kriya_launch_deadline", default=None)
+
+
+@contextlib.contextmanager
+def launch_deadline(deadline: Optional[float]) -> Iterator[None]:
+    token = _LAUNCH_DEADLINE.set(deadline)
+    try:
+        yield
+    finally:
+        _LAUNCH_DEADLINE.reset(token)
+
+
+def current_launch_deadline() -> Optional[float]:
+    """``time.monotonic()`` value at which the launch being prepared ends, or None."""
+    return _LAUNCH_DEADLINE.get()
 
 
 PERSISTENT_DEPENDENCY_CACHE_WRITABLE = "PERSISTENT_DEPENDENCY_CACHE_WRITABLE"
@@ -404,6 +448,9 @@ class PreparedContainment:
     # when the OWNER dies without running ``cleanup`` (SIGKILL). A container belongs to the Docker daemon, not to the process group of the CLI that started it: MEASURED, a
     # container kept running and wrote to the bind-mounted workspace 18.9 s after its owner was killed. A host backend has nothing to add (the tree kill is enough).
     owner_death_cleanup: Tuple[Tuple[str, ...], ...] = ()
+    # CONTAINMENT-PROXY-START-TIMEOUT-ORPHAN-001: seconds this preparation spent WAITING on an indeterminate start, inside the launch's deadline.
+    # ProcessController takes them off the command's own timeout, so the wait never lengthens the launch. 0.0 for every ordinary preparation.
+    setup_wait_seconds: float = 0.0
 
 
 class ContainmentBackend(Protocol):

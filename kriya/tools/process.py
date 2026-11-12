@@ -21,6 +21,7 @@ look similar."""
 import asyncio
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -34,6 +35,7 @@ from kriya.tools.containment import (
     NetworkAuthority,
     PreparedContainment,
     infrastructure_diagnostic_for,
+    launch_deadline,
 )
 
 
@@ -324,6 +326,7 @@ class _ResolvedExecution:
     finite_launch: Optional[FiniteLaunchStage] = None
     backend_name: Optional[str] = None                      # the prepared containment's backend identity (evidence only)
     owner_death_cleanup: Tuple[Tuple[str, ...], ...] = ()   # W3-8: argv lists the owner-death watchdog runs after it kills the tree (the backend's authoritative teardown)
+    setup_wait_seconds: float = 0.0                         # seconds preparation waited inside the launch deadline (PreparedContainment.setup_wait_seconds)
 
 
 def _prepare_env_and_preexec(
@@ -334,6 +337,7 @@ def _prepare_env_and_preexec(
     env: Optional[Dict[str, str]],
     preexec_fn: Optional[Callable[[], None]],
     finite: bool = False,
+    launch_timeout: Optional[float] = None,
 ) -> _ResolvedExecution:
     """The single place `env`/`preexec_fn`/`command` get resolved, for
     every caller of every lifecycle in this module. A caller passes EITHER
@@ -362,7 +366,9 @@ def _prepare_env_and_preexec(
         raise ValueError(
             "Pass either (env, preexec_fn) or (containment_profile, containment_backend), never both."
         )
-    prepared: PreparedContainment = containment_backend.prepare(containment_profile, command)
+    # CONTAINMENT-PROXY-START-TIMEOUT-ORPHAN-001: the launch's own timeout, as a deadline, is the only bound the backend may wait under.
+    with launch_deadline(None if launch_timeout is None else time.monotonic() + launch_timeout):
+        prepared: PreparedContainment = containment_backend.prepare(containment_profile, command)
     launch = prepared.finite_launch if finite else None
     target = launch.wrap(command) if launch is not None else command
     effective_command = (list(prepared.command_prefix) + target) if prepared.command_prefix else target
@@ -372,7 +378,13 @@ def _prepare_env_and_preexec(
         toolchain_identity=(prepared.toolchain_identity.to_dict() if prepared.toolchain_identity else None),
         egress=egress_evidence_for(containment_profile, containment_backend),
         resources=prepared.resources, finite_launch=launch, backend_name=prepared.backend_name, owner_death_cleanup=prepared.owner_death_cleanup,
+        setup_wait_seconds=float(getattr(prepared, "setup_wait_seconds", 0.0) or 0.0),
     )
+
+
+def _command_timeout(timeout: float, resolved: _ResolvedExecution) -> float:
+    """The command's own time: the launch timeout less what preparation already waited inside it. Unchanged (the same object) when it waited for nothing."""
+    return timeout if not resolved.setup_wait_seconds else max(0.0, timeout - resolved.setup_wait_seconds)
 
 
 def _spawn_popen(*args: Any, **kwargs: Any) -> subprocess.Popen:
@@ -463,7 +475,7 @@ class ProcessController:
         # just the one that supplies a real payload.
         resolved = _prepare_env_and_preexec(
             command=command, containment_profile=containment_profile, containment_backend=containment_backend,
-            env=env, preexec_fn=preexec_fn, finite=True,
+            env=env, preexec_fn=preexec_fn, finite=True, launch_timeout=timeout,
         )
         try:
             process = _spawn_popen(
@@ -473,7 +485,7 @@ class ProcessController:
             )
             timed_out = False
             try:
-                stdout, stderr = process.communicate(input=stdin_payload or "", timeout=timeout)
+                stdout, stderr = process.communicate(input=stdin_payload or "", timeout=_command_timeout(timeout, resolved))
             except subprocess.TimeoutExpired:
                 timed_out = True
                 terminate_process_tree(process)
@@ -542,7 +554,7 @@ class ProcessController:
         `asyncio.create_subprocess_*` calls."""
         resolved = _prepare_env_and_preexec(
             command=command, containment_profile=containment_profile, containment_backend=containment_backend,
-            env=env, preexec_fn=preexec_fn, finite=True,
+            env=env, preexec_fn=preexec_fn, finite=True, launch_timeout=timeout,
         )
         try:
             process = await spawn_subprocess_exec_fail_closed(
@@ -554,7 +566,7 @@ class ProcessController:
             stdin_bytes = (stdin_payload or "").encode("utf-8")
             try:
                 stdout_b, stderr_b = await asyncio.wait_for(
-                    process.communicate(input=stdin_bytes), timeout=timeout,
+                    process.communicate(input=stdin_bytes), timeout=_command_timeout(timeout, resolved),
                 )
             except asyncio.TimeoutError:
                 timed_out = True

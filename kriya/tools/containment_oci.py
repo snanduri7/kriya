@@ -82,6 +82,8 @@ from kriya.policy.protected_authority_paths import WORKSPACE_ANCHOR_RELPATH, WOR
 from kriya.tools.containment import (
     LAUNCHER_REACHED_MARKER,
     PERSISTENT_DEPENDENCY_CACHE_WRITABLE,
+    PROXY_START_FAILED,
+    PROXY_START_TIMEOUT,
     TARGET_NOT_STARTED_MARKER,
     BackendUnavailableError,
     ContainmentProfile,
@@ -90,7 +92,9 @@ from kriya.tools.containment import (
     HostWriterIdentityRefused,
     NetworkAuthority,
     PreparedContainment,
+    ProxyStartError,
     build_restricted_env,
+    current_launch_deadline,
     host_writer_identity,
     require_single_environment_source,
 )
@@ -1264,6 +1268,127 @@ def _finite_launch_stage() -> FiniteLaunchStage:
     )
 
 
+# ------------------------------------------------------------------------------------------------- CONTAINMENT-PROXY-START-TIMEOUT-ORPHAN-001
+# The registry proxy is created, then started, as two calls. `docker create` answers at once (MEASURED 127 ms in run 8); `docker start` keeps the
+# client-call limit the single `docker run -d` had. When that client call times out the start is INDETERMINATE (the backend still serves it later:
+# MEASURED 31.1 s), so the same container is observed - never started again - until it runs, fails, or the launch's own deadline ends.
+_PROXY_CLIENT_CALL_SECONDS = 20          # the limit of the former `docker run -d`, unchanged; applies to each of the two calls
+_PROXY_STATE_FORMAT = "{{.State.Status}}|{{.State.ExitCode}}|{{.State.Error}}"
+_PROXY_STATE_ABSENT = "absent"
+_PROXY_OBSERVE_INTERVAL_SECONDS = 0.5     # the readiness probe's own interval
+
+
+def _proxy_container_state(docker_path: str, proxy_name: str, *, timeout: float) -> Tuple[Optional[str], str]:
+    """``(status, detail)`` of the named proxy container. ``status`` is docker's own (created, running, exited, dead, ...), ``absent`` when the
+    daemon says there is no such container, or None when the daemon gave no usable answer in time (nothing is known: the caller keeps observing)."""
+    try:
+        seen = subprocess.run(
+            [docker_path, "inspect", "--format", _PROXY_STATE_FORMAT, proxy_name], capture_output=True, timeout=timeout, text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return None, f"docker inspect gave no answer: {error}"
+    if seen.returncode != 0:
+        stderr = (seen.stderr or "").strip()
+        return (_PROXY_STATE_ABSENT, stderr[:300]) if "no such" in stderr.lower() else (None, f"docker inspect exited {seen.returncode}: {stderr[:300]}")
+    status, _, rest = (seen.stdout or "").strip().partition("|")
+    exit_code, _, error = rest.partition("|")
+    if not status:
+        return None, "docker inspect reported no state"
+    failed = bool(error.strip()) or exit_code not in ("", "0")
+    return status, (f"exit code {exit_code}" + (f", {error.strip()}" if error.strip() else "")) if failed else ""
+
+
+def _await_indeterminate_proxy_start(docker_path: str, proxy_name: str, deadline: Optional[float]) -> float:
+    """After the client-side timeout of `docker start`: observe the SAME container (no second start) until it runs (returns the seconds waited),
+    reaches a state it cannot run from (ProxyStartError PROXY_START_FAILED), or ``deadline`` - the launch's own, never one made here - is reached
+    (PROXY_START_TIMEOUT). With no deadline there is nothing to wait under: one observation decides."""
+    began = time.monotonic()
+    while True:
+        remaining = None if deadline is None else deadline - time.monotonic()
+        status, detail = _proxy_container_state(
+            docker_path, proxy_name, timeout=10 if remaining is None else max(1.0, min(10.0, remaining)),
+        )
+        if status == "running":
+            waited = time.monotonic() - began
+            logger.warning(
+                "CONTAINMENT_PROXY_START_INDETERMINATE resolved: registry proxy %s reached state running %.1fs after its %ds start call timed out "
+                "(no second start was issued; the wait is taken off this launch's own timeout)", proxy_name, waited, _PROXY_CLIENT_CALL_SECONDS,
+            )
+            return waited
+        if status is not None and (status != "created" or detail):
+            raise ProxyStartError(
+                PROXY_START_FAILED,
+                f"Failed to start the registry proxy {proxy_name!r}: after its {_PROXY_CLIENT_CALL_SECONDS}s start call timed out the container "
+                f"reached state {status!r}{f' ({detail})' if detail else ''}",
+            )
+        if deadline is None:
+            raise ProxyStartError(
+                PROXY_START_TIMEOUT,
+                f"Failed to start the registry proxy {proxy_name!r}: its start call timed out after {_PROXY_CLIENT_CALL_SECONDS}s and this launch "
+                "has no deadline to keep observing it under",
+            )
+        if time.monotonic() >= deadline:
+            raise ProxyStartError(
+                PROXY_START_TIMEOUT,
+                f"Failed to start the registry proxy {proxy_name!r}: its start call timed out after {_PROXY_CLIENT_CALL_SECONDS}s and the container "
+                f"was still not running when this launch's own deadline was reached ({time.monotonic() - began:.1f}s observed; last state "
+                f"{status or 'unknown'}{f', {detail}' if detail else ''})",
+            )
+        time.sleep(_PROXY_OBSERVE_INTERVAL_SECONDS)
+
+
+def _start_registry_proxy(docker_path: str, proxy_name: str, create_args: List[str], deadline: Optional[float]) -> float:
+    """`docker create` then ONE `docker start` of the registry proxy. Returns the seconds spent observing an indeterminate start (0.0 for an
+    ordinary one). Every failure is a ProxyStartError; the caller owns the teardown (container first, then network)."""
+    try:
+        created = subprocess.run(
+            [docker_path, "create", "--name", proxy_name, *create_args], capture_output=True, timeout=_PROXY_CLIENT_CALL_SECONDS, text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ProxyStartError(PROXY_START_FAILED, f"Failed to start the registry proxy {proxy_name!r}: docker create gave no answer: {error}") from error
+    if created.returncode != 0:
+        raise ProxyStartError(
+            PROXY_START_FAILED, f"Failed to start the registry proxy {proxy_name!r}: docker create exited {created.returncode}: {created.stderr.strip()[:400]}")
+    try:
+        started = subprocess.run([docker_path, "start", proxy_name], capture_output=True, timeout=_PROXY_CLIENT_CALL_SECONDS, text=True)
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "CONTAINMENT_PROXY_START_INDETERMINATE: `docker start %s` gave no answer within %ds; the container is observed, not started again",
+            proxy_name, _PROXY_CLIENT_CALL_SECONDS,
+        )
+        return _await_indeterminate_proxy_start(docker_path, proxy_name, deadline)
+    except OSError as error:
+        raise ProxyStartError(PROXY_START_FAILED, f"Failed to start the registry proxy {proxy_name!r}: {error}") from error
+    if started.returncode != 0:
+        raise ProxyStartError(PROXY_START_FAILED, f"Failed to start the registry proxy {proxy_name!r}: {started.stderr.strip()[:400]}")
+    return 0.0
+
+
+def _remove_proxy_then_network(docker_path: str, proxy_name: str, network_name: str) -> List[str]:
+    """Teardown after a proxy start that did not succeed: the CONTAINER first, and the network only once the container is known to be gone - a
+    start may still be pending in the backend, and a network removed under it leaves an orphan container (run 8). Returns what could not be
+    removed (empty = both gone); never raises, never claims a removal it did not see."""
+    failures: List[str] = []
+    container_gone = False
+    try:
+        removed = subprocess.run([docker_path, "rm", "-f", proxy_name], capture_output=True, timeout=15, text=True)
+        container_gone = removed.returncode == 0 or "no such container" in (removed.stderr or "").lower()
+        if not container_gone:
+            failures.append(f"docker rm -f {proxy_name} exited {removed.returncode}: {(removed.stderr or '').strip()[:200]}")
+    except (OSError, subprocess.TimeoutExpired) as error:
+        failures.append(f"docker rm -f {proxy_name} gave no answer: {error}")
+    if not container_gone:
+        failures.append(f"network {network_name} kept: its proxy container was not removed and its start may still be pending")
+        return failures
+    try:
+        network = subprocess.run([docker_path, "network", "rm", network_name], capture_output=True, timeout=15, text=True)
+        if network.returncode != 0:
+            failures.append(f"docker network rm {network_name} exited {network.returncode}: {(network.stderr or '').strip()[:200]}")
+    except (OSError, subprocess.TimeoutExpired) as error:
+        failures.append(f"docker network rm {network_name} gave no answer: {error}")
+    return failures
+
+
 class OCIContainmentBackend:
     """Real containment via `docker run` - filesystem/network/process/
     resource controls actually enforced by the OCI runtime, not by
@@ -1702,42 +1827,40 @@ class OCIContainmentBackend:
         def _remove_network() -> None:
             subprocess.run([docker_path, "network", "rm", network_name], capture_output=True, timeout=15)
 
+        # CONTAINMENT-PROXY-START-TIMEOUT-ORPHAN-001: create, then one start; a client-side start timeout is indeterminate and is resolved by
+        # observing this container under the launch's own deadline. On any failure the container goes first, the network second.
+        squid_conf = _render_squid_conf(hosts)
+        proxy_create_args = [
+            "--label", f"kriya.authority={authority_id}",
+            "--network", network_name, "--cap-drop", "ALL",
+            *_mirror_host_gateway_args(registry_mirror),
+            # Squid drops ITS OWN privileges internally (root ->
+            # 'proxy' user, via setuid/setgid) at startup and
+            # refuses to run as root - confirmed empirically:
+            # --cap-drop ALL alone makes that internal drop fail
+            # ("setgid: Operation not permitted") and squid
+            # crash-loops (exit 139). SETUID/SETGID are the only
+            # two capabilities added back - this container is
+            # trusted Kriya-managed infrastructure (runs a fixed,
+            # Kriya-authored config, never untrusted repo content),
+            # not the payload NetworkAuthority constrains.
+            "--cap-add", "SETUID", "--cap-add", "SETGID",
+            "--security-opt", "no-new-privileges",
+            "--entrypoint", "sh", _PROXY_IMAGE_TAG,
+            "-c", f"printf '%s' {_shell_quote(squid_conf)} > /etc/squid/kriya.conf && "
+                  f"exec squid -N -f /etc/squid/kriya.conf",
+        ]
         try:
-            squid_conf = _render_squid_conf(hosts)
-            proxy_run = subprocess.run(
-                [
-                    docker_path, "run", "-d", "--name", proxy_name,
-                    "--label", f"kriya.authority={authority_id}",
-                    "--network", network_name, "--cap-drop", "ALL",
-                    *_mirror_host_gateway_args(registry_mirror),
-                    # Squid drops ITS OWN privileges internally (root ->
-                    # 'proxy' user, via setuid/setgid) at startup and
-                    # refuses to run as root - confirmed empirically:
-                    # --cap-drop ALL alone makes that internal drop fail
-                    # ("setgid: Operation not permitted") and squid
-                    # crash-loops (exit 139). SETUID/SETGID are the only
-                    # two capabilities added back - this container is
-                    # trusted Kriya-managed infrastructure (runs a fixed,
-                    # Kriya-authored config, never untrusted repo content),
-                    # not the payload NetworkAuthority constrains.
-                    "--cap-add", "SETUID", "--cap-add", "SETGID",
-                    "--security-opt", "no-new-privileges",
-                    "--entrypoint", "sh", _PROXY_IMAGE_TAG,
-                    "-c", f"printf '%s' {_shell_quote(squid_conf)} > /etc/squid/kriya.conf && "
-                          f"exec squid -N -f /etc/squid/kriya.conf",
-                ],
-                capture_output=True, timeout=20, text=True,
+            setup_wait_seconds = _start_registry_proxy(docker_path, proxy_name, proxy_create_args, current_launch_deadline())
+        except Exception as error:
+            cleanup_failures = _remove_proxy_then_network(docker_path, proxy_name, network_name)
+            refusal = (
+                ProxyStartError(error.reason_code, error.detail, cleanup_failures) if isinstance(error, ProxyStartError)
+                else ProxyStartError(PROXY_START_FAILED, f"Failed to start the registry proxy {proxy_name!r}: {error}", cleanup_failures)
             )
-            if proxy_run.returncode != 0:
-                _remove_network()
-                raise BackendUnavailableError(
-                    f"Failed to start the registry proxy {proxy_name!r}: {proxy_run.stderr.strip()[:400]}"
-                )
-        except BackendUnavailableError:
-            raise
-        except Exception as e:
-            _remove_network()
-            raise BackendUnavailableError(f"Failed to start the registry proxy: {e}") from e
+            if cleanup_failures:
+                logger.warning("Registry proxy teardown after a failed start is INCOMPLETE (%s): %s", proxy_name, "; ".join(cleanup_failures))
+            raise refusal from error
 
         def _remove_proxy_and_log_denied() -> None:
             try:
@@ -1882,6 +2005,7 @@ class OCIContainmentBackend:
             owner_death_cleanup=((docker_path, "rm", "-f", container_name),),      # W3-8: see the single-network constructor above
             toolchain_identity=resolved_toolchain,
             finite_launch=_finite_launch_stage(),
+            setup_wait_seconds=setup_wait_seconds,
         )
 
 

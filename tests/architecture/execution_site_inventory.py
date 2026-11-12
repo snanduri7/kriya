@@ -67,6 +67,10 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
     ("kriya/tools/containment_oci.py", "_ensure_image"): _DOCKER_FIXED_IMAGE,
     ("kriya/tools/containment_oci.py", "_check_net_admin_available"): _DOCKER_FIXED_IMAGE,
     ("kriya/tools/containment_oci.py", "_container_ip"): _DOCKER_CLI,
+    # CONTAINMENT-PROXY-START-TIMEOUT-ORPHAN-001: the registry proxy's create/start, the observation of an indeterminate start, and its ordered teardown
+    ("kriya/tools/containment_oci.py", "_proxy_container_state"): _DOCKER_CLI,
+    ("kriya/tools/containment_oci.py", "_start_registry_proxy"): _DOCKER_CLI,
+    ("kriya/tools/containment_oci.py", "_remove_proxy_then_network"): _DOCKER_CLI,
     ("kriya/tools/containment_oci.py", "OCIContainmentBackend._probe_daemon"): _DOCKER_CLI,
     ("kriya/tools/containment_oci.py", "OCIContainmentBackend.prepare._cleanup"): _DOCKER_CLI,
     ("kriya/tools/containment_oci.py", "OCIContainmentBackend._prepare_registry_scoped"): _DOCKER_CLI,
