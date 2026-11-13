@@ -1694,6 +1694,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # ENFORCE-TERMINAL-ENV-REASON-LOST-001: the unit whose own result stopped the run (its id and that result); the terminal aggregation
         # reads a typed stop from it.
         terminal_unit_stop: Optional[Dict[str, Any]] = None
+        # ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001 (runs 7 and 9; closes R7-C): the typed stop of an OWNER invocation made inside a
+        # consumer's recovery, when that invocation is the last one of the run. MEASURED: in both runs the last invocation was the reopened
+        # owner ending on the generation budget; the terminal read only the consumer's own result and reported a plan-scope conflict (run 7)
+        # or a bare needs_review (run 9). Set on every unit invocation, so any later invocation clears it.
+        recovery_invocation_stop: Optional[Dict[str, Any]] = None
         # MA8.1 completion (2026-08-29 v2 design review): "Requirement-
         # scoped repeated owner recovery." A live PRV-06 run proved a bare
         # owner-id set (reopen each owner at most once per run) is the
@@ -1938,6 +1943,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             )
             _record_advisory_review(target, unit_result)
             _keep_replay_handle(target, unit_result)
+            nonlocal recovery_invocation_stop
+            recovery_invocation_stop = (
+                {"subtask_id": target.id, "call_result": unit_result}
+                if execution_role in DEPENDENT_VERIFICATION_PENDING_ROLES and isinstance(unit_result, Mapping)
+                and unit_typed_stop(unit_result) is not None else None
+            )
             return unit_result
 
         # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001: at most ONE run-local handle per unit - its latest refused
@@ -4583,16 +4594,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # ENFORCE-TERMINAL-ENV-REASON-LOST-001 (run 8): the stopping unit's typed stop is the terminal's cause. MEASURED: the unit result said
         # containment_setup_failed with its CONTAINMENT_SETUP_FAILED reason, this aggregate carried neither, and the `.enforce` row said only
         # `failed`. A plan-scope conflict keeps its own terminal (below); a knowledge gap and a commit failure set theirs above.
-        typed_stop = (
-            unit_typed_stop(terminal_unit_stop["call_result"])
-            if terminal_unit_stop is not None and scope_conflict_result is None and knowledge_gap_break is None else None
+        # ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001: a typed stop of the run's LAST invocation, made for an owner inside a recovery, is
+        # what ended the run. It outranks the conflict that recovery was working on (the conflict was not refused: its recovery was cut
+        # short) and the consumer's own earlier result. The recovery itself stays on record in plan_recovery_events.
+        nested_stop = recovery_invocation_stop if knowledge_gap_break is None else None
+        stopping = nested_stop or (
+            terminal_unit_stop if scope_conflict_result is None and knowledge_gap_break is None else None
         )
+        typed_stop = unit_typed_stop(stopping["call_result"]) if stopping is not None else None
         if typed_stop is not None and "failure_type" not in aggregated:
             aggregated["failure_type"] = typed_stop[0]
             aggregated["terminal_cause"] = {
-                "subtask_id": terminal_unit_stop["subtask_id"], "failure_category": typed_stop[0], "reason": typed_stop[1],
+                "subtask_id": stopping["subtask_id"], "failure_category": typed_stop[0], "reason": typed_stop[1],
             }
-        if scope_conflict_result is not None:
+        if scope_conflict_result is not None and nested_stop is None:
             aggregated["failure_type"] = "PLANNING_ERROR"
             aggregated["recovery"] = "PLAN_REPAIR"
             codes = aggregated.setdefault("reason_codes", [])

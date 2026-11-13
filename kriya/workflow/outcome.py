@@ -170,7 +170,10 @@ def terminal_failure_category(state: RunState) -> str:
         None,
     )
     return (
-        "final_review_refused" if state.final_review_refusal is not None
+        # ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001 (run 9): the refused final review names the unit's category only when it is the reason the
+        # unit is not a success - its candidate was applied (quality_gates_succeeded). MEASURED: a unit whose replayed verifier had already failed
+        # its gates was then closed "final_review_refused" because the advisory review of the refused candidate met the exhausted deadline.
+        "final_review_refused" if state.final_review_refusal is not None and state.quality_gates_succeeded
         else "plan_scope_revision_required" if state.plan_scope_conflict
         else "unauthorized_generation_target" if is_scope_defect_stop
         else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure

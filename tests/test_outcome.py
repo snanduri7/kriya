@@ -189,7 +189,15 @@ def test_the_failure_category_ladder_precedence():
     assert terminal_failure_category(_state(plan_scope_conflict=conflict, environment_failure=stop)) == \
         "plan_scope_revision_required"
     assert terminal_failure_category(_state(final_review_refusal=refused, plan_scope_conflict=conflict,
-                                            environment_failure=stop)) == "final_review_refused"
+                                            environment_failure=stop, quality_gates_succeeded=True)) == "final_review_refused"
+    # ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001 (Scenario-A run 9): the refusal outranks everything ONLY because the candidate
+    # was applied. A unit that had already failed keeps its own cause; the advisory review of its refused candidate is not it.
+    assert terminal_failure_category(_state(final_review_refusal=refused, plan_scope_conflict=conflict,
+                                            environment_failure=stop)) == "plan_scope_revision_required"
+    assert terminal_failure_category(_state(final_review_refusal=refused, environment_failure=stop)) == "static_analysis_blocked"
+    assert terminal_failure_category(_state(final_review_refusal=refused, no_progress_terminated=True)) == "no_progress"   # run 9's s5
+    assert terminal_failure_category(_state(final_review_refusal=refused)) == "quality_gates_exhausted"
+    assert terminal_failure_category(_state(final_review_refusal=refused, quality_gates_succeeded=True)) == "final_review_refused"
 
 
 def test_the_failure_report_maps_every_gate_outcome_in_order():

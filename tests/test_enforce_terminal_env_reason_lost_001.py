@@ -8,7 +8,8 @@ Pre-fix characterization (passes on ff23469): ~/kriya-evidence/product-72h-confi
 Reporting only: the lifecycle status, the units' statuses and the plan-repair terminal of a plan-scope conflict are asserted unchanged.
 NOT fixed here: R7-C (ENFORCE-TERMINAL-CATEGORY-FIRST-SCOPE-CONFLICT-001). In run 7 the stopping unit's OWN result carried the plan-scope
 conflict and the typed stop (the generation budget) belonged to an owner invocation inside that unit's recovery: a different first wrong
-decision. The last test below pins what this change does about it: nothing.
+decision. This change did nothing about it; it was closed on 2026-11-13 by ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001
+(tests/test_enforce_terminal_nested_recovery_stop_001.py), which reproduced it model-free together with run 9's nested budget stop.
 """
 import json
 import logging
@@ -123,9 +124,10 @@ async def test_a_typed_stop_of_the_last_invocation_after_a_recovered_conflict_is
 
 
 @pytest.mark.asyncio
-async def test_run7_shape_is_unchanged_r7c_stays_open(tmp_path):
-    """R7-C is NOT fixed by this change: when the owner never fixes it, the stopping unit's own last result carries the conflict and the
-    terminal is the plan-repair one, as before."""
+async def test_a_recovery_cap_exhausted_by_ordinary_owner_failures_is_the_plan_repair_terminal(tmp_path):
+    """When the owner never fixes it and nothing typed ends the run, the stopping unit's own last result carries the conflict and the
+    terminal is the plan-repair one. (R7-C itself - the typed stop of an owner invocation inside the recovery - is closed by
+    ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001, tests/test_enforce_terminal_nested_recovery_stop_001.py.)"""
     shape = r7.Run7Shape(r7.NEVER_FIXED, r7._overflow_until_fixed)
     legacy = (await r7._run(tmp_path, shape)).legacy_result
 
