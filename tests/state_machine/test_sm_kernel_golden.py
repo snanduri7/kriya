@@ -563,3 +563,32 @@ def test_the_pre_r1_reference_is_exactly_the_four_enforce_scenarios_and_no_longe
     form = _form(name, tmp_path)
     assert form == _golden(name)
     assert form != (PRE_R1_DIR / f"{name}.json").read_text(encoding="utf-8")
+
+
+# --- TIME-BUDGET-EXHAUSTED-MODEL-ATTRIBUTION-001 (owner ruling 2026-11-13 after Scenario-A run 9) -----------------------------------------
+# The ONE golden that correction re-recorded: the budget stop's attribution is now RESOURCE_LIMIT / high / "no source file owns it" instead of
+# SOURCE_DEFECT / low / "triage found nothing actionable". The file it replaced is kept in PRE_RUN9_BUDGET_DIR; the delta is pinned below.
+# Hashed contents before and after: ~/kriya-evidence/product-72h-confidence/run9-fixes-2026-11-13/budget-attribution/golden_content.diff.
+PRE_RUN9_BUDGET_DIR = kg.GOLDEN_DIR.parent / "kernel_pre_run9_budget_attribution"
+RUN9_BUDGET_RERECORDED = ("legacy_budget_stop",)
+# (the line's key, digest before, digest after): the diagnosis record's reasoning and payload, and the gate outcome that carries the same fields
+RUN9_BUDGET_DELTA = [
+    ('"attribution_reasoning"', "sha256:529720fc811eddec", "sha256:019fd0947fc19791"),
+    ('"payload"', "sha256:f1bbc081d1bd5eea", "sha256:e1745eae00ba0339"),
+    ('"outcome"', "sha256:d70d91e3560c99b3", "sha256:ac4204196673eccb"),
+]
+
+
+def test_the_budget_stop_golden_differs_from_its_pre_run9_form_only_in_the_attribution_digests(tmp_path):
+    (name,) = RUN9_BUDGET_RERECORDED
+    assert sorted(path.stem for path in PRE_RUN9_BUDGET_DIR.glob("*.json")) == sorted(RUN9_BUDGET_RERECORDED)
+    before = (PRE_RUN9_BUDGET_DIR / f"{name}.json").read_text(encoding="utf-8").splitlines()
+    after = _golden(name).splitlines()
+    assert len(before) == len(after)                                    # nothing added, removed or reordered
+    changed = [(old.strip(), new.strip()) for old, new in zip(before, after, strict=True) if old != new]
+    assert len(changed) == len(RUN9_BUDGET_DELTA)
+    for (old, new), (key, digest_before, digest_after) in zip(changed, RUN9_BUDGET_DELTA, strict=True):
+        assert old.rstrip(",") == f'{key}: "{digest_before}"' and new.rstrip(",") == f'{key}: "{digest_after}"'
+    # negative control: the kept reference is not a second accepted golden - the kernel no longer produces it
+    form = _form(name, tmp_path)
+    assert form == _golden(name) and form != (PRE_RUN9_BUDGET_DIR / f"{name}.json").read_text(encoding="utf-8")

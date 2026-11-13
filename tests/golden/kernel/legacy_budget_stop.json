@@ -577,12 +577,12 @@
     {
      "attempt": 1,
      "content": {
-      "attribution_reasoning": "sha256:529720fc811eddec",
+      "attribution_reasoning": "sha256:019fd0947fc19791",
       "message": "sha256:14443fd49a7faf63",
       "raw_output": "sha256:3ca1a1b150344f37"
      },
      "kind": "diagnosis",
-     "payload": "sha256:f1bbc081d1bd5eea",
+     "payload": "sha256:e1745eae00ba0339",
      "payload_keys": [
       "attempt",
       "attribution_confidence",
@@ -608,7 +608,7 @@
     {
      "attempt": 1,
      "content": {
-      "outcome": "sha256:d70d91e3560c99b3"
+      "outcome": "sha256:ac4204196673eccb"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:d26ccae72a53fea5",

@@ -78,11 +78,13 @@ async def test_a_containment_stop_raised_as_a_gate_failure_bypasses_source_attri
 
 
 def test_the_infrastructure_stop_types_are_a_closed_table_of_the_measured_type_only():
-    """Only what run 8 measured. The two other operational stops keep the label the kernel goldens pin
-    (INFRA-STOP-ATTRIBUTION-SOURCE-DEFECT-LABEL-001, open); candidate types are never in the table."""
+    """Only what run 8 measured. internal_framework_error keeps the label the kernel goldens pin
+    (INFRA-STOP-ATTRIBUTION-SOURCE-DEFECT-LABEL-001, open); candidate types are never in the table. A budget stop is NOT infrastructure either:
+    since run 9 it is RESOURCE_LIMIT (TIME-BUDGET-EXHAUSTED-MODEL-ATTRIBUTION-001, tests/test_time_budget_exhausted_attribution_001.py)."""
     assert INFRASTRUCTURE_STOP_FAILURE_TYPES == frozenset({"containment_setup_failed"})
     assert classify_failure_attribution("containment_setup_failed", "x") is FailureAttributionKind.INFRASTRUCTURE_DEFECT
-    for unchanged in ("internal_framework_error", "time_budget_exhausted", "compile", "run_verification", "general_error",
+    assert classify_failure_attribution("time_budget_exhausted", "x") is FailureAttributionKind.RESOURCE_LIMIT
+    for unchanged in ("internal_framework_error", "compile", "run_verification", "general_error",
                       "static_analysis_blocked", "goal_spec_compliance"):
         assert classify_failure_attribution(unchanged, "x") is FailureAttributionKind.SOURCE_DEFECT
     assert classify_failure_attribution("test", "x") is FailureAttributionKind.TEST_DEFECT

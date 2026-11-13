@@ -44,6 +44,9 @@ class FailureAttributionKind(str, Enum):
     VERIFICATION_CONTRACT_DEFECT = "VERIFICATION_CONTRACT_DEFECT"
     TEST_DEFECT = "TEST_DEFECT"
     INFRASTRUCTURE_DEFECT = "INFRASTRUCTURE_DEFECT"
+    # TIME-BUDGET-EXHAUSTED-MODEL-ATTRIBUTION-001: the run was stopped by a resource/policy limit (its generation budget). Nobody's defect:
+    # not a source file's, not the infrastructure's. Deterministic, no file, no attribution model request.
+    RESOURCE_LIMIT = "RESOURCE_LIMIT"
 
 
 # ENV-FAILURE-TRIAGE-MODEL-CALL-001 (Scenario-A run 8): the typed stop no source file can own. MEASURED: after CONTAINMENT_SETUP_FAILED (docker did
@@ -53,6 +56,12 @@ class FailureAttributionKind(str, Enum):
 # Only the measured type is here. internal_framework_error and time_budget_exhausted take the same default and are NOT changed: their attribution
 # fields are pinned by kernel goldens and no model call was measured for them (INFRA-STOP-ATTRIBUTION-SOURCE-DEFECT-LABEL-001, open).
 INFRASTRUCTURE_STOP_FAILURE_TYPES = frozenset({"containment_setup_failed"})
+
+# TIME-BUDGET-EXHAUSTED-MODEL-ATTRIBUTION-001 (Scenario-A run 9): the typed stops that are a resource/policy termination. MEASURED: with 0.0 s
+# of generation budget left the default below called the stop a SOURCE_DEFECT, the retry strategy built a source-attribution model request
+# (refused at dispatch by the same exhausted deadline) and the diagnosis named a source owner nobody had observed. Owner ruling 2026-11-13: a
+# budget stop is NOT infrastructure and NOT a source defect. internal_framework_error stays out of both tables until characterized on its own.
+RESOURCE_LIMIT_FAILURE_TYPES = frozenset({"time_budget_exhausted"})
 
 
 def classify_failure_attribution(type_: str, message: str = "") -> FailureAttributionKind:
@@ -75,6 +84,8 @@ def classify_failure_attribution(type_: str, message: str = "") -> FailureAttrib
         return FailureAttributionKind.INFRASTRUCTURE_DEFECT
     if type_ in INFRASTRUCTURE_STOP_FAILURE_TYPES:
         return FailureAttributionKind.INFRASTRUCTURE_DEFECT
+    if type_ in RESOURCE_LIMIT_FAILURE_TYPES:
+        return FailureAttributionKind.RESOURCE_LIMIT
     if type_ in ("plan_scope_conflict", "ambiguous_planned_file_ownership"):
         return FailureAttributionKind.PLAN_SCOPE_DEFECT
     if type_ in (

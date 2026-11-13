@@ -1099,6 +1099,16 @@ async def _record_attempt_failure(
                 "managed_service_outcome": diagnostics.get("managed_service_outcome"),
                 "required_files": [],
             }
+        elif attribution_kind is FailureAttributionKind.RESOURCE_LIMIT:
+            # TIME-BUDGET-EXHAUSTED-MODEL-ATTRIBUTION-001: the budget is authoritatively exhausted. The attribution is decided here, with no
+            # file and no model request (run 9 built one with 0 ms left; the deadline refused it and a source owner was recorded anyway).
+            attribution = AttributionResult(
+                tier="full_set", files=[], confidence="high",
+                reasoning=(
+                    f"{attribution_kind.value} is a resource/policy termination of the run; no source file owns it and "
+                    "source-file attribution is not performed."
+                ),
+            )
         elif attribution_kind in (
             FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT,
             FailureAttributionKind.INFRASTRUCTURE_DEFECT,
