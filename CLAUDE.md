@@ -53,7 +53,7 @@ The user is quota-conscious in this repo specifically — apply these by default
 
 ## Backlog registry
 
-`handover/BACKLOG_REGISTRY.csv` is the one canonical registry for open and deferred items. Each row carries `id, priority, status, discovered_in, target_scope, blocking, closure_evidence`. `handover/TASK_STATUS_TRACKER.csv` holds tasks only and never duplicates a registry item. Other docs reference the registry for status. A batch may not close with a newly found P2/P3 missing `target_scope`, and an open P0/P1 is worked, never parked there (`tests/test_backlog_registry.py`).
+`handover/BACKLOG_REGISTRY.csv` is the one canonical registry for open and deferred items. Each row carries `id, priority, status, discovered_in, target_scope, blocking, closure_evidence`. `handover/TASK_STATUS_TRACKER.csv` holds tasks only and never duplicates a registry item. Other docs reference the registry for status. A batch may not close with a newly found P2/P3 missing `target_scope`, and a P0/P1 that is not closed is recorded as P0/P1 with status `ACTIVE` (worked now), never `OPEN`/`DEFERRED` and never under a lower priority (`tests/test_backlog_registry.py`).
 
 ## Mandatory quality bar (every change, every session — standing user directive, 2026-09-26)
 
