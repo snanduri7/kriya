@@ -137,7 +137,9 @@ async def test_f1_residual_a_rerun_whose_environment_cannot_be_prepared_stops_ty
     launched = _app_launched(stub.commands)
     assert len(launched) == 1 and launched[0][0] == ".kriya/venv/bin/python", stub.commands
     created_at = [i for i, command in enumerate(stub.commands) if command in _venv_attempted(stub.commands)]      # positions, the two creation commands are equal lists
-    assert len(created_at) == 2 and created_at[0] < stub.commands.index(launched[0]) < created_at[1]
+    # PYTHON-VENV creation retry (ffcbebac, "one bounded retry from nothing and still fails closed"): the failing creation of the re-run is attempted
+    # exactly once more, immediately, and then stops - three creation commands in all, never a fourth. (This pin predates that commit; found 2026-11-13.)
+    assert len(created_at) == 3 and created_at[0] < stub.commands.index(launched[0]) < created_at[1] and created_at[2] == created_at[1] + 1
     # The invariant.
     failure = raised.value.failure
     assert failure.type == INFRA, (failure.type, failure.message[:300])

@@ -26,6 +26,7 @@ from _strict_doubles import developer_double
 from test_workflow import _runtime_verifier_ctx
 
 from kriya.config.config import AutonomyConfig
+from kriya.config.environment import PROJECT_PYTHON_INTERPRETER
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.acceptance import RUNTIME_PREREQUISITE_BUILD_FAILED, runtime_verification_infrastructure_reason
 from kriya.workflow.attempt import run_attempt
@@ -157,8 +158,12 @@ def test_the_prerequisite_build_is_bounded_by_the_runs_root_deadline(tmp_path):
 def test_an_interpreted_python_runtime_gets_no_build_prerequisite(tmp_path):
     (tmp_path / "app.py").write_text("print('PY_RAN')\n")
     validator = _validator(tmp_path)
+    # 0a188e9 (effective-argv authority, owner-approved): the validator runs the EFFECTIVE argv it is given and refuses an interpreter launcher typed
+    # (EFFECTIVE_ARGV_NOT_RESOLVED, pinned below). This test predates that commit and passed a launcher; found red 2026-11-13.
     with patch.object(validator, "run_compile_check", side_effect=AssertionError("no compile for Python")):
-        result = validator.run_app_sequence([[sys.executable, "app.py"]])
+        result = validator.run_app_sequence([[PROJECT_PYTHON_INTERPRETER, "app.py"]])
+        launcher = validator.run_app_sequence([[sys.executable, "app.py"]])
+    assert launcher["success"] is False and "EFFECTIVE_ARGV_NOT_RESOLVED" in launcher["output"]
     assert result["success"] and "PY_RAN" in result["output"] and result["runtime_prerequisite"] is None
 
 

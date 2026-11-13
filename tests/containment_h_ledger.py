@@ -112,7 +112,7 @@ LEDGER: Dict[str, Entry] = {
     "tests/test_oi142_gate_view.py::test_a_changed_venv_is_recreated_not_reused": _e(
         "a HOST venv is sealed and a changed one is recreated (venv_integrity)", [VALIDATOR, OPT_OUT],
         ["tests/test_oi142_gate_view_oci.py::test_under_oci_a_gate_cannot_modify_the_project_venv",
-         "tests/test_s3_execution_views.py::test_the_origin_venv_is_mounted_into_the_view_read_only_and_writable_only_when_asked"],
+         "tests/test_s3_execution_views.py::test_the_scopes_venv_source_is_mounted_into_the_view_read_only_and_writable_only_when_asked"],   # renamed by 48b1fad (PYTHON-VENV-SOURCE-REUSE-001): the same read-only mount, of the scope-owned source
         why="the contained venv is mounted READ-ONLY into every gate (writable only for creation and install), so a changed venv cannot exist; the host seal is the weaker control"),
     POLY + "test_java_home_override_also_applies_under_sandbox_execution": _e(
         "a goal-stated JDK is forced onto host subprocesses via JAVA_HOME", [VALIDATOR, OPT_OUT], [GOAL_JDK]),

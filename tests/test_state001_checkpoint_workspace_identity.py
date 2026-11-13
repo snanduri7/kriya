@@ -460,7 +460,11 @@ def test_run_structured_enforce_uses_persist_control_state_closure_everywhere():
     # raw save_control_state stays exactly 1 (inside the closure).
     # Wave 2 Slice A (ff7a458): 13 -> 14: a TOOL subtask's terminal failure record is saved durably (durable=True) through the same closure, so a failed attempt is never retried unseen;
     # the count was not updated with that commit (found by the W2-04 adjacent gate, 2026-10-28).
-    assert persist_calls == 14, persist_calls
+    # 14 -> 16 (0690600, RECOVERY-SHARED-DECISION-PARTICIPANTS-CANNOT-MAY-CHANGE-001): the MAY_CHANGE recovery saves the reopened participant state and the
+    # state after its answer; 16 -> 18 (0401d22, ENFORCE-RECOVERY-CONVERGENCE-001): the invalidation of completed dependents and the dependent
+    # reverification result. All four go through the closure (raw stays 1, asserted above); the count was not updated with either commit (git blame of
+    # the 18 call sites, 2026-11-13: e162d52 x7, 245e94d x4, 4a875a2 x2, ff7a458 x1, 0690600 x2, 0401d22 x2).
+    assert persist_calls == 18, persist_calls
 
 
 # ---------------------------------------------------------------------------

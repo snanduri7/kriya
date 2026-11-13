@@ -299,11 +299,11 @@ def test_enforce_paths_are_unchanged_by_the_recorder(tmp_path, monkeypatch, scen
         assert statuses["s0"] == "completed"
     if scenario == "enforce_tool_subtask_failed":
         assert statuses == {"s0": "failed"}
+    # ENFORCE-TERMINAL-REQUIREMENT-TRUTH-001 (R1, 6d9bfe0): every enforce terminal writes its own .enforce trace row, so the tool-failed plan (no generation
+    # unit ran) carries the pointer event too - exactly one row. This used to pin "no trace row"; the pin predates R1 and was found red 2026-11-13.
     if scenario == "enforce_tool_subtask_failed":
-        # No generation unit ran, so no trace row carries the pointer event;
-        # the store itself is checked below.
-        assert all(observed["_pointers"] == [] for observed in observations.values())
-    else:
+        assert all(len(observed["_pointers"]) == 1 for observed in observations.values())
+    if True:
         assert {p["status"] for p in observations["full"]["_pointers"]} == {"OPEN"}
         assert {p["status"] for p in observations["open_fails"]["_pointers"]} == {"RECORDER_UNAVAILABLE"}
     full_runs = reader.list_runs(observations["full"]["_state"])

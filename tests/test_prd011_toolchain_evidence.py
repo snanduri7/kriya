@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from kriya.config import AppConfig
+from kriya.config.environment import PROJECT_PYTHON_INTERPRETER
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.state_paths import trace_db_path
@@ -88,8 +89,12 @@ def test_app_sequence_result_carries_the_attested_identity(tmp_path):
     cfg.autonomy.containment_backend = "oci"
     (tmp_path / "app.py").write_text("print(1)\n")
     validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=cfg.autonomy)
+    # 0a188e9 (effective-argv authority, owner-approved): the validator runs the EFFECTIVE argv it is given and refuses an interpreter launcher typed
+    # (EFFECTIVE_ARGV_NOT_RESOLVED, pinned below). This test predates that commit and passed a launcher; found red 2026-11-13.
     with patch("kriya.tools.validate.ProcessController.run", side_effect=_contained_run):
-        result = validator.run_app_sequence([["python3", "app.py"]])
+        result = validator.run_app_sequence([[PROJECT_PYTHON_INTERPRETER, "app.py"]])
+        launcher = validator.run_app_sequence([["python3", "app.py"]])
+    assert launcher["success"] is False and "EFFECTIVE_ARGV_NOT_RESOLVED" in launcher["output"]
     assert result["success"] is True
     assert result["toolchain_identity"] == ATTESTED
     assert result["steps"][0]["toolchain_identity"] == ATTESTED

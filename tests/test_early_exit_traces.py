@@ -142,6 +142,10 @@ IDENTITY = {"milestone_group_id": "mg-e5", "milestone_index": 2, "milestone_tota
 NO_IDENTITY = {key: None for key in IDENTITY}
 # what every run records before its first stage (the goal derives requirements; the contract is sealed)
 SEALED = OPENING_EVENTS + ["verification_contract.sealed"]
+# CURRENT PROJECT VIEW (owner ruling 2026-11-07 Phase B, c4531ce; bisected 2026-11-13: these six pins fail from c4531ce on, by exactly this one kind):
+# every run that reaches work-unit analysis records the view it built for the Planner. The knowledge-gap exit stops BEFORE analysis and keeps SEALED -
+# the control that the event belongs to analysis and is not a new opening event.
+VIEWED = SEALED + ["project_view.built"]
 
 
 @pytest.fixture
@@ -199,7 +203,7 @@ def test_the_baseline_indeterminate_stop_writes_the_short_row(tmp_path, _git_ide
         "failure_category": "baseline_indeterminate"}      # W3-6: the category the short row below records
     [row] = _rows(outcome.cfg)
     assert row["run_id"] == res["run_id"] and kwargs == [SHORT_ROW_KWARGS] and row["failure_category"] == res["failure_category"]
-    assert _short_row(row) == _expected_row(kg.GOAL, "baseline_indeterminate", "baseline_indeterminate", IDENTITY, SEALED + [
+    assert _short_row(row) == _expected_row(kg.GOAL, "baseline_indeterminate", "baseline_indeterminate", IDENTITY, VIEWED + [
         "requirement.lineage", "requirement.lineage", "validation_baseline.policy",
         "validation_baseline.full_regression_source", "model.role_metrics"])
     assert outcome.extra["model_calls"]["developer"] == 0 and outcome.extra["approvals"] == []
@@ -217,7 +221,7 @@ def test_the_worktree_sync_refusal_writes_the_short_row(tmp_path, _git_identity)
         "files": [], "quality_gates_passed": False}
     [row] = _rows(outcome.cfg)
     assert row["run_id"] == res["run_id"] and kwargs == [SHORT_ROW_KWARGS]
-    assert _short_row(row) == _expected_row(kg.GOAL, "failure", "worktree_sync_failed", IDENTITY, SEALED + [
+    assert _short_row(row) == _expected_row(kg.GOAL, "failure", "worktree_sync_failed", IDENTITY, VIEWED + [
         "requirement.lineage", "requirement.lineage", "validation_baseline.policy", "model.role_metrics"])
     assert outcome.extra["model_calls"]["developer"] == 0 and outcome.extra["approvals"] == []
     assert [c["stage"] for c in outcome.extra["checkpoints"]] == ["design"]
@@ -239,13 +243,13 @@ def test_the_knowledge_gap_stop_writes_the_short_row_with_the_run_identity(tmp_p
 
 DESIGN_STAGE_EXITS = {
     "knowledge_gap": (dict(goal=kg.STAGE_LIBRARY_GOAL), SEALED + ["model.role_metrics"]),
-    "planner_output_incomplete": (dict(planner=lambda n: ""), SEALED + ["model.role_metrics"]),
-    "planner_output_unauthorized_path": (dict(planner=lambda n: kg._escaping_plan()), SEALED + ["model.role_metrics"]),
-    "planner_output_schema_invalid": (dict(planner=lambda n: kg._schema_invalid_plan()), SEALED + [
+    "planner_output_incomplete": (dict(planner=lambda n: ""), VIEWED + ["model.role_metrics"]),
+    "planner_output_unauthorized_path": (dict(planner=lambda n: kg._escaping_plan()), VIEWED + ["model.role_metrics"]),
+    "planner_output_schema_invalid": (dict(planner=lambda n: kg._schema_invalid_plan()), VIEWED + [
         "structured_plan_validation", "structured_plan_repair_requested", "structured_plan_repair_result",
         "structured_plan_validation", "structured_plan_repair_requested", "structured_plan_repair_result",
         "model.role_metrics"]),
-    "architect_file_list_rejected": (dict(architect=lambda n: json.dumps({"files": ["../outside/evil.py"]})), SEALED + [
+    "architect_file_list_rejected": (dict(architect=lambda n: json.dumps({"files": ["../outside/evil.py"]})), VIEWED + [
         "requirement.lineage", "requirement.lineage", "plan.file_list_entries_rejected", "model.role_metrics"]),
 }
 

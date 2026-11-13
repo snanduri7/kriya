@@ -314,7 +314,11 @@ async def test_enforce_reopens_the_resource_owner_for_exactly_that_file(tmp_path
     result, calls = await _run_controller(tmp_path, "<beans/>")
     assert result.legacy_result["status"] == "success", result.legacy_result
     assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
-    assert [c["allowed_write_relpaths"] for c in calls] == [["pom.xml"], [CONFIG], [APP], [], [CONFIG], []]
+    # ENFORCE-RECOVERY-CONVERGENCE-001 (R4, 0401d22; this pin predates it and was not in a focused gate): s3 completed on s2's OLD config, so the
+    # accepted recovery of s2 invalidates it and it is re-entered ONCE as a dependent reverification, over its own file only.
+    assert [c["allowed_write_relpaths"] for c in calls] == [["pom.xml"], [CONFIG], [APP], [], [CONFIG], [], [APP]]
+    assert [(c["current_subtask_id"], c["execution_scope"].rsplit("role=", 1)[-1]) for c in calls[4:]] == [
+        ("s2", "owner_recovery"), ("s4", "consumer_retry"), ("s3", "dependent_reverification")]
     event = result.legacy_result["plan_recovery_events"][0]
     assert (event["failed_subtask"], event["reopened_owner"], event["required_repair_files"]) == ("s4", "s2", [CONFIG])
 

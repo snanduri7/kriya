@@ -160,9 +160,17 @@ def test_the_validator_has_no_host_env_and_preexec_policy_and_its_one_spawn_is_c
     assert not {"build_subprocess_env_and_preexec", "host_resource_plan"} & defined
     node = _function("kriya/tools/validate.py", "PolymorphicValidator._run_cmd_with_timeout")
     runs = [call for call in ast.walk(node) if isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "run"]
-    assert len(runs) == 1, "exactly one spawn in the validator's command runner"
-    assert {"containment_profile", "containment_backend"} <= {kw.arg for kw in runs[0].keywords}
-    assert not {"env", "preexec_fn"} & {kw.arg for kw in runs[0].keywords}, "a host environment is passed again"
+    # BIND-SOURCE-RELAUNCH-001 (owner ruling 2026-11-11, 334da9a; this pin predates it and was in no focused gate): the runner has the launch and its ONE
+    # relaunch of the SAME contained command - two spawn sites, never more, both contained, the second only under the typed relaunch record.
+    assert len(runs) == 2, "exactly the launch and its one bind-source relaunch in the validator's command runner"
+    for run in runs:
+        assert {"containment_profile", "containment_backend"} <= {kw.arg for kw in run.keywords}
+        assert not {"env", "preexec_fn"} & {kw.arg for kw in run.keywords}, "a host environment is passed again"
+    assert [ast.unparse(kw.value) for kw in runs[0].keywords if kw.arg != "timeout"] == [ast.unparse(kw.value) for kw in runs[1].keywords if kw.arg != "timeout"], \
+        "the relaunch is the same launch (only its timeout is what remains)"
+    [guard] = [branch for branch in ast.walk(node) if isinstance(branch, ast.If) and ast.unparse(branch.test) == "recovery is not None"
+               and any(call in ast.walk(branch) for call in runs)]
+    assert runs[1] in ast.walk(guard) and runs[0] not in ast.walk(guard), "the second spawn exists only under the typed relaunch record"
     assert "ContainmentSetupError" in _names(node), "a missing profile/backend is the typed refusal"
 
 

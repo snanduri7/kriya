@@ -1963,6 +1963,149 @@
       }
      ],
      "short_help": null
+    },
+    "log": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Read-only KUP: one bounded page of a run's real, redacted application log (<log dir>/runs/<run id>/kriya.log); the cockpit's Kriya Log.",
+     "hidden": false,
+     "name": "log",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "With --json: wrap the result in a KUP envelope of this schema version (1). Run Cockpit v1.1.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "kup_version",
+       "nargs": 1,
+       "opts": [
+        "--kup-version"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Page size (default 200, maximum 500).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "limit",
+       "nargs": 1,
+       "opts": [
+        "-n",
+        "--limit"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "The next_cursor of the previous page.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "cursor",
+       "nargs": 1,
+       "opts": [
+        "--cursor"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
     }
    },
    "deprecated": false,

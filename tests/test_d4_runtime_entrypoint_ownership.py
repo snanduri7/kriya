@@ -336,7 +336,12 @@ async def test_enforce_reopens_the_pom_owner_only_for_pom_and_reverifies(tmp_pat
         ["pom.xml"], [SOURCE], [],  # s1, s2, s3 (verification-only: owns nothing)
         ["pom.xml"],  # s1 reopened for exactly the implicated file
         [],  # s3 re-verified with its own, still empty scope
+        # ENFORCE-RECOVERY-CONVERGENCE-001 (R4, 0401d22; this pin predates it and was not in a focused gate): s2 completed on s1's OLD pom, so the
+        # accepted recovery of s1 invalidates it and it is re-entered ONCE as a dependent reverification, over its own file only.
+        [SOURCE],
     ]
+    assert [(c["current_subtask_id"], c["execution_scope"].rsplit("role=", 1)[-1]) for c in calls[3:]] == [
+        ("s1", "owner_recovery"), ("s3", "consumer_retry"), ("s2", "dependent_reverification")]
     event = result.legacy_result["plan_recovery_events"][0]
     assert (event["failed_subtask"], event["reopened_owner"], event["required_repair_files"]) == ("s3", "s1",
                                                                                                   ["pom.xml"])

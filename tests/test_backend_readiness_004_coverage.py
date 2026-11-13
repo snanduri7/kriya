@@ -242,7 +242,9 @@ def test_09_coverage_added_after_sealing_changes_the_contract_and_the_compiler_i
     first, again = _compile(reqs, COMPOUND, one), _compile(reqs, COMPOUND, one)
     assert first.digest == again.digest and first.to_dict() == again.to_dict()  # retry/fallback: same bindings
     assert first.digest != _compile(reqs2, COMPOUND, two).digest  # a bundle with more coverage is another contract
-    assert first.identity_payload()["compiler_version"] == 3  # BACKEND-FINAL-CLOSURE-005: FILE_IMMUTABILITY
+    # 4: REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001 (e4e2e48) - the FILE_CREATION claim and the RUNTIME_STDOUT binding; the version was bumped on
+    # purpose (contract_compilation.CONTRACT_COMPILER_VERSION, "every /3 contract is stale by design") and this pin was not updated with it (found 2026-11-13).
+    assert first.identity_payload()["compiler_version"] == 4
 
 
 # ---------------------------------------------------------------- baseline with several bindings on one claim

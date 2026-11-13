@@ -183,9 +183,11 @@ def test_a_milestone_whose_final_review_is_refused_keeps_earlier_commits_and_fai
 
 
 @pytest.mark.asyncio
-async def test_an_enforce_subtask_whose_final_review_is_refused_fails_typed_and_commits_nothing(tmp_path):
-    """Enforce subtasks run in the plan workspace; the live workspace changes
-    only at the terminal commit, which a failed subtask never reaches."""
+async def test_an_enforce_subtask_whose_final_review_is_refused_is_accepted_on_its_gates_and_reported_as_not_reviewed(tmp_path):
+    """ENFORCE-UNIT-ADVISORY-REVIEW-ACCEPTANCE-001 (audit root R2, 9c7cf00) replaced this test's original contract ("fails typed and commits
+    nothing"): in an enforce plan a unit is accepted on its DETERMINISTIC gates, and a final review that was not performed decides nothing - it is
+    reported, never shown as reviewed work. The 001C part that survives: the refusal is not retried, keeps its reason code, and the plan-worktree
+    refusal record never surfaces at the top level. (This pin predates R2 and was in no focused gate; found red by the full suite of 2026-11-13.)"""
     from test_auth_goal_contamination_001 import _plan_copying
     from test_workflow_controller import _workflow_engine
 
@@ -216,12 +218,14 @@ async def test_an_enforce_subtask_whose_final_review_is_refused_fails_typed_and_
         outcome = await WorkflowController(engine).execute("create a.py", str(workspace), migration_mode="enforce")
 
     legacy = outcome.legacy_result or {}
-    assert legacy.get("quality_gates_passed") is False and legacy.get("status") != "success"
+    assert legacy.get("quality_gates_passed") is True and legacy.get("status") == "success"
     assert engine.run_generation_workflow.await_count == 1  # not retried
     [subtask] = [r for r in legacy["subtask_results"] if r["subtask_id"] == "s1"]
-    assert subtask["status"] == "failed" and CONTEXT_BUDGET_UNSATISFIABLE in subtask["reason_codes"]
-    assert "final review not performed" in subtask["error"]
-    assert not (workspace / "a.py").exists()  # nothing reached the live workspace
+    assert subtask["status"] == "completed" and subtask["reason_codes"] == ["ADVISORY_REVIEW_NOT_PERFORMED", CONTEXT_BUDGET_UNSATISFIABLE]
+    assert legacy["advisory_reviews_not_performed"] == [{
+        "subtask_id": "s1", "execution_role": "unit", "reason_code": CONTEXT_BUDGET_UNSATISFIABLE,
+        "detail": "CONTEXT_BUDGET_UNSATISFIABLE: refused", "review_performed": False}]
+    assert (workspace / "a.py").read_text(encoding="utf-8") == "# generated\n"  # the accepted unit's work is committed
     # The plan-worktree refusal never surfaces at the top level, where the
     # CLI would read candidate_applied as the live workspace.
     assert "final_review_refusal" not in legacy

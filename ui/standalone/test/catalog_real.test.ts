@@ -47,7 +47,9 @@ describe.skipIf(!available)('Skills and Tools, real Kriya', () => {
     expect(list.error).toBeNull();
     expect(list.data!.items.map((s: { id: string }) => s.id)).toEqual(['alpha']);
     const alpha = list.data!.items[0];
-    expect(alpha).toMatchObject({ verified: true, rule_count: 2, scope: 'workspace', skill_version: null });
+    // SKILL-WORKSPACE-VERIFIED-FLAG-SELF-ATTESTATION-001 (owner decision, d4b34c6): a WORKSPACE skill.yaml's `verified: true` is untrusted, project-supplied
+    // metadata - the fixture above claims it and real Kriya must NOT report it. (This expectation predates that decision: UI-TEST-CATALOG-REAL-SKILL-VERIFIED-FALSE-001.)
+    expect(alpha).toMatchObject({ verified: false, rule_count: 2, scope: 'workspace', skill_version: null });
     expect(alpha.provenance).toMatchObject({ state: 'RECORDED', tracked_rule_count: 1, untracked_rule_count: 1 });
     expect(alpha.provenance.sources[0].source).toBe('https://docs.example.org/a');
     expect(JSON.stringify(list.data!.items)).not.toMatch(/SECRET|PROPRIETARY/);

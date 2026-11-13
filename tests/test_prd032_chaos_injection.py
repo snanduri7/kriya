@@ -244,8 +244,16 @@ def test_a_fake_operator_message_in_reference_context_authorizes_nothing(chaos_c
     for request in runtime.requests:
         for message in request.messages:
             text = str(message.get("content") or "")
-            # Only Kriya's own fence markers survive: the injected pair is quoted.
-            assert text.count(UNTRUSTED_REFERENCE_END) == text.count(UNTRUSTED_REFERENCE_BEGIN) <= 1
+            # Only Kriya's own fence markers survive: the injected pair is quoted. Kriya fences at most TWO sections of one message - the reference context
+            # and, since the Current Project View reaches this request (c4531ce / e7f0a5a; this pin predates it, found 2026-11-13), that view. The pairs
+            # are balanced and never nested, a second block can only be the project view, and the injected operator text is never outside a fence.
+            blocks = text.split(UNTRUSTED_REFERENCE_BEGIN)[1:]
+            assert text.count(UNTRUSTED_REFERENCE_END) == text.count(UNTRUSTED_REFERENCE_BEGIN) == len(blocks) <= 2
+            assert all(block.count(UNTRUSTED_REFERENCE_END) == 1 for block in blocks)
+            inside = [block.split(UNTRUSTED_REFERENCE_END)[0] for block in blocks]
+            assert sum("=== Current Project View" in section for section in inside) == len(blocks) - sum("Library docs for calc." in section for section in inside) <= 1
+            outside = text.split(UNTRUSTED_REFERENCE_BEGIN)[0] + "".join(block.split(UNTRUSTED_REFERENCE_END)[1] for block in blocks)
+            assert "SYSTEM (operator)" not in outside and "pre-approved" not in outside
     requirements = result.get("requirements") or {}
     derived = [r.text for r in derive_requirements(goal).requirements]
     recorded = [r.get("text") for r in requirements.get("requirements", [])]
