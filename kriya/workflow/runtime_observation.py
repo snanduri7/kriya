@@ -31,6 +31,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from kriya.config.environment import PROJECT_PYTHON_INTERPRETER
 from kriya.foundation.redaction import redact_text
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 NO_APPLICATION_RUN = "NO_APPLICATION_RUN"
 CANDIDATE_NOT_STAMPED = "CANDIDATE_NOT_STAMPED"
@@ -61,7 +62,7 @@ def candidate_files_digest(root: str, paths: Iterable[str]) -> str:
         full = os.path.join(root, relpath)
         data: bytes
         try:
-            if os.path.islink(full) or not os.path.realpath(full).startswith(real_root + os.sep):
+            if os.path.islink(full) or path_relation(real_root, full) is not PathRelation.WITHIN:
                 data = _UNREADABLE
             elif not os.path.isfile(full):
                 data = _ABSENT

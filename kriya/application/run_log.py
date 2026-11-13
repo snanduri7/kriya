@@ -91,7 +91,9 @@ def read_run_log(log_directory: str, run_id: str, offset: int = 0, limit: int = 
     runs_root = os.path.realpath(os.path.join(log_directory, "runs"))
     path = os.path.join(runs_root, run_id, "kriya.log")
     real = os.path.realpath(path)
-    if os.path.commonpath([runs_root, real]) != runs_root or os.path.dirname(os.path.dirname(real)) != runs_root:
+    # exactly <runs root>/<one directory>/<file>: the resolved log's grandparent IS the runs root, so a link out of runs/ (the file or its run directory) is
+    # refused. (A lexical commonpath test stood beside this and added nothing - PLAT-PATH-CONTAINMENT-001 forbids the idiom; removed 2026-11-13.)
+    if os.path.dirname(os.path.dirname(real)) != runs_root:
         return _unavailable(run_id, RUN_LOG_UNREADABLE)
     try:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))

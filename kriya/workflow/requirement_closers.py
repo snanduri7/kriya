@@ -23,6 +23,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.acceptance_oracle import bound_acceptance
 from kriya.workflow.validation_baseline import _capture_single_baseline
@@ -496,7 +497,7 @@ def close_requirements_by_file_creation(
     def present(path: str) -> bool:
         full = os.path.join(candidate_root, path)
         return (not os.path.islink(full) and os.path.isfile(full)
-                and os.path.realpath(full).startswith(real_root + os.sep))
+                and path_relation(real_root, full) is PathRelation.WITHIN)
 
     return close_file_creation_requirements(
         ledger, requirement_set, contract, created_paths=created_paths, present=present,

@@ -468,3 +468,50 @@ def test_observed_output_is_capped_redacted_and_flags_lost_output(tmp_path):
     assert observed_run_output([{"attempt": 1, "type": "test", "success": True, "steps": [_step(["pytest"])]}], 1) is None
     assert observed_run_output([{"attempt": 1, "type": "run_verification", "success": True, "graded_by": "managed_service_probe",
                                  "steps": [_step(["x"])]}], 1) is None
+
+
+# ---------------------------------------------------------------------------------------------------------------- PLAT-PATH-CONTAINMENT-001 (PLAT-018)
+# Both sites decided containment by a lexical prefix (flagged by tests/test_backend_readiness_004_platform_paths.py since e4e2e48, found 2026-11-13);
+# they now ask kriya.platform.filesystem_semantics.path_relation. The leaf-symlink guard never covered a path that leaves the root through a linked PARENT.
+
+def _escaping_parent(tmp_path, root):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "hello.py").write_text("x\n")
+    os.symlink(str(outside), os.path.join(root, "pkg"))
+
+
+def test_a_created_file_reached_through_a_linked_parent_outside_the_candidate_does_not_close(tmp_path):
+    inside = _candidate(tmp_path)
+    os.mkdir(os.path.join(inside, "pkg"))
+    with open(os.path.join(inside, "pkg", "hello.py"), "w", encoding="utf-8") as handle:
+        handle.write("x\n")
+    entries, outcomes = _creation("Create pkg/hello.py.\n", inside, ["pkg/hello.py"])
+    assert entries[0]["closed"] is True and outcomes["REQ-1"] is RequirementOutcome.CLOSED_BY_EVIDENCE          # the positive control: inside the root
+
+    (tmp_path / "second").mkdir()
+    escaping = _candidate(tmp_path / "second")
+    _escaping_parent(tmp_path, escaping)
+    assert os.path.isfile(os.path.join(escaping, "pkg", "hello.py")) and not os.path.islink(os.path.join(escaping, "pkg", "hello.py"))
+    entries, outcomes = _creation("Create pkg/hello.py.\n", escaping, ["pkg/hello.py"])
+    assert entries[0]["closed"] is False and outcomes["REQ-1"] is RequirementOutcome.UNVERIFIED
+
+
+def test_the_candidate_digest_never_reads_bytes_through_a_linked_parent_outside_the_root(tmp_path):
+    inside = _candidate(tmp_path)
+    os.mkdir(os.path.join(inside, "pkg"))
+    with open(os.path.join(inside, "pkg", "hello.py"), "w", encoding="utf-8") as handle:
+        handle.write("x\n")
+    (tmp_path / "second").mkdir()
+    escaping = _candidate(tmp_path / "second")
+    _escaping_parent(tmp_path, escaping)                                                   # the same bytes, outside the root
+    (tmp_path / "third").mkdir()
+    linked = _candidate(tmp_path / "third")
+    os.mkdir(os.path.join(linked, "pkg"))
+    os.symlink(str(tmp_path / "outside" / "hello.py"), os.path.join(linked, "pkg", "hello.py"))   # the leaf link: the marker an unreadable path contributes
+
+    real = candidate_files_digest(inside, ["pkg/hello.py"])
+    assert candidate_files_digest(escaping, ["pkg/hello.py"]) == candidate_files_digest(linked, ["pkg/hello.py"]) != real
+    with open(os.path.join(tmp_path, "outside", "hello.py"), "w", encoding="utf-8") as handle:
+        handle.write("changed outside\n")
+    assert candidate_files_digest(escaping, ["pkg/hello.py"]) == candidate_files_digest(linked, ["pkg/hello.py"])   # outside bytes are never part of it
