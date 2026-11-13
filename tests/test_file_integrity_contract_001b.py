@@ -100,6 +100,9 @@ CANDIDATE_BYTE_SOURCES = {
     "_restore_api_contract_owners_deterministically(": "deterministic recovery: the owner's captured baseline",
     "[{'filepath': fp, 'content': content} for fp, content in (ctx.resume_state.get('final_files')":
         "resume: the checkpoint's verified candidate (STATE-001 binding)",
+    # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001 (R7-B; classified late - this audit was not in a focused gate): a verifier replay stages the
+    # unit's OWN refused candidate, carried in memory and digest-checked before and after staging (verifier_replay.ReplayHandle, staged_bytes_mismatch).
+    "ctx.carried_candidate.generated_files()": "verifier replay: the unit's own refused candidate, exact bytes bound by raw digest",
     "normalized_files": "path normalization of the entries above (no new bytes)",
     "list(deduped.values())": "de-duplication of the entries above (no new bytes)",
     "{'filepath': expected_path, 'content': cumulative_content, '_kriya_carried_forward_content': True}":
