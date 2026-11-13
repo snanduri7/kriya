@@ -145,6 +145,10 @@ class _NoGateRoot:
     """A stand-in validator that has no execution root to view (it never runs a command): the OI-142 scope hooks `_verification_gate` calls are
     no-ops, so these tests keep exercising the recorder (`gate.result`) alone."""
 
+    # BIND-SOURCE-RELAUNCH-001 (334da9a) added this validator attribute, which `_verification_gate` reads after every gate; this stand-in is not a
+    # PolymorphicValidator, so it did not inherit the class default and the one test whose gate RETURNS raised AttributeError (found 2026-11-13).
+    _bind_source_recovery = None
+
     @contextlib.contextmanager
     def dependency_cache_scope(self):  # R3: every gate opens a dependency scope; a validator that runs nothing has no layers to create
         yield

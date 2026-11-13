@@ -425,6 +425,10 @@ def test_only_module_and_session_scoped_fixtures_call_mktemp_directly_everything
         'conftest.py:"cwd"',                                                       # released through _RELEASE_AFTER_PASS
         'conftest.py:"docker-worker-contract"',                                    # session-scoped, only with KRIYA_DOCKER_WORKER_CONTRACT set (TEST-DOCKER-WORKER-CONTRACT-001)
         'test_greenfield_direct_plan_runtime.py:"direct"',                         # module-scoped approved_run
+        # TEST-HARNESS-STATE-PATHNAME-REUSE-001 (e195b21) validity control: it calls pytest's own allocation twice ON PURPOSE (to prove the reuse the
+        # harness fix removes) and removes both directories itself before it returns - nothing is left to release. Listed 2026-11-13.
+        'test_harness_state_pathname_reuse_001.py:"reuse-validity"',
+        'test_harness_state_pathname_reuse_001.py:"reuse-validity"',
         'test_prd034_python_wheels.py:"venv"',                                     # module-scoped fresh_venv
     ]), callers
 

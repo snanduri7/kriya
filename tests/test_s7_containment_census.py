@@ -171,6 +171,11 @@ def test_the_stand_in_proves_no_isolation_so_isolation_claims_stay_with_real_oci
 
 def _offline_run(view: Path, command, monkeypatch):
     monkeypatch.setenv("PIP_NO_INDEX", "1")              # a real pip would fail here: the only registry it could use is unreachable
+    # The canonical runner (scripts/run_full_suite.py) exports PYTHONPATH=<repository root> for child processes, and the stand-in runs the command as a host
+    # process with the inherited environment (a real container inherits none of it). Left in place it made `import kriya` succeed in the project venv, so
+    # the "nothing else leaks" check below failed under the full suite ONLY (MEASURED 2026-11-13: fails with PYTHONPATH set, passes without, on every
+    # revision back to the branch point). What is under test is the stand-in's own site wiring, so the runner's variable is removed for these commands.
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     monkeypatch.setenv("PIP_INDEX_URL", "http://127.0.0.1:9/simple")
     return ProcessController().run(command, cwd=str(view), timeout=120, containment_profile=_profile(view), containment_backend=MountAwareStandIn())
 

@@ -25,8 +25,8 @@ GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAM
 
 
 @pytest.fixture
-def clean_git_home(tmp_path_factory, monkeypatch):
-    home = tmp_path_factory.mktemp("clean-home")
+def clean_git_home(scratch_dir, monkeypatch):
+    home = scratch_dir("clean-home")      # released when the test passed (tests/conftest.py)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "xdg"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")

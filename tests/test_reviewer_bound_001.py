@@ -24,6 +24,7 @@ from _chaos_harness import (
     plausible_message_tokens,
     run_direct,
 )
+from _strict_doubles import strict_config
 
 from kriya.agents.agent import (
     REVIEWER_DEFAULT_MAX_OUTPUT_TOKENS,
@@ -37,7 +38,6 @@ from kriya.core.completion import CompletionProtocolError, CompletionResult, Com
 from kriya.core.inference_runtime import ChatResponse
 from kriya.core.state_paths import trace_db_path
 from kriya.metrics.evidence import load_trace_runs
-from tests._strict_doubles import strict_config
 
 GOAL = "add sub to calc.py"
 LOOP = "### Code Review\n\n#### Summary of Findings\n\n* The tests cover standard cases.\n\n" * 400

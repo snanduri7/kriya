@@ -69,4 +69,13 @@ def test_no_other_test_module_starts_the_stub_or_runs_the_scenario_03_idle_check
     users = sorted(path.name for path in TESTS.glob("test_*.py")
                    if any(token in path.read_text(encoding="utf-8") for token in ("stub_ctl.sh", "--scenario\", \"03\"", "scenario-03", "STUB_PORT")))
     # test_demo_v2_assets.py only drives the REFUSAL path of reset/prepare on a directory demo-v2 did not create: it exits before any stub is started or inspected
-    assert users == ["test_cert_shared_lock.py", "test_demo_v2_assets.py", "test_demo_v2_owner_state.py", "test_demo_v2_stub.py"], users
+    # test_demo_v2_state_root_001.py (3956743; listed 2026-11-13, it was added without this tripwire running): ONE scenario-03 reset, which stops the stub -
+    # made under the lock, pinned below so the listing can never stand in for the lock.
+    assert users == ["test_cert_shared_lock.py", "test_demo_v2_assets.py", "test_demo_v2_owner_state.py", "test_demo_v2_state_root_001.py",
+                     "test_demo_v2_stub.py"], users
+    state_root = (TESTS / "test_demo_v2_state_root_001.py").read_text(encoding="utf-8")
+    assert state_root.count('"--scenario", "03"') == 1
+    locked, reset = state_root.index('with shared_resource_lock("demo-v2-stub-port-18767"):'), state_root.index('"--scenario", "03"')
+    assert locked < reset and state_root[locked:reset].count("\n") == 1, "the scenario-03 reset is the statement directly under the lock"
+    for module in ("test_demo_v2_owner_state.py", "test_demo_v2_stub.py"):
+        assert 'shared_resource_lock("demo-v2-stub-port-18767")' in (TESTS / module).read_text(encoding="utf-8"), module

@@ -109,7 +109,12 @@ def test_a_failed_deletion_of_the_old_state_does_not_cause_reuse_or_block_the_re
 
 
 def test_unrelated_paths_are_untouched_by_a_reset(work):
-    assert _run("reset_demo.sh", work, "--scenario", "03").returncode == 0
+    # CERT-SHARED-PORT-001: a scenario-03 reset runs `stub_ctl.sh stop` (reset_demo.sh), and the stub owns the machine-wide fixed port 18767 - so this one
+    # reset is made under the same lock as the tests that start that stub (it must never stop a stub another worker's test is using).
+    from _shared_resource_lock import shared_resource_lock
+
+    with shared_resource_lock("demo-v2-stub-port-18767"):
+        assert _run("reset_demo.sh", work, "--scenario", "03").returncode == 0
     other_state = _active(work, "03")
     (other_state / "keep").write_text("another scenario's state")
     assert _run("reset_demo.sh", work, "--scenario", "04").returncode == 0

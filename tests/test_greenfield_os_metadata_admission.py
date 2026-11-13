@@ -34,9 +34,9 @@ def _refused(path):
 
 
 @pytest.fixture
-def clean_git_home(tmp_path_factory, monkeypatch):
+def clean_git_home(scratch_dir, monkeypatch):
     """No global ``core.excludesFile`` (this Mac ignores ``.DS_Store`` globally, which would hide the very thing under test; a customer's machine need not)."""
-    home = tmp_path_factory.mktemp("clean-home")
+    home = scratch_dir("clean-home")      # released when the test passed (tests/conftest.py)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "xdg"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
