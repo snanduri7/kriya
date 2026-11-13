@@ -824,3 +824,39 @@ Item 8 merge: one model-free reproducer showed run 7's `PLANNING_ERROR` terminal
 **Not done.** No pre-live gate (owed ONCE on the final executable revision, after items 4/5 or the owner's decision to freeze without them). Run 10 not frozen, no execution worktree created. `kriya-b141fdd` kept. No full suite. Nothing pushed or tagged.
 
 Evidence: `~/kriya-evidence/product-72h-confidence/run9-fixes-2026-11-13/`.
+
+## 40. Owner rulings 2026-11-13 (fourth, fifth, and "APPROVE BISECT + GROUPED ROOT-CAUSE FIXES"): operator-authorized verifier repair BUILT (`9e8abbd`); full suite at `b9ec849` was RED (32) - bisected into 18 clusters, every one classified and corrected at its root owner; stable-tree acceptance green; final full suite and the one pre-live gate are recorded after this section
+
+**Verifier repair (`ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001`, closed, `9e8abbd`).** A verifier replay that fails on a defect in the verifier itself can be repaired only under a typed, attended approval - the third approval kind `VERIFIER_DEFECT_REPAIR_AUTHORIZATION` - bound to the exact verifier files, the contract text and an authorization fingerprint. A locator, a `TEST_DEFECT` label, a stack location, a filename or model reasoning is never authority. Unattended mode, and a mode that cannot be read, refuse. The repaired verifier V1 is staged and must pass with the owner change (O1) and fail without it (O0) before anything is applied. The pre-repair owner bytes are run-local and never persisted; the evidence store stays observational. Backend: `kriya/workflow/verifier_repair.py`, enforce loop, approval policy, launch approval/status/CLI. Desktop: KUP schema and bindings, review-channel third kind, `verifier_repair_host.ts` (re-proof + native confirmation), one new classified IPC channel (allowlist 24), review card.
+
+**Full suite at `b9ec849` (MEASURED): 32 failed, 21501 passed, 3h22m under contention.** 30 fail the same way on the untouched baseline; 2 were caused by the uncommitted slice. Bisect (owner-approved; detached scratch worktrees, no edits; 73 evaluations over the 165 commits `456ec40..b9ec849`; every failure monotonic):
+
+| First bad | Failing | Class | Correction |
+|---|---|---|---|
+| `c6916bc` (own run-9 commit) | 2 final-review terminal tests | REAL DEFECT, own regression | `77242d4` outcome ladder rung |
+| `15b543b` | reg_r1 x2, reg_r2, repair_003_p1_2 | REAL PRODUCT DEFECT | `0dac1f7` session rootdir neutral to the view name |
+| `20a4f7c` / `e4e2e48` (+ slice) | platform-path tripwire | REAL ARCHITECTURE DEFECT | `88bc928` `path_relation`; slice sites in `9e8abbd` |
+| `0401d22` | d4, d5 | intentional contract, stale pin | `f16cefa` |
+| `9c7cf00` | 001c enforce test | intentional contract, stale pin | `f16cefa` |
+| `c4531ce` | 6 early-exit rows | intentional contract, stale pin | `f16cefa` |
+| `334da9a` | s8 spawn pin; candidate-gates double | stale pin; harness defect | `f16cefa`; `77287c3` |
+| `6d9bfe0`, `0690600`(+`0401d22`), `e4e2e48`, `e7f0a5a`, `ffcbeba`, `48b1fad`, `0a188e9` (2), `20a4f7c` | one each (two for `0a188e9`) | intentional contracts, stale pins/golden | `f16cefa` |
+| `2af807b`, `2353859`, `3956743` | tmp-growth x2, shared lock | TEST/HARNESS defects | `77287c3` |
+| failing at the anchor | `s7_containment_census`; `catalog_real` (UI) | environment (runner's PYTHONPATH, measured both ways); stale expectation of `d4b34c6` | `77287c3`; `f16cefa` |
+| slice | inventory 99 vs 98; `verifier_repair.py` lexical containment | current-slice regressions | redundant record site removed (98 stays); `path_relation` |
+
+No count was bumped, no allowlist widened without a control, no assertion weakened, nothing skipped. Each stale pin cites the approving commit in a comment.
+
+**Own regressions, stated as the ruling asks.**
+- OLD ASSUMPTION: a refused advisory final review relabels the terminal only for an applied candidate (`c6916bc`). NEW MEASURED EVIDENCE: PROMPT-BUDGET-FIT-001C also requires a unit with exhausted gates, no typed cause and a refused review to end `final_review_refused`; two tests failed from `c6916bc` on. REQUIRED CORRECTION: one rung before the catch-all; every typed cause still outranks it (run 9: `no_progress` stays `no_progress`). The focused gate of `c6916bc` did not contain those tests.
+- R7-B added a candidate-bytes source without classifying it in the 001B audit - classified, alone, in `c3d5348`.
+- Slice: a pre-apply refusal was recorded twice in design (my own record site plus the retry strategy's fallback). Mutant G11 survived, which proved the site redundant; removed, inventory back to 98, mutant G11b killed.
+- Slice: the IPC allowlist length pin was left at 23 after the channel was added; now 24 with a control that an unclassified channel still has no way in.
+
+**Verification on the unchanged stable tree (MEASURED).** Original 32-id cohort: 32 passed. Adjacent Python set, once: 3135 passed in 56m41s, tree digest identical before and after. Canonical UI check: green on the second run (kup 71, shared 982, test-host 52 + 2 skipped, standalone 585 + 1 skipped). The first run had 2 failures in `cancel_run.test.tsx` (real-timer waits); the file passes alone on the current tree and on `b9ec849`; recorded as contention-suspect, NOT proven. Mutants: group fixes 13 of 13 effective, backend 28 of 28, launch/status/CLI 12 of 12, UI 17 of 17. Desktop: `package:mac` and `verify:mac-app` exit 0; the packaged main-process modules accept a third-kind review, relay the decision and answer `ACCEPTED`; an unknown kind closes the channel; an unproven review is refused `AUTHORIZATION_NOT_REVIEWABLE`. Limit: packaged modules with a stand-in waiter socket, not a live GUI run against real Kriya. ruff clean, pylint exit 0.
+
+**Run 10 relevance.** The session-rootdir defect appears only where a gate view's host path is visible (not in the real container), so Scenario A was not exposed to it. The terminal-category regression is reporting only. The path-containment sites failed closed. The verifier repair is the path Run 9 lacked.
+
+**Not done at the time of this section.** Final full suite, the one pre-live gate, the fresh execution worktree and `FROZEN_RUN_10.md` - their results are recorded in a later evidence-only commit. Nothing pushed or tagged. `kriya-b141fdd` kept.
+
+Evidence: `~/kriya-evidence/product-72h-confidence/bisect-2026-11-13/`.
