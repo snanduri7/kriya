@@ -100,7 +100,7 @@ def _render_selected(lines: Sequence[str], selected: Sequence[int]) -> str:
     return "\n".join(out)
 
 
-def _anchored_excerpt(text: str, locations: Sequence[Tuple[str, int]], limit: int) -> Optional[str]:
+def anchored_excerpt(text: str, locations: Sequence[Tuple[str, int]], limit: int) -> Optional[str]:
     """The lines of ``text`` that report the validator's own locations, each with as much surrounding output as ``limit`` allows.
 
     OPEN-FINDING-EVIDENCE-001 (Scenario-A run 10, MEASURED): a Maven test failure of 11252 characters carried its assertion at
@@ -159,7 +159,7 @@ def _anchored_excerpt(text: str, locations: Sequence[Tuple[str, int]], limit: in
 
 def bounded_evidence(text: str, locations: Sequence[Tuple[str, int]], limit: int) -> str:
     """Validator evidence within ``limit``: anchored on the validator's locations when the output reports them, else both ends."""
-    excerpt = _anchored_excerpt(text, locations, limit)
+    excerpt = anchored_excerpt(text, locations, limit)
     return excerpt if excerpt is not None else _head_and_tail(text, limit)
 
 

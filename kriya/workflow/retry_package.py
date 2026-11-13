@@ -6,7 +6,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 from kriya.workflow.context_projection import FileProjection, project_implementation_source
 from kriya.workflow.failure import Failure
-from kriya.workflow.open_findings import OpenFinding, render_open_findings
+from kriya.workflow.open_findings import OpenFinding, anchored_excerpt, render_open_findings
 
 _OMISSION = "\n... [middle omitted from retry evidence; canonical evidence remains local] ...\n"
 
@@ -157,9 +157,13 @@ def build_retry_package(
     add(references, reference_per_file, reference_projections, "dependency_reference")
 
     error = failure.raw_output or failure.message
+    # REPAIR-PROMPT-CONTEXT-BUDGET-001: the CURRENT failure is cut the way a carried finding is (OPEN-FINDING-EVIDENCE-001) - around the
+    # lines that report the validator's own locations - and only falls back to both ends when the output reports none of them.
+    located = tuple(dict.fromkeys((location.filepath, location.line) for location in failure.file_locations if location.line))
+    anchored = anchored_excerpt(error, located, max_error_chars) if len(error) > max_error_chars else None
     return RetryPackage(
         failure_type=failure.type,
-        authoritative_error=_bounded_text(error, max_error_chars),
+        authoritative_error=anchored if anchored is not None else _bounded_text(error, max_error_chars),
         advisory_context=_bounded_text(advisory_context, 3000),
         target_files=requested_targets,
         target_projections=tuple(target_projections),

@@ -1883,7 +1883,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 supplementary_context="\n\n".join(filter(None, (
                     deps.build_subtask_constraint_context(goal),
                     deps.build_subtask_semantic_context(plan, target),
-                    deps.render_established_file_context(established_file_context),
+                    deps.render_established_file_context(established_context_for_dependencies(
+                        established_file_context, established_provenance.writer, plan, target.id)),
                     target_context_text,
                     deps.findings_prompt_block([f for f in ownership_findings if f.subtask_id == target.id]),
                 ))),
@@ -4923,6 +4924,29 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 _VERIFIER_REPAIR_OUTCOME_MAX_CHARS = 12_000    # the gate output shown to the operator and to the one repair request
 
 DEPENDENT_VERIFICATION_PENDING_ROLES = frozenset({"owner_recovery", "may_change_owner_recovery", "verification_owner_recovery"})
+
+
+def established_context_for_dependencies(established: Mapping[str, str], writers: Mapping[str, str], plan: EngineeringPlan,
+                                         unit_id: str) -> Dict[str, str]:
+    """The earlier units' source a unit is SHOWN: what its plan-declared dependencies established, directly or through a chain.
+
+    REPAIR-PROMPT-CONTEXT-BUDGET-001 (Scenario-A run 10, MEASURED): every later unit was shown every earlier unit's files. The test
+    unit s6 (depends on s3, which depends on s2) carried pom.xml, App.java and ignite-config.xml in every request, 19617 characters of
+    mandatory text. The plan's ``depends_on`` is the authority for what a unit builds on (never a file name or a guess). A file with
+    no recorded writer, or written by this unit itself, is kept. Only the prompt changes: the workspace, the gates and
+    ``established_files`` still cover the whole project.
+    """
+    by_id = {subtask.id: subtask for subtask in plan.subtasks}
+    upstream: set = set()
+    frontier = [unit_id]
+    while frontier:
+        current = by_id.get(frontier.pop())
+        for dependency in (current.depends_on if current is not None else ()):
+            if dependency not in upstream:
+                upstream.add(dependency)
+                frontier.append(dependency)
+    return {path: content for path, content in established.items()
+            if writers.get(path) is None or writers[path] == unit_id or writers[path] in upstream}
 
 
 def owner_recovery_mutation_scope(owner: Subtask, implicated_artifacts: Sequence[str]) -> List[str]:
