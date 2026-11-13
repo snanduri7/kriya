@@ -36,6 +36,7 @@ class Run:
     grader_prompts: List[str] = field(default_factory=list)                               # user prompts sent to the run-verification grader (the captured-output evidence it judged)
     builds: List[Any] = field(default_factory=list)                                       # ("compile"|"tests", on_build() result) for every build/test gate execution, in order
     developer_calls: List[Optional[str]] = field(default_factory=list)                    # the unit of EVERY Developer request, in order (a replayed verifier makes none)
+    developer_requests: List[Tuple[Optional[str], str, str]] = field(default_factory=list)  # (unit, the file the request was answered for, the system prompt's first line)
 
 
 def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, str]], goal: str = "Change the page size", mode: str = "human-in-the-loop",
@@ -79,12 +80,23 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
     async def transport(llm, client, model, system_prompt, user_prompt, *args, **kwargs):
         del llm, client, model, args, kwargs
         first = (system_prompt or "").splitlines()[0] if system_prompt else ""
-        path, source = units.get(active.get("id") or "", ("", ""))
+        scripted = units.get(active.get("id") or "", ("", ""))
+        if isinstance(scripted, dict):      # a unit that owns several files: {path: source}; the request's own text names the one file it is for
+            text = (system_prompt or "") + "\n" + (user_prompt or "")
+            named = [p for p in scripted if p in (system_prompt or "")] or [p for p in scripted if p in (user_prompt or "")]
+            path = named[0] if len(named) == 1 else min(scripted, key=lambda p: text.find(p) if p in text else len(text))
+            source = scripted[path]
+        else:
+            path, source = scripted
         if "File List Planner" in first:
-            content = '{"files": ["%s"]}' % path
+            content = json.dumps({"files": list(scripted) if isinstance(scripted, dict) else [path]})
         elif "Developer Agent" in first:
             run.developer_calls.append(active.get("id"))
-            content = sentinel(path, analysis="edit.", content=source() if callable(source) else source)
+            run.developer_requests.append((active.get("id"), path, first))
+            text_or_pair = source() if callable(source) else source
+            if isinstance(text_or_pair, tuple):     # (another path, content): the scripted model answers for a file it was not asked for
+                path, text_or_pair = text_or_pair
+            content = sentinel(path, analysis="edit.", content=text_or_pair)
         elif "Run Verification Judge" in first:
             run.judge_calls.append(active.get("id"))
             content = json.dumps(judge_reply or {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None,

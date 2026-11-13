@@ -1801,11 +1801,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             execution_role: str = "planned",
             grounded_locations: Sequence[Mapping[str, Any]] = (),
             carried_candidate: Optional[ReplayHandle] = None,
+            mutation_scope: Optional[Sequence[str]] = None,
         ) -> Dict[str, Any]:
             target_goal = deps.build_subtask_goal_text(
                 target, target_position, total, plan=plan, grounding_goal=goal,
             )
-            target_files = [pf.path for pf in target.planned_files]
+            # OWNER-RECOVERY-IMPLICATED-ARTIFACT-SCOPE-LOST-001 (run 9): an owner recovery passes the recovery requirement's implicated
+            # artifacts; they are then this invocation's generation targets, its completeness requirement and its write scope. Every other
+            # invocation (mutation_scope None) is over all the unit's planned files, as before.
+            target_files = (
+                [pf.path for pf in target.planned_files] if mutation_scope is None
+                else owner_recovery_mutation_scope(target, mutation_scope)
+            )
             target_context = deps.project_for_subtask(execution_context, target)
             # GRAPHIFY-OVERSIZE-REQUEST-001: a planned file's full current
             # source is not rendered into supplementary_context (mandatory
@@ -3373,7 +3380,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     if owner_result is None:
                         owner_result = await _invoke_bounded_subtask(
                             owner, owner_position, recovery_context=recovery_context,
-                            execution_role="owner_recovery",
+                            execution_role="owner_recovery", mutation_scope=required_owner_files,
                         )
                     owner_declared = {pf.path for pf in owner.planned_files}
                     owner_undeclared = sorted(
@@ -4663,6 +4670,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 # of what each MODEL unit committed to this run's candidate (ControlState.subtask_written_files - the evidence the
 # planned-read view (subtask_executor.reads_candidate_view), owner resolution (owner_recovery) and the abandoned-plan
 # quarantine (resume_support) read).
+
+def owner_recovery_mutation_scope(owner: Subtask, implicated_artifacts: Sequence[str]) -> List[str]:
+    """OWNER-RECOVERY-IMPLICATED-ARTIFACT-SCOPE-LOST-001: what an owner-recovery invocation may generate, must return and may write - the
+    recovery requirement's implicated artifacts that this owner plans, in plan order. The owner's other files are not in it: they stay in the
+    base tree as context and take part in every gate, and are neither regenerated nor reported missing.
+
+    MEASURED, Scenario-A run 9: the requirement named ProtocolParser.java; the owner (Protocol.java + ProtocolParser.java) was generated over
+    both; three of its seven failed attempts were about the unchanged Protocol.java. A wider need is a new plan-scope conflict (the existing
+    authority), never an inference here. An implicated set that names none of the owner's planned files is a coding error upstream (a
+    recovery group's participants are its owner's artifacts): refused, never widened to the whole owner."""
+    implicated = set(implicated_artifacts)
+    scope = [planned.path for planned in owner.planned_files if planned.path in implicated]
+    if not scope:
+        raise ValueError(
+            f"owner recovery of {owner.id!r}: none of the implicated artifacts {sorted(implicated)} is one of its planned files")
+    return scope
+
 
 _TERMINAL_REASON_MAX_CHARS = 2000
 

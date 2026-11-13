@@ -200,6 +200,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_prd011_toolchain_evidence.py': ('S', 'M'),
  'tests/test_prd011_toolchain_fingerprint.py': ('S', 'M'),
  'tests/test_verifier_replay_unit_001.py': ('S', 'M'),  # R7-B: the real-unit run-7 shape (verifier replay), gates scripted
+ 'tests/test_owner_recovery_implicated_scope_001.py': ('S', 'M'),  # run 9: the real-unit two-file owner recovery (implicated scope), gates scripted
  'tests/test_toolchain_host_probe_authority_001.py': ('S', 'M'),  # R7-A: the real-run prompt replay, the candidate validator's identity and the toolchain fingerprint, under scripted host states
  'tests/test_prd011_toolchain_identity.py': ('S', 'M'),
  'tests/test_prd011_toolchain_migration.py': ('S', 'M'),
