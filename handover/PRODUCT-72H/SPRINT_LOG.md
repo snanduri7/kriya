@@ -790,3 +790,37 @@ Evidence: `~/kriya-evidence/product-72h-confidence/scenario-a-run9-2026-11-13/` 
 **Not done.** No product code, no test change, no rerun, no gate (not owed). Model-free characterizations of E and of the terminal shape are owed before any edit. Nothing pushed or tagged.
 
 Evidence: `~/kriya-evidence/product-72h-confidence/run9-characterization-2026-11-13/` (30 manifest entries; `repro_output.txt`, `versions/`, `controls/`, `CORRECTIONS.md`).
+
+## 39. Owner ruling 2026-11-13 (third, items 1-13): Run 9 FINAL = VALID / KRIYA PRODUCT DEFECT with a contributing model verifier defect; scope, learning, budget-attribution, terminal-cause and registry corrections FIXED+VERIFIED deterministically (code `c6916bc`); O0 handle and verifier repair NOT built - STOPPED for the owner's ruling on what authority proves a verifier invalid; no gate, Run 10 NOT frozen
+
+**Run 9 final (item 1).** VALID / KRIYA PRODUCT DEFECT, contributing model verifier defect; R7-B LIVE VERIFIED and frozen. Recorded outside the seal: `~/kriya-evidence/product-72h-confidence/run9-fixes-2026-11-13/RUN9_FINAL_CLASSIFICATION.md`. The sealed directory is untouched; never rerun, never resumed.
+
+**Contract (item 2), `8a77013`.** `demo-v2/scenarios/04-spring-ignite-protocol/goal.md` now states: dataLength is the number of bytes in body, and encode/decode must not change the Protocol they are given. sha256 `673d20ee...` -> `fe29c881d0d8efdda73e67806c217cf6ecc1d8111463de722caae1d3412bfbd1`. Wire format unchanged, still five derived requirements. An intended change caused by measured ambiguity; part of the Run-10 freeze evidence.
+
+**Reproducers first (item 10).** Run-7 and run-9 shapes reproduced model-free on `b141fdd`'s code before any edit (`run9-fixes-2026-11-13/prefix-characterization/`).
+
+**Corrections (each: pre-fix characterization, controls, negative controls, mutants, adjacent tests, ruff + pylint exit 0).**
+
+| Row | Commit | What changed | Proof |
+|---|---|---|---|
+| `BACKLOG-REGISTRY-CANNOT-REPRESENT-OPEN-P1-001` | `ad19c33` | a P0/P1 that is not closed is P0/P1 `ACTIVE`, never a lowered priority | 7 tests, 6 of 6 mutants |
+| `OWNER-RECOVERY-IMPLICATED-ARTIFACT-SCOPE-LOST-001` (P1) | `fcd8f75` | `enforce_loop.owner_recovery_mutation_scope`: an owner recovery's targets, completeness and write scope are the recovery group's participants, not every file the owner plans | 8 controls (loop + REAL unit), 8 of 8 mutants, adjacent 822 passed |
+| `OWNER-RECOVERY-LOCAL-SUCCESS-KNOWLEDGE-PROMOTED-BEFORE-DEPENDENT-VERIFICATION-001` | `4831508` | `dependent_verification_pending` (roles `owner_recovery`, `may_change_owner_recovery`, `verification_owner_recovery`) skips stage-7 learning | 5 controls (REAL unit), 7 of 7 mutants, adjacent 219 passed |
+| `TIME-BUDGET-EXHAUSTED-MODEL-ATTRIBUTION-001` | `788d783` | `FailureAttributionKind.RESOURCE_LIMIT` for `time_budget_exhausted`: deterministic, no file, no model request | 4 controls, 7 of 7 mutants; kernel golden `legacy_budget_stop.json` re-recorded, exact three-digest delta pinned |
+| `ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001` (closes R7-C `ENFORCE-TERMINAL-CATEGORY-FIRST-SCOPE-CONFLICT-001`) | `c6916bc` | the typed stop of the run's last invocation, when it is an owner invocation inside a recovery, is the terminal cause (`terminal_cause`, `failure_type`, `failure_category`) and outranks the conflict that recovery was working on; `final_review_refused` only for an applied candidate | 7 controls + `tests/test_outcome.py` ladder, 8 of 8 mutants; state-machine tier 1783 passed; adjacent 1972 passed |
+
+Item 8 merge: one model-free reproducer showed run 7's `PLANNING_ERROR` terminal and run 9's causeless `needs_review` terminal share ONE first wrong decision (the aggregate read only the stopping consumer's own result), so they were corrected together.
+
+**Readings taken (disclosed).**
+- Implicated set = the recovery group's participants; a MAY_CHANGE participant remains a target. The unit's goal text still lists the owner's planned files.
+- Learning: skill accrual is skipped together with lesson extraction for the three owner-reopen roles. A deferred extraction after the episode settles is NOT implemented; such a lesson is simply not extracted.
+- Terminal: when a nested typed stop ends the run, `recovery: PLAN_REPAIR` and `plan_scope_conflict` are dropped from the terminal (the recoveries stay in `plan_recovery_events`). Reporting only; lifecycle status and unit statuses are asserted unchanged.
+- `INFRA-STOP-ATTRIBUTION-SOURCE-DEFECT-LABEL-001` stays OPEN for `internal_framework_error` only (owner ruling: not broadened).
+
+**Own errors, reported.** (1) Terminal fix: mutants T4 and T6 survived the first pass - two rules had no test; one negative control added for each, then 8 of 8 killed. (2) A new control raised IndexError on an empty answer list (test bug, fixed before commit). (3) The lesson positive control did not trigger extraction at first (the trigger needs two retries); a forced trigger is used for the real-unit tests plus one unforced positive control. (4) The R8-B pin in `tests/test_env_failure_triage_model_call_001.py` and the `tests/test_outcome.py` ladder pin were changed on purpose with the fixes.
+
+**NOT built: items 4 and 5 (`ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001`, P1 ACTIVE).** The ruling's negative control (V1 must reject O0 and pass O1) proves a REPAIRED verifier still detects the original owner defect. It does not prove the ORIGINAL verifier was invalid, and it does not stop a V1 that simply drops the assertion O1 fails. TRACED: nothing deterministic in Kriya binds Scenario A's contract sentence to an executable authority, and the ruling forbids locator, label, stack, filename and model reasoning as authority. So no deterministic trigger exists today for "this verifier is proven invalid". The O0 handle has no other consumer, so it waits with item 5. Proposal sent to the owner: in human-in-the-loop mode the operator authorizes ONE verifier repair through the existing approval channel (a new approval kind, shown V0's failing assertion and the contract text); V1 must then reject O0 (run-local `pre_repair_owner` bytes, never persisted) and pass O1, else `VERIFIER_REPAIR_REFUSED` and the run stops; unattended mode keeps today's safe failure.
+
+**Not done.** No pre-live gate (owed ONCE on the final executable revision, after items 4/5 or the owner's decision to freeze without them). Run 10 not frozen, no execution worktree created. `kriya-b141fdd` kept. No full suite. Nothing pushed or tagged.
+
+Evidence: `~/kriya-evidence/product-72h-confidence/run9-fixes-2026-11-13/`.
