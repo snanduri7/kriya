@@ -19,9 +19,12 @@ immutable: model text never edits it.
 """
 from __future__ import annotations
 
+import os
+from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 
+from kriya.workflow.failure_grounding import error_source_location_matches
 from kriya.workflow.failure_reporting import FailureCategory, categorize_failure
 
 # Failures that judge only the Developer's RESPONSE. (Single definition: retry_strategy's family inheritance uses it too.)
@@ -56,6 +59,9 @@ class OpenFinding:
     source: str
     evidence: str
     first_attempt: int
+    # The validator's own (file, line) locators (Failure.file_locations with a line). They pick the evidence excerpt and let a
+    # later request show the source at those lines again (OPEN-FINDING-EVIDENCE-001).
+    locations: Tuple[Tuple[str, int], ...] = ()
 
     def render(self) -> str:
         subject = f" (files: {', '.join(self.files)})" if self.files else ""
@@ -77,17 +83,100 @@ def _head_and_tail(text: str, limit: int) -> str:
     return text[: keep // 2] + marker + text[-(keep - keep // 2):]
 
 
+_LINES_OMITTED = "... [lines omitted] ..."
+
+
+def _render_selected(lines: Sequence[str], selected: Sequence[int]) -> str:
+    """The chosen lines in file order, with one marker line wherever lines were left out."""
+    out: List[str] = []
+    previous = -1
+    for index in selected:
+        if index != previous + 1:
+            out.append(_LINES_OMITTED)
+        out.append(lines[index])
+        previous = index
+    if previous != len(lines) - 1:
+        out.append(_LINES_OMITTED)
+    return "\n".join(out)
+
+
+def _anchored_excerpt(text: str, locations: Sequence[Tuple[str, int]], limit: int) -> Optional[str]:
+    """The lines of ``text`` that report the validator's own locations, each with as much surrounding output as ``limit`` allows.
+
+    OPEN-FINDING-EVIDENCE-001 (Scenario-A run 10, MEASURED): a Maven test failure of 11252 characters carried its assertion at
+    offsets 1582 and 9994; a blind head-and-tail cut of 2000 kept the build preamble and the help footer and dropped both. The
+    anchor is not a guess about the tool: it is where the output names a location the validator already put on the Failure.
+    Returns None when the output names none of them (the caller keeps the head-and-tail cut).
+    """
+    wanted = {(os.path.basename(path), line) for path, line in locations}
+    if not wanted:
+        return None
+    lines = text.split("\n")
+    starts: List[int] = []
+    offset = 0
+    for line in lines:
+        starts.append(offset)
+        offset += len(line) + 1
+    anchors: List[int] = []
+    seen = set()
+    for basename, line_no, match_offset in error_source_location_matches(text):
+        key = (basename, line_no)
+        if key in wanted and key not in seen:
+            seen.add(key)
+            index = bisect_right(starts, match_offset) - 1
+            if index not in anchors:
+                anchors.append(index)
+    selected: List[int] = []
+
+    def add(index: int) -> bool:
+        if index < 0 or index >= len(lines) or index in selected:
+            return False
+        candidate = sorted([*selected, index])
+        if len(_render_selected(lines, candidate)) > limit:
+            return False
+        selected[:] = candidate
+        return True
+
+    kept = [anchor for anchor in anchors if add(anchor)]   # the anchors first, in the validator's order
+    if not kept:
+        return None
+    # Then grow every kept anchor outwards one line at a time, in turn, until nothing more fits.
+    open_ends = {(anchor, step): True for anchor in kept for step in (-1, 1)}
+    distance = 0
+    while any(open_ends.values()):
+        distance += 1
+        for anchor in kept:
+            for step in (-1, 1):
+                if not open_ends[(anchor, step)]:
+                    continue
+                index = anchor + step * distance
+                if index in selected:
+                    continue
+                if not add(index):
+                    open_ends[(anchor, step)] = False
+    return _render_selected(lines, selected)
+
+
+def bounded_evidence(text: str, locations: Sequence[Tuple[str, int]], limit: int) -> str:
+    """Validator evidence within ``limit``: anchored on the validator's locations when the output reports them, else both ends."""
+    excerpt = _anchored_excerpt(text, locations, limit)
+    return excerpt if excerpt is not None else _head_and_tail(text, limit)
+
+
 def finding_from_failure(failure: Any, attempt: int) -> OpenFinding:
     evidence = str(failure.raw_output or failure.message or "")
-    locations = [location.filepath for location in failure.file_locations]
-    files = tuple(dict.fromkeys([*locations, *failure.likely_files]))
+    paths = [location.filepath for location in failure.file_locations]
+    files = tuple(dict.fromkeys([*paths, *failure.likely_files]))
+    locations = tuple(dict.fromkeys(
+        (location.filepath, location.line) for location in failure.file_locations if location.line))
     return OpenFinding(
         failure_type=failure.type,
         reason_code=(failure.diagnostics or {}).get("reason_code"),
         files=files,
         source=failure.source,
-        evidence=_head_and_tail(evidence, MAX_EVIDENCE_CHARS),
+        evidence=bounded_evidence(evidence, locations, MAX_EVIDENCE_CHARS),
         first_attempt=attempt,
+        locations=locations,
     )
 
 
@@ -109,6 +198,11 @@ def render_open_findings(open_findings: Sequence[OpenFinding]) -> str:
         "Still unresolved from an earlier attempt (no later validator has cleared this finding, so it still applies and "
         "must also be fixed):\n" + blocks
     )
+
+
+def open_finding_locations(open_findings: Sequence[OpenFinding]) -> List[Tuple[str, int]]:
+    """The validator-owned (file, line) locators of the open findings, in order, without repeats."""
+    return list(dict.fromkeys(location for finding in open_findings for location in finding.locations))
 
 
 def open_finding_files(open_findings: Sequence[OpenFinding]) -> List[str]:

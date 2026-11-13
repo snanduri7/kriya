@@ -57,6 +57,7 @@ from kriya.workflow.failure import (
 from kriya.workflow.failure_grounding import (
     _build_error_source_context,
     build_failure_signature,
+    build_source_context_for_locations,
     classify_environment_failure,
     extract_error_search_terms,
     grounded_evidence_excerpt,
@@ -70,7 +71,12 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.model_transition import fallback_routing_for_context
-from kriya.workflow.open_findings import DELIVERY_FAILURE_TYPES, open_finding_files, update_open_findings
+from kriya.workflow.open_findings import (
+    DELIVERY_FAILURE_TYPES,
+    open_finding_files,
+    open_finding_locations,
+    update_open_findings,
+)
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.retry_policy import (
@@ -1628,6 +1634,13 @@ async def _record_attempt_failure(
         if failure_is_authoritative or previous_primary_failure is None
         else previous_error_source_context
     )
+    # OPEN-FINDING-EVIDENCE-001: a delivery failure judges only the response and names no source line, so the window above
+    # is empty - while the validator finding it leaves open still points at exact lines. Show those lines again, read fresh.
+    if not fresh_error_source_context and failure.type in DELIVERY_FAILURE_TYPES and state.open_findings:
+        carried_source_context = build_source_context_for_locations(
+            ctx.worktree_path, open_finding_locations(state.open_findings))
+        if carried_source_context:
+            state.last_error_source_context = carried_source_context
 
     # LSP grounding (Java only, silently skipped if jdtls isn't
     # installed or this isn't a Maven project) - deterministic,

@@ -524,16 +524,26 @@ def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
     so a future fourth shape doesn't need to renumber every existing one."""
     seen = set()
     locations: List[Tuple[str, int]] = []
+    for basename, line, _offset in error_source_location_matches(error_text):
+        key = (basename, line)
+        if key not in seen:
+            seen.add(key)
+            locations.append(key)
+    return locations
+
+
+def error_source_location_matches(error_text: str) -> List[Tuple[str, int, int]]:
+    """Every locator in the text, in order, as (basename, line, character offset of the match). The same shapes as
+    extract_error_source_locations (which is this list without the offsets and without repeats); the offset lets a
+    caller find WHERE in a long validator output a known location is reported (OPEN-FINDING-EVIDENCE-001)."""
+    matches: List[Tuple[str, int, int]] = []
     for m in _ERROR_LOCATION_PATTERN.finditer(error_text):
         filepath = (m.group("jc_file") or m.group("jt_file") or m.group("py_file") or m.group("pc_file")
                     or m.group("ps_file"))
         line = (m.group("jc_line") or m.group("jt_line") or m.group("py_line") or m.group("pc_line")
                 or m.group("ps_line"))
-        key = (os.path.basename(filepath), int(line))
-        if key not in seen:
-            seen.add(key)
-            locations.append(key)
-    return locations
+        matches.append((os.path.basename(filepath), int(line), m.start()))
+    return matches
 
 
 # D5 (KNOW A on demo-runtime-3, 2026-10-01): a runtime exception that names the
@@ -760,26 +770,35 @@ def _build_error_source_context(
     if not locations:
         return {}
     by_basename = _files_by_basename(known_files)
+    return build_source_context_for_locations(
+        worktree_path,
+        [(filepath, line_no) for filename, line_no in locations for filepath in by_basename.get(filename, [])],
+    )
+
+
+def build_source_context_for_locations(worktree_path: str, locations: Iterable[Tuple[str, int]]) -> Dict[str, str]:
+    """The source window for each already-resolved (relative filepath, line), read fresh from the worktree. Shared by
+    _build_error_source_context (locations found in the error text) and by a carried open finding, whose validator-owned
+    locations are known although the latest failure's own text names none (OPEN-FINDING-EVIDENCE-001)."""
     context_by_file: Dict[str, str] = {}
-    for filename, line_no in locations:
-        for filepath in by_basename.get(filename, []):
-            try:
-                with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
-                    lines = fh.readlines()
-            except Exception as ex:
-                logger.debug(f"Failed to read source context for {filepath}:{line_no}: {ex}")
-                continue
-            if not (1 <= line_no <= len(lines)):
-                continue
-            start, end = max(0, line_no - 4), min(len(lines), line_no + 3)
-            snippet = "\n".join(
-                f"{'>>' if (i + 1) == line_no else '  '} {i + 1}: {lines[i].rstrip()}"
-                for i in range(start, end)
-            )
-            context_by_file[filepath] = (
-                context_by_file.get(filepath, "")
-                + f"\n=== Source context at the reported error location (line {line_no}) ===\n{snippet}\n"
-            )
+    for filepath, line_no in locations:
+        try:
+            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()
+        except Exception as ex:
+            logger.debug(f"Failed to read source context for {filepath}:{line_no}: {ex}")
+            continue
+        if not (1 <= line_no <= len(lines)):
+            continue
+        start, end = max(0, line_no - 4), min(len(lines), line_no + 3)
+        snippet = "\n".join(
+            f"{'>>' if (i + 1) == line_no else '  '} {i + 1}: {lines[i].rstrip()}"
+            for i in range(start, end)
+        )
+        context_by_file[filepath] = (
+            context_by_file.get(filepath, "")
+            + f"\n=== Source context at the reported error location (line {line_no}) ===\n{snippet}\n"
+        )
     return context_by_file
 
 
