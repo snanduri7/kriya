@@ -157,6 +157,15 @@ _PYTEST_VERSION_RE = re.compile(r"\bpytest-(\d[\w.]*)")
 # plugin set). Only these keyed lines: other header lines can carry values
 # that change every run (a random seed) and are never part of a context.
 _PYTEST_SESSION_FACT_RE = re.compile(r"^(platform|rootdir|configfile|testpaths|plugins):? (.+)$", re.MULTILINE)
+# PYTEST-SESSION-GATE-VIEW-NAME-001 (bisected to 15b543b, 2026-11-13): a gate runs in a view whose directory name no earlier view had
+# (kriya/tools/gate_view.py), so wherever the view's host path is visible to pytest (any backend that does not remap it) the `rootdir` fact named a
+# different directory on every run of the SAME tree and every same-context replay read as REPLAY_CONTEXT_MISMATCH - stability was never measured and a
+# harmless candidate stopped REGRESSION_UNATTRIBUTED. Only the view's own name is neutral; the rest of the path still identifies the context.
+_GATE_VIEW_NAME_RE = re.compile(r"(?<=/gate-views/)view-[0-9a-f]+(?:-\d+)?(?=/|$)")
+
+
+def _session_fact(value: str) -> str:
+    return _GATE_VIEW_NAME_RE.sub("<view>", value.strip())
 
 
 @dataclass(frozen=True)
@@ -390,7 +399,7 @@ def pytest_suite_evidence(raw_result: Dict[str, Any]) -> Optional[PytestSuiteEvi
         version=PYTEST_EVIDENCE_VERSION, complete=reason is None, reason=reason, collected=len(cases),
         report_digest=report_files[0].get("sha256") if report_files and isinstance(report_files[0], dict) else None,
         runner_version=version.group(1) if version else None, cases=tuple(sorted(cases, key=lambda c: c.key)),
-        session=tuple(sorted({(name, value.strip()) for name, value in _PYTEST_SESSION_FACT_RE.findall(output)})),
+        session=tuple(sorted({(name, _session_fact(value)) for name, value in _PYTEST_SESSION_FACT_RE.findall(output)})),
     )
 
 

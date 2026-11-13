@@ -557,6 +557,24 @@ def test_session_facts_are_the_keyed_header_lines_only():
                                 ("rootdir", "/w"))
 
 
+def test_a_gate_views_own_name_is_not_part_of_the_session_and_every_other_root_still_is():
+    """PYTEST-SESSION-GATE-VIEW-NAME-001 (bisected to 15b543b): a gate view's directory name is never reused, so a `rootdir` that names it differs on every
+    run of the SAME tree. Before the fix each replay read as REPLAY_CONTEXT_MISMATCH (the four REG-R1/R2/REPAIR-003 reproducers stopped
+    REGRESSION_UNATTRIBUTED). Only the view's own name is neutral: another state root, another tree below the view, or a look-alike directory that is not
+    a gate view is still a different context."""
+    def session_of(rootdir):
+        return pytest_suite_evidence(raw_result({KEY: F()}, session=SESSION.replace("rootdir: /w", f"rootdir: {rootdir}"))).session
+
+    first = session_of("/state/gate-views/view-0123456789abcdef0000a1b2000001")
+    assert first == session_of("/state/gate-views/view-0123456789abcdef0000a1b2000002") == session_of("/state/gate-views/view-fedcba98-3")
+    assert dict(first)["rootdir"] == "/state/gate-views/<view>"
+    assert session_of("/state/gate-views/view-01ab/sub") == session_of("/state/gate-views/view-02cd/sub") != first        # the tree below still counts
+    assert session_of("/other/gate-views/view-0123456789abcdef0000a1b2000001") != first                                    # another state root
+    assert session_of("/state/views/view-01ab") != session_of("/state/views/view-02cd")                                    # not a gate view
+    assert session_of("/state/gate-views/view-01abXY") != session_of("/state/gate-views/view-02cdXY")                      # not a view name
+    assert session_of("/w") == (("platform", "t -- Python 3.12, pytest-9.1.1, pluggy-1.6.0"), ("plugins", "p-1.0"), ("rootdir", "/w"))
+
+
 def test_junit_key_matches_pytests_own_address_mangling():
     assert junit_key_for_node_id("tests/test_x.py::test_a") == "tests.test_x::test_a"
     assert junit_key_for_node_id("tests/sub/test_x.py::TestC::test_a[1-a/b]") == "tests.sub.test_x.TestC::test_a[1-a/b]"
