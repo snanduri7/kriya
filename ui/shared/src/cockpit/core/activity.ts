@@ -64,6 +64,15 @@ export function activityFromLaunch(status: LaunchStatus | null): ActivityEntry[]
   out.push({ key: 'launch.requested', text: 'Run started', tone: 'info', at: launch.requested_at ?? null, source: 'launch.requested_at' });
   const reviews = [...(launch.approval_history ?? []), ...(launch.pending_approval ? [launch.pending_approval] : [])];
   for (const review of reviews) {
+    if (review.kind === 'verifier_defect_repair_authorization') {
+      // the third subject: a decision ABOUT a verifier. Neither answer applies or runs anything by itself.
+      out.push({ key: `${review.review_id}:asked`, text: 'Waiting for your decision about a verifier', tone: 'wait', at: review.requested_at ?? null, source: 'launch.pending_approval.requested_at' });
+      const answered = review.decision;
+      if (review.status === 'APPROVED' && answered) out.push({ key: `${review.review_id}:decided`, text: 'One verifier repair authorized', tone: 'ok', at: answered.decided_at ?? null, source: 'launch.pending_approval.decision' });
+      else if (review.status === 'REJECTED' && answered) out.push({ key: `${review.review_id}:decided`, text: 'Verifier repair not authorized', tone: 'info', at: answered.decided_at ?? null, source: 'launch.pending_approval.decision' });
+      else if (review.status === 'EXPIRED') out.push({ key: `${review.review_id}:expired`, text: 'The verifier decision expired; no repair was authorized', tone: 'info', at: answered?.decided_at ?? null, source: 'launch.pending_approval.status' });
+      continue;
+    }
     const runtime = review.kind === 'runtime_command';
     out.push({ key: `${review.review_id}:asked`, text: runtime ? 'Waiting for permission to run commands' : 'Waiting for code approval', tone: 'wait', at: review.requested_at ?? null, source: 'launch.pending_approval.requested_at' });
     const decided = review.decision;

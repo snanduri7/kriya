@@ -850,11 +850,11 @@ export interface LaunchStatus {
     /**
      * The review the run is waiting on (or last waited on): a CHANGE review (the exact candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya asks to run), discriminated by `kind`. Only a PENDING review can be decided, over the run's private review channel for its own kind; the waiting process records the decision BEFORE the run continues.
      */
-    pending_approval?: null | PendingChangeReview | PendingRuntimeCommandReview;
+    pending_approval?: null | PendingChangeReview | PendingRuntimeCommandReview | PendingVerifierRepairAuthorization;
     /**
      * Earlier reviews of this launch (a retry produced a new candidate), oldest first; none of them can be decided any more.
      */
-    approval_history?: (PendingChangeReview | PendingRuntimeCommandReview)[];
+    approval_history?: (PendingChangeReview | PendingRuntimeCommandReview | PendingVerifierRepairAuthorization)[];
     /**
      * The human decision the run reached and the desktop cannot make (never auto-approved): which kind, the reason Kriya gave, and the recorded details.
      */
@@ -965,6 +965,106 @@ export interface PendingRuntimeCommandReview {
    */
   environment_names: string[];
   reason_sha256?: string;
+  decision: {
+    decision?: string | null;
+    decided_at?: string | null;
+    source?: string;
+    [k: string]: unknown;
+  } | null;
+  [k: string]: unknown;
+}
+/**
+ * A VERIFIER-DEFECT REPAIR AUTHORIZATION review (owner rulings 2026-11-13; a subject distinct from a change review and a runtime-command review): the person's SEMANTIC decision whether ONE exact verifier candidate conflicts with the canonical contract, authorizing one bounded repair of it. Everything shown is deterministic evidence Kriya recorded - the verifier's exact source and digest, the canonical contract text and digest, the gate outcome against the pre-repair owner and against the repaired owner - never a model's conclusion. `authorization_fingerprint` (= candidate_digest) covers every binding (run, plan, recovery, verifier bytes, contract, owner states, failure identities) and is what the decision must carry. `verified` is Kriya's own re-proof, at read time, that the recorded texts are the bytes the fingerprint binds; a review that is not verified is never offered for approval.
+ */
+export interface PendingVerifierRepairAuthorization {
+  review_id: string;
+  sequence: number;
+  kind: 'verifier_defect_repair_authorization';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+  requested_at: string;
+  expires_at: string;
+  /**
+   * Equal to authorization_fingerprint: the digest the decision must carry.
+   */
+  candidate_digest: string;
+  /**
+   * Digest over every binding of the authorization.
+   */
+  authorization_fingerprint: string;
+  /**
+   * Present in a served status: Kriya re-derived the fingerprint from the recorded bindings and re-checked every shown text against its bound digest.
+   */
+  verified?: boolean;
+  /**
+   * The exact question the person decides.
+   */
+  question: string;
+  /**
+   * Kriya's fixed statement that automatic verifier repair is otherwise forbidden and what an approval does and does not do.
+   */
+  notice: string;
+  verifier_unit_id: string;
+  owner_unit_id: string;
+  bindings: {
+    run_id: string;
+    plan_hash: string;
+    recovery_plan_id: string;
+    recovery_generation: number;
+    goal_digest: string;
+    verification_contract_digest?: string | null;
+    pre_repair_failure_identity?: string | null;
+    replay_failure_identity: string;
+    [k: string]: unknown;
+  };
+  /**
+   * The verifier candidate under review: each file's path, the digest of its exact bytes and its exact source.
+   *
+   * @minItems 1
+   */
+  verifier_files: [
+    {
+      path: string;
+      sha256: string;
+      source: string;
+      [k: string]: unknown;
+    },
+    ...{
+      path: string;
+      sha256: string;
+      source: string;
+      [k: string]: unknown;
+    }[]
+  ];
+  /**
+   * The canonical goal/contract text, exactly as bound by contract_digest.
+   */
+  contract_text: string;
+  contract_digest: string;
+  /**
+   * The owner's implicated files BEFORE its repair (path and digest; the bytes stay in the run's memory).
+   */
+  pre_repair_owner_files: {
+    path: string;
+    sha256: string;
+    [k: string]: unknown;
+  }[];
+  /**
+   * The same files after the owner's repair.
+   */
+  repaired_owner_files: {
+    path: string;
+    sha256: string;
+    [k: string]: unknown;
+  }[];
+  /**
+   * The deterministic gate output of this verifier against the pre-repair owner (bounded, display-redacted).
+   */
+  pre_repair_outcome: string;
+  /**
+   * The deterministic gate output of this verifier against the repaired owner: the failure under review (bounded, display-redacted).
+   */
+  replay_outcome: string;
+  replay_failure_type: string;
   decision: {
     decision?: string | null;
     decided_at?: string | null;
@@ -2184,6 +2284,21 @@ export interface DecideRuntimeCommandResult {
   review_id?: string | null;
   decision?: string | null;
   decided_at?: string | null;
+}
+
+// ---- DecideVerifierRepairRequest (host-contract.schema.json#/$defs/DecideVerifierRepairRequest) ----
+/**
+ * Verifier-defect repair authorization decision (owner rulings 2026-11-13): ONE human decision for the VERIFIER-REPAIR AUTHORIZATION review that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, authorization fingerprint) and the decision - never a file, a source text, a contract or an outcome. approve = the person decided that the shown verifier expectation conflicts with the canonical contract and authorizes one repair; reject = no repair is authorized and the run continues on its existing routing.
+ */
+export interface DecideVerifierRepairRequest {
+  /**
+   * Absolute path without control characters.
+   */
+  workspace: string;
+  launch_id: string;
+  review_id: string;
+  authorization_fingerprint: string;
+  decision: 'approve' | 'reject';
 }
 
 // ---- ApproveConfigurationRequest (host-contract.schema.json#/$defs/ApproveConfigurationRequest) ----

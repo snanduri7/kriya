@@ -212,3 +212,34 @@ describe('the capability', () => {
     expect(() => parseWaiterFrame(JSON.stringify({ v: true, type: 'result' }))).toThrow();
   });
 });
+
+describe('the third kind: a verifier-defect repair authorization (owner rulings 2026-11-13)', () => {
+  const KIND = 'verifier_defect_repair_authorization';
+  it('a review frame of the third kind is accepted and its decision is relayed in the protocol shape, end to end', async () => {
+    const { host, peer } = attached();
+    peer.send(reviewFrame({ kind: KIND }));
+    expect(peer.destroyed).toBe(false);               // a host with the two-kind table closes the channel on this frame
+    expect(host.hasReview(LAUNCH, REVIEW)).toBe(true);
+    const pending = host.decide(request({ kind: KIND as ChannelDecisionRequest['kind'], decision: 'approve' }));
+    expect(peer.frames()).toEqual([{ v: 1, type: 'decision', launch_id: LAUNCH, review_id: REVIEW, kind: KIND, candidate_digest: DIGEST, decision: 'approve', capability: CAPABILITY }]);
+    peer.send(resultFrame());
+    expect(await pending).toEqual({ accepted: true, code: 'ACCEPTED' });
+  });
+  it('the subjects never cross: a decision of another kind for it, or of this kind for another review, sends nothing', async () => {
+    const { host, peer } = attached();
+    peer.send(reviewFrame({ kind: KIND }));
+    expect(await host.decide(request({ kind: 'change_approval' }))).toEqual({ accepted: false, code: 'WRONG_REVIEW_KIND' });
+    expect(await host.decide(request({ kind: 'runtime_command' }))).toEqual({ accepted: false, code: 'WRONG_REVIEW_KIND' });
+    expect(await host.decide(request({ kind: KIND as ChannelDecisionRequest['kind'], candidate_digest: 'sha256:' + 'dd'.repeat(32) }))).toEqual({ accepted: false, code: 'STALE_REVIEW' });
+    expect(peer.written).toEqual([]);
+    const other = attached();
+    other.peer.send(reviewFrame());
+    expect(await other.host.decide(request({ kind: KIND as ChannelDecisionRequest['kind'] }))).toEqual({ accepted: false, code: 'WRONG_REVIEW_KIND' });
+    expect(other.peer.written).toEqual([]);
+  });
+  it('an unknown kind is still a protocol violation that closes the channel', () => {
+    const { peer } = attached();
+    peer.send(reviewFrame({ kind: 'verifier_repair' }));
+    expect(peer.destroyed).toBe(true);
+  });
+});

@@ -13,6 +13,18 @@ import java.util.List;
  * commands Kriya asks to run to verify the application, in order, where they run, and the
  * command fingerprint the decision must carry. Never a stdin or environment VALUE; `files`
  * does not exist on this shape.
+ *
+ * A VERIFIER-DEFECT REPAIR AUTHORIZATION review (owner rulings 2026-11-13; a subject
+ * distinct from a change review and a runtime-command review): the person's SEMANTIC
+ * decision whether ONE exact verifier candidate conflicts with the canonical contract,
+ * authorizing one bounded repair of it. Everything shown is deterministic evidence Kriya
+ * recorded - the verifier's exact source and digest, the canonical contract text and
+ * digest, the gate outcome against the pre-repair owner and against the repaired owner -
+ * never a model's conclusion. `authorization_fingerprint` (= candidate_digest) covers every
+ * binding (run, plan, recovery, verifier bytes, contract, owner states, failure identities)
+ * and is what the decision must carry. `verified` is Kriya's own re-proof, at read time,
+ * that the recorded texts are the bytes the fingerprint binds; a review that is not
+ * verified is never offered for approval.
  */
 public class PendingApprovalClass {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
@@ -44,9 +56,26 @@ public class PendingApprovalClass {
     private String unitid;
     private String workingDirectory;
     private WorkingDirectoryKind workingDirectoryKind;
+    private String authorizationFingerprint;
+    private Bindings bindings;
+    private String contractDigest;
+    private String contractText;
+    private String notice;
+    private String ownerUnitid;
+    private String preRepairOutcome;
+    private List<PreRepairOwnerFile> preRepairOwnerFiles;
+    private String question;
+    private List<RepairedOwnerFile> repairedOwnerFiles;
+    private String replayFailureType;
+    private String replayOutcome;
+    private Boolean verified;
+    private List<VerifierFile> verifierFiles;
+    private String verifierUnitid;
 
     /**
      * Equal to command_fingerprint: the digest the decision must carry.
+     *
+     * Equal to authorization_fingerprint: the digest the decision must carry.
      */
     @JsonProperty("candidate_digest")
     public String getCandidateDigest() { return candidateDigest; }
@@ -170,4 +199,115 @@ public class PendingApprovalClass {
     public WorkingDirectoryKind getWorkingDirectoryKind() { return workingDirectoryKind; }
     @JsonProperty("working_directory_kind")
     public void setWorkingDirectoryKind(WorkingDirectoryKind value) { this.workingDirectoryKind = value; }
+
+    /**
+     * Digest over every binding of the authorization.
+     */
+    @JsonProperty("authorization_fingerprint")
+    public String getAuthorizationFingerprint() { return authorizationFingerprint; }
+    @JsonProperty("authorization_fingerprint")
+    public void setAuthorizationFingerprint(String value) { this.authorizationFingerprint = value; }
+
+    @JsonProperty("bindings")
+    public Bindings getBindings() { return bindings; }
+    @JsonProperty("bindings")
+    public void setBindings(Bindings value) { this.bindings = value; }
+
+    @JsonProperty("contract_digest")
+    public String getContractDigest() { return contractDigest; }
+    @JsonProperty("contract_digest")
+    public void setContractDigest(String value) { this.contractDigest = value; }
+
+    /**
+     * The canonical goal/contract text, exactly as bound by contract_digest.
+     */
+    @JsonProperty("contract_text")
+    public String getContractText() { return contractText; }
+    @JsonProperty("contract_text")
+    public void setContractText(String value) { this.contractText = value; }
+
+    /**
+     * Kriya's fixed statement that automatic verifier repair is otherwise forbidden and what an
+     * approval does and does not do.
+     */
+    @JsonProperty("notice")
+    public String getNotice() { return notice; }
+    @JsonProperty("notice")
+    public void setNotice(String value) { this.notice = value; }
+
+    @JsonProperty("owner_unit_id")
+    public String getOwnerUnitid() { return ownerUnitid; }
+    @JsonProperty("owner_unit_id")
+    public void setOwnerUnitid(String value) { this.ownerUnitid = value; }
+
+    /**
+     * The deterministic gate output of this verifier against the pre-repair owner (bounded,
+     * display-redacted).
+     */
+    @JsonProperty("pre_repair_outcome")
+    public String getPreRepairOutcome() { return preRepairOutcome; }
+    @JsonProperty("pre_repair_outcome")
+    public void setPreRepairOutcome(String value) { this.preRepairOutcome = value; }
+
+    /**
+     * The owner's implicated files BEFORE its repair (path and digest; the bytes stay in the
+     * run's memory).
+     */
+    @JsonProperty("pre_repair_owner_files")
+    public List<PreRepairOwnerFile> getPreRepairOwnerFiles() { return preRepairOwnerFiles; }
+    @JsonProperty("pre_repair_owner_files")
+    public void setPreRepairOwnerFiles(List<PreRepairOwnerFile> value) { this.preRepairOwnerFiles = value; }
+
+    /**
+     * The exact question the person decides.
+     */
+    @JsonProperty("question")
+    public String getQuestion() { return question; }
+    @JsonProperty("question")
+    public void setQuestion(String value) { this.question = value; }
+
+    /**
+     * The same files after the owner's repair.
+     */
+    @JsonProperty("repaired_owner_files")
+    public List<RepairedOwnerFile> getRepairedOwnerFiles() { return repairedOwnerFiles; }
+    @JsonProperty("repaired_owner_files")
+    public void setRepairedOwnerFiles(List<RepairedOwnerFile> value) { this.repairedOwnerFiles = value; }
+
+    @JsonProperty("replay_failure_type")
+    public String getReplayFailureType() { return replayFailureType; }
+    @JsonProperty("replay_failure_type")
+    public void setReplayFailureType(String value) { this.replayFailureType = value; }
+
+    /**
+     * The deterministic gate output of this verifier against the repaired owner: the failure
+     * under review (bounded, display-redacted).
+     */
+    @JsonProperty("replay_outcome")
+    public String getReplayOutcome() { return replayOutcome; }
+    @JsonProperty("replay_outcome")
+    public void setReplayOutcome(String value) { this.replayOutcome = value; }
+
+    /**
+     * Present in a served status: Kriya re-derived the fingerprint from the recorded bindings
+     * and re-checked every shown text against its bound digest.
+     */
+    @JsonProperty("verified")
+    public Boolean getVerified() { return verified; }
+    @JsonProperty("verified")
+    public void setVerified(Boolean value) { this.verified = value; }
+
+    /**
+     * The verifier candidate under review: each file's path, the digest of its exact bytes and
+     * its exact source.
+     */
+    @JsonProperty("verifier_files")
+    public List<VerifierFile> getVerifierFiles() { return verifierFiles; }
+    @JsonProperty("verifier_files")
+    public void setVerifierFiles(List<VerifierFile> value) { this.verifierFiles = value; }
+
+    @JsonProperty("verifier_unit_id")
+    public String getVerifierUnitid() { return verifierUnitid; }
+    @JsonProperty("verifier_unit_id")
+    public void setVerifierUnitid(String value) { this.verifierUnitid = value; }
 }

@@ -26,6 +26,7 @@ export { conciseWhy, renderMarkdown, reviewBody } from './markdown';
 export { activityEntries, activityFromLaunch, activityFromRecords, resultsFromRecords, type ActivityEntry } from './activity';
 export { attemptRejections, failedDuring, rejectionOf, retrySummary, DELIVERY_WORDS, type AttemptRejection, type RetrySummary } from './retryFacts';
 export { RuntimeCommandReviewCard, useRuntimeCommandReview, displayCommand, displayArg } from './RuntimeCommandReview';
+export { VerifierRepairReviewCard, verifierReviewViewable } from './VerifierRepairReview';
 export { FileDiff } from './ChangeDiff';
 export * from './presentation';
 export { RunCardView } from './RunCardView';
@@ -42,7 +43,7 @@ export { CockpitProviders, ModuleScope, useCapabilities, useDispatch, useModuleS
 export * from '../design';
 export * from './deep';
 export * from './describe';
-export { ExecutionProvider, useExecution, foldRecords, deriveOutcome, notificationFor, progressCounts, activeReview, activeRuntimeCommandReview, createDecider, createRuntimeCommandDecider, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type PendingReview, type PendingRuntimeCommandReview, type DecisionState, type RuntimeDecisionState, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';
+export { ExecutionProvider, useExecution, foldRecords, deriveOutcome, notificationFor, progressCounts, activeReview, activeRuntimeCommandReview, activeVerifierRepairReview, createDecider, createRuntimeCommandDecider, createVerifierRepairDecider, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type PendingReview, type PendingRuntimeCommandReview, type DecisionState, type RuntimeDecisionState, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';
 export { RunMemoryLine, memoryRunIdOf } from './RunMemoryLine';
 export { ReplayNotice } from './ReplayNotice';
 export { BeforeAfter, deliveredLabel, recoveryText, securityText, summaryRows, writeScopeOf } from './BeforeAfter';

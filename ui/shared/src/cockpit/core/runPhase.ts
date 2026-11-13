@@ -73,10 +73,16 @@ export function runPhase(run: RunView): RunPhase {
   if (run.runtimeReview) {
     return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for permission to run commands', detail: 'Kriya paused the run and runs nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(3) };
   }
+  if (run.verifierReview) {
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your decision about a verifier', detail: 'Kriya paused the run. A verifier is never repaired unless you decide it conflicts with the contract.', tone: 'warn', needsAction: true, steps: steps(3) };
+  }
   const pendingApproval = run.status?.launch.pending_approval;
   const approved = pendingApproval?.status === 'APPROVED' && run.status?.launch.phase === 'RUNNING';
   if (approved && pendingApproval?.kind === 'runtime_command') {
     return { ...base, state: 'RUNNING', label: 'Verifying your application', detail: 'You allowed the reviewed commands. Kriya is running them in its isolated worktree and checking the result.', tone: 'info', steps: steps(3), verifyingApplication: true };
+  }
+  if (pendingApproval?.kind === 'verifier_defect_repair_authorization' && run.status?.launch.phase === 'RUNNING' && pendingApproval.status !== 'PENDING') {
+    return { ...base, state: 'RUNNING', label: 'Verifying', detail: approved ? 'You authorized one repair of the verifier. Kriya is repairing and re-checking it.' : 'No verifier repair was authorized. Kriya continues the run.', tone: 'info', steps: steps(3) };
   }
   if (approved) {
     return { ...base, state: 'VALIDATING', label: 'Finishing', detail: 'Your change was approved. Kriya is running final checks.', tone: 'info', steps: steps(3) };

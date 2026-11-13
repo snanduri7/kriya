@@ -71,6 +71,7 @@
 //     DecideApprovalResult data = Converter.DecideApprovalResultFromJsonString(jsonString);
 //     DecideRuntimeCommandRequest data = Converter.DecideRuntimeCommandRequestFromJsonString(jsonString);
 //     DecideRuntimeCommandResult data = Converter.DecideRuntimeCommandResultFromJsonString(jsonString);
+//     DecideVerifierRepairRequest data = Converter.DecideVerifierRepairRequestFromJsonString(jsonString);
 //     ApproveConfigurationRequest data = Converter.ApproveConfigurationRequestFromJsonString(jsonString);
 //     ApproveConfigurationResult data = Converter.ApproveConfigurationResultFromJsonString(jsonString);
 //     List<String> data = Converter.RecentWorkspacesFromJsonString(jsonString);
@@ -602,6 +603,14 @@ public class Converter {
 
     public static String DecideRuntimeCommandResultToJsonString(DecideRuntimeCommandResult obj) throws JsonProcessingException {
         return getDecideRuntimeCommandResultObjectWriter().writeValueAsString(obj);
+    }
+
+    public static DecideVerifierRepairRequest DecideVerifierRepairRequestFromJsonString(String json) throws IOException {
+        return getDecideVerifierRepairRequestObjectReader().readValue(json);
+    }
+
+    public static String DecideVerifierRepairRequestToJsonString(DecideVerifierRepairRequest obj) throws JsonProcessingException {
+        return getDecideVerifierRepairRequestObjectWriter().writeValueAsString(obj);
     }
 
     public static ApproveConfigurationRequest ApproveConfigurationRequestFromJsonString(String json) throws IOException {
@@ -2455,6 +2464,37 @@ public class Converter {
     private static ObjectWriter getDecideRuntimeCommandResultObjectWriter() {
         if (DecideRuntimeCommandResultWriter == null) instantiateDecideRuntimeCommandResultMapper();
         return DecideRuntimeCommandResultWriter;
+    }
+
+    private static ObjectReader DecideVerifierRepairRequestReader;
+    private static ObjectWriter DecideVerifierRepairRequestWriter;
+
+    private static void instantiateDecideVerifierRepairRequestMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        DecideVerifierRepairRequestReader = mapper.readerFor(DecideVerifierRepairRequest.class);
+        DecideVerifierRepairRequestWriter = mapper.writerFor(DecideVerifierRepairRequest.class);
+    }
+
+    private static ObjectReader getDecideVerifierRepairRequestObjectReader() {
+        if (DecideVerifierRepairRequestReader == null) instantiateDecideVerifierRepairRequestMapper();
+        return DecideVerifierRepairRequestReader;
+    }
+
+    private static ObjectWriter getDecideVerifierRepairRequestObjectWriter() {
+        if (DecideVerifierRepairRequestWriter == null) instantiateDecideVerifierRepairRequestMapper();
+        return DecideVerifierRepairRequestWriter;
     }
 
     private static ObjectReader ApproveConfigurationRequestReader;

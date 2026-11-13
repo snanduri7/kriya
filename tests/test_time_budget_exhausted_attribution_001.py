@@ -71,7 +71,8 @@ def test_the_resource_limit_types_are_a_closed_table_distinct_from_infrastructur
     # owner ruling 2026-11-13: internal_framework_error is neither; it keeps its label until it is characterized on its own
     assert classify_failure_attribution("internal_framework_error", "x") is FailureAttributionKind.SOURCE_DEFECT
     assert {kind.value for kind in FailureAttributionKind} == {
-        "SOURCE_DEFECT", "PLAN_SCOPE_DEFECT", "VERIFICATION_CONTRACT_DEFECT", "TEST_DEFECT", "INFRASTRUCTURE_DEFECT", "RESOURCE_LIMIT"}
+        "SOURCE_DEFECT", "PLAN_SCOPE_DEFECT", "VERIFICATION_CONTRACT_DEFECT", "TEST_DEFECT", "INFRASTRUCTURE_DEFECT", "RESOURCE_LIMIT",
+        "VERIFIER_REPAIR_REFUSAL"}       # added with the authorized verifier repair (kriya/workflow/verifier_repair.py), deterministic like RESOURCE_LIMIT
 
 
 @pytest.mark.asyncio

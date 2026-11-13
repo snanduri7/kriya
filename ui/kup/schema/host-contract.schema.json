@@ -1202,6 +1202,46 @@
       },
       "additionalProperties": false
     },
+    "DecideVerifierRepairRequest": {
+      "description": "Verifier-defect repair authorization decision (owner rulings 2026-11-13): ONE human decision for the VERIFIER-REPAIR AUTHORIZATION review that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, authorization fingerprint) and the decision - never a file, a source text, a contract or an outcome. approve = the person decided that the shown verifier expectation conflicts with the canonical contract and authorizes one repair; reject = no repair is authorized and the run continues on its existing routing.",
+      "type": "object",
+      "required": [
+        "workspace",
+        "launch_id",
+        "review_id",
+        "authorization_fingerprint",
+        "decision"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001F]*$",
+          "description": "Absolute path without control characters."
+        },
+        "launch_id": {
+          "type": "string",
+          "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$"
+        },
+        "review_id": {
+          "type": "string",
+          "pattern": "^ra-[0-9a-f]{24}$"
+        },
+        "authorization_fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "DecideRuntimeCommandResult": {
       "description": "Answer to a runtime-command decision. accepted=true means Kriya durably recorded the decision for the waiting run; the run's outcome is only ever in Kriya's durable records. accepted=false carries Kriya's or the host's closed code; `CONFIRMATION_DECLINED` means the person pressed Cancel on the native confirmation: nothing was sent, nothing was approved, and the review is still waiting.",
       "type": "object",

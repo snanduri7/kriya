@@ -473,6 +473,35 @@ def _stop_after_a_failed_verifier_replay(state: GenerationState, ctx, failure: F
     logger.error("Quality Gates stopped - %s (replayed verifier, %s gate).", VERIFIER_REPLAY_FAILED, failure.type)
 
 
+def _stop_after_a_failed_verifier_repair(state: GenerationState, ctx, failure: Failure) -> None:
+    """ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001: the one operator-authorized repair of a verifier ends with its first failed
+    attempt, whatever failed (a malformed or unchanged answer, a refused review, a gate against the repaired owner, the pre-repair-owner check).
+    A further attempt would be a second Developer answer. A typed route decided first (an environment stop, another no-progress terminal) keeps
+    its own reason; the loop stops either way."""
+    from kriya.workflow.verifier_repair import VERIFIER_REPAIR_FAILED
+
+    if getattr(ctx, "verifier_repair", None) is None:
+        return
+    already_typed = bool(state.environment_failure or state.no_progress_terminated)
+    state.no_progress_terminated = True
+    if already_typed:
+        return
+    state.no_progress_reason = VERIFIER_REPAIR_FAILED
+    state.record_event(RunEvent(
+        kind="retry.no_progress_terminal",
+        attempt=state.attempt_number,
+        source="retry_strategy._stop_after_a_failed_verifier_repair",
+        authority=EventAuthority.ADVISORY,
+        message=(f"{VERIFIER_REPAIR_FAILED}: the authorized verifier repair failed its {failure.type} gate; it has one Developer answer, so no "
+                 "further attempt is made and nothing was applied."),
+        details={"reason_code": VERIFIER_REPAIR_FAILED, "classification": state.last_progress_classification, "limit": None,
+                 "last_vector_digest": (state.last_progress_vector.digest()
+                                        if state.last_progress_vector is not None else None),
+                 "declared_by": failure.type, "refusal": (failure.diagnostics or {}).get("reason_code")},
+    ))
+    logger.error("Quality Gates stopped - %s (authorized verifier repair, %s gate).", VERIFIER_REPAIR_FAILED, failure.type)
+
+
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
     """Called from workflow.py's `except Exception as e:` after a failed
     run_attempt() call. Mutates state (error_context, last_implicated_files/
@@ -1099,7 +1128,8 @@ async def _record_attempt_failure(
                 "managed_service_outcome": diagnostics.get("managed_service_outcome"),
                 "required_files": [],
             }
-        elif attribution_kind is FailureAttributionKind.RESOURCE_LIMIT:
+        elif attribution_kind in (FailureAttributionKind.RESOURCE_LIMIT, FailureAttributionKind.VERIFIER_REPAIR_REFUSAL):
+            # VERIFIER_REPAIR_REFUSAL (kriya/workflow/verifier_repair.py): the same deterministic route - a refusal of the repair transaction.
             # TIME-BUDGET-EXHAUSTED-MODEL-ATTRIBUTION-001: the budget is authoritatively exhausted. The attribution is decided here, with no
             # file and no model request (run 9 built one with 0 ms left; the deadline refused it and a source owner was recorded anyway).
             attribution = AttributionResult(
@@ -1637,3 +1667,4 @@ async def _record_attempt_failure(
     _admit_verification_only_retry(state, ctx, failure)
     _apply_declared_no_progress_stop(state, failure)
     _stop_after_a_failed_verifier_replay(state, ctx, failure)
+    _stop_after_a_failed_verifier_repair(state, ctx, failure)

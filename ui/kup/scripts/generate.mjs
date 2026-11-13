@@ -87,6 +87,7 @@ const TYPES = [
   ['DecideApprovalResult', 'host-contract.schema.json', '#/$defs/DecideApprovalResult'],
   ['DecideRuntimeCommandRequest', 'host-contract.schema.json', '#/$defs/DecideRuntimeCommandRequest'],
   ['DecideRuntimeCommandResult', 'host-contract.schema.json', '#/$defs/DecideRuntimeCommandResult'],
+  ['DecideVerifierRepairRequest', 'host-contract.schema.json', '#/$defs/DecideVerifierRepairRequest'],
   ['ApproveConfigurationRequest', 'host-contract.schema.json', '#/$defs/ApproveConfigurationRequest'],
   ['ApproveConfigurationResult', 'host-contract.schema.json', '#/$defs/ApproveConfigurationResult'],
   ['RecentWorkspaces', 'host-contract.schema.json', '#/$defs/RecentWorkspaces'],

@@ -564,7 +564,7 @@ def test_the_generate_callback_delegates_to_the_tested_function():
     nested = source[source.index("    def on_change_approval("):]
     nested = nested[: nested.index("\n    def ", 10)] if "\n    def " in nested[10:] else nested[:400]
     assert "return _approval_decision(files, reason, yes)" in nested
-    assert "on_approval = TypedApprovalCallback(on_change_approval, lambda subject: _runtime_command_decision(subject, yes))" in source   # the one typed channel for the runtime subject
+    assert "on_approval = TypedApprovalCallback(on_change_approval, lambda subject: _runtime_command_decision(subject, yes)," in source   # the one typed channel for the runtime subject
 
 
 def test_only_the_change_gate_passes_a_non_empty_change_set_to_an_approval_callback():

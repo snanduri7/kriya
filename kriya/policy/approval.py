@@ -226,9 +226,12 @@ class RuntimeCommandDecision:
 class TypedApprovalCallback:
     """The approval callback of a desktop launch: a plain ``callback(files, reason)`` for every legacy approval AND one typed channel for the runtime-command subject."""
 
-    def __init__(self, change_callback: Callable[[List[Any], str], Any], runtime_command_callback: Callable[[RuntimeCommandSubject], Any]) -> None:
+    def __init__(self, change_callback: Callable[[List[Any], str], Any], runtime_command_callback: Callable[[RuntimeCommandSubject], Any],
+                 verifier_repair_callback: Optional[Callable[["VerifierRepairSubject"], Any]] = None) -> None:
         self._change_callback = change_callback
         self.runtime_command_review = runtime_command_callback
+        # The third typed subject (VERIFIER_DEFECT_REPAIR_AUTHORIZATION). None = this channel cannot put it to a person: it is then never asked.
+        self.verifier_repair_review = verifier_repair_callback
 
     def __call__(self, files: List[Any], reason: str) -> Any:
         return self._change_callback(files, reason)
@@ -353,6 +356,105 @@ def approval_matches(decision: RuntimeCommandDecision, about_to_run: RuntimeComm
     return decision.approved_fingerprint is not None and decision.approved_fingerprint == about_to_run.fingerprint
 
 
+# ----------------------------------------------------------------------------- verifier-defect repair authorization (owner rulings 2026-11-13, Scenario-A run 9)
+
+VERIFIER_REPAIR_QUESTION = "Does this verifier expectation conflict with the canonical contract, authorizing one verifier repair?"
+VERIFIER_REPAIR_NOTICE = (
+    "Kriya never repairs a verifier on its own: a failing verifier is evidence against the code it checks. Only your decision here authorizes ONE "
+    "repair of exactly this verifier, in this run. The repaired verifier must still be approved as source, must reject the pre-repair owner code "
+    "and must pass against the repaired owner code, or it is refused. Declining changes nothing: the failure goes back to the owner as evidence."
+)
+VERIFIER_REPAIR_MAX_FILES = 8
+VERIFIER_REPAIR_MAX_SOURCE_CHARS = 200_000
+VERIFIER_REPAIR_MAX_OUTCOME_CHARS = 12_000
+
+
+@dataclass(frozen=True)
+class VerifierRepairSubject:
+    """What the person is asked: whether ONE exact verifier candidate, in one recovery episode of one run, holds an expectation that conflicts with the
+    canonical contract. It is a SEMANTIC authorization, not a source approval (the repaired verifier is reviewed and approved as source separately) and not
+    a durable grant: ``fingerprint`` covers every binding below, the decision is bound to that fingerprint, and the caller recomputes it immediately
+    before the repair (``verifier_repair_matches``) - any changed binding makes the authorization stale.
+
+    Bindings: run, plan hash, recovery plan and generation, verifier unit, owner unit, the verifier's paths and byte digests (V0), the goal and
+    verification-contract digests, the owner's pre-repair (O0) and repaired (O1) path/digest sets, and the identities of the two deterministic gate
+    failures under review. The remaining fields are what is SHOWN (each is the text one of those digests was taken over, or a gate's own output):
+    never a model's conclusion."""
+
+    run_id: str
+    plan_hash: str
+    recovery_plan_id: str
+    recovery_generation: int
+    verifier_unit_id: str
+    owner_unit_id: str
+    verifier_files: Tuple[Tuple[str, str], ...]              # (path, sha256 of the exact bytes) - V0
+    goal_digest: str
+    verification_contract_digest: Optional[str]
+    pre_repair_owner_files: Tuple[Tuple[str, str], ...]      # O0
+    repaired_owner_files: Tuple[Tuple[str, str], ...]        # O1
+    pre_repair_failure_identity: Optional[str]               # V0 against O0: the failure that reopened the owner
+    replay_failure_identity: str                             # V0 against O1: the replay failure under review
+    # shown, not separately bound
+    contract_text: str = ""
+    verifier_sources: Tuple[Tuple[str, str], ...] = ()       # (path, exact text)
+    pre_repair_outcome: str = ""
+    replay_outcome: str = ""
+    replay_failure_type: str = ""
+
+    @property
+    def fingerprint(self) -> str:
+        return _sha(json.dumps({
+            "run_id": self.run_id, "plan_hash": self.plan_hash, "recovery_plan_id": self.recovery_plan_id,
+            "recovery_generation": self.recovery_generation, "verifier_unit_id": self.verifier_unit_id, "owner_unit_id": self.owner_unit_id,
+            "verifier_files": [list(pair) for pair in self.verifier_files], "goal_digest": self.goal_digest,
+            "verification_contract_digest": self.verification_contract_digest,
+            "pre_repair_owner_files": [list(pair) for pair in self.pre_repair_owner_files],
+            "repaired_owner_files": [list(pair) for pair in self.repaired_owner_files],
+            "pre_repair_failure_identity": self.pre_repair_failure_identity, "replay_failure_identity": self.replay_failure_identity,
+        }, separators=(",", ":"), sort_keys=True))
+
+
+def verifier_repair_reviewable(subject: VerifierRepairSubject) -> bool:
+    """An authorization that cannot be shown exactly is never offered: every verifier file's text must be present, bounded and unchanged by the one
+    redaction owner (shown redacted it would not be the bytes the digest binds), and so must the contract text."""
+    paths = [path for path, _digest in subject.verifier_files]
+    sources = dict(subject.verifier_sources)
+    if not paths or len(paths) > VERIFIER_REPAIR_MAX_FILES or sorted(sources) != sorted(paths):
+        return False
+    if not subject.contract_text or not subject.replay_failure_identity or not subject.pre_repair_owner_files:
+        return False
+    texts = [*sources.values(), subject.contract_text]
+    return all(isinstance(text, str) and 0 < len(text) <= VERIFIER_REPAIR_MAX_SOURCE_CHARS and redact_value(text) == text for text in texts)
+
+
+@dataclass(frozen=True)
+class VerifierRepairDecision:
+    """``approved_fingerprint`` is the subject fingerprint the person's authorization is bound to; None when not authorized (declined, cancelled,
+    expired, no channel: the caller treats them alike - no repair)."""
+
+    approved_fingerprint: Optional[str]
+
+    @property
+    def approved(self) -> bool:
+        return self.approved_fingerprint is not None
+
+
+async def ask_verifier_repair(callback: Any, subject: VerifierRepairSubject) -> VerifierRepairDecision:
+    """Ask for the authorization. ONLY a typed callback with a verifier-repair channel is asked: a plain ``callback(files, reason)`` cannot show the
+    subject or bind its answer to it, and an auto-approving caller is not a person's semantic judgement - so it is not asked and nothing is authorized."""
+    review = getattr(callback, "verifier_repair_review", None) if isinstance(callback, TypedApprovalCallback) else None
+    if review is None or not verifier_repair_reviewable(subject):
+        return VerifierRepairDecision(None)
+    with human_wait():
+        answer = await await_if_awaitable(review(subject))
+    return answer if isinstance(answer, VerifierRepairDecision) else VerifierRepairDecision(None)
+
+
+def verifier_repair_matches(decision: VerifierRepairDecision, about_to_repair: VerifierRepairSubject) -> bool:
+    """True only when the authorization is bound to exactly the repair about to start."""
+    return decision.approved_fingerprint is not None and decision.approved_fingerprint == about_to_repair.fingerprint
+
+
 # ----------------------------------------------------------------------------- review kinds, refusal codes, candidate digest (moved from kriya/control/launch_approval.py)
 
 REFUSAL_CODES = ("INVALID_REQUEST", "LAUNCH_NOT_FOUND", "LAUNCH_RECORD_UNREADABLE", "WRONG_WORKSPACE", "LAUNCH_ENDED", "LAUNCH_NOT_ACTIVE", "NOT_PENDING",
@@ -361,8 +463,43 @@ REFUSAL_CODES = ("INVALID_REQUEST", "LAUNCH_NOT_FOUND", "LAUNCH_RECORD_UNREADABL
 # The two subjects a launch can hold for a human. A decision names the kind it is for, and `decide` refuses it for a review of the other kind: the change-approval action can never
 # approve a runtime-command review, nor the reverse.
 KIND_CHANGE, KIND_RUNTIME = "change_approval", "runtime_command"
-KINDS = (KIND_CHANGE, KIND_RUNTIME)
+KIND_VERIFIER_REPAIR = "verifier_defect_repair_authorization"
+KINDS = (KIND_CHANGE, KIND_RUNTIME, KIND_VERIFIER_REPAIR)
 WORKING_DIRECTORY_KIND = "ISOLATED_WORKTREE"   # Kriya runs verification in its isolated candidate worktree, never in the project folder
+
+
+def verifier_repair_entry_verified(entry: Any) -> bool:
+    """Kriya's read-time proof of a recorded verifier-repair review, for whoever is about to show it: the fingerprint re-computed from the recorded bindings is the
+    digest the decision must carry, every shown verifier source is the bytes its bound digest names, and the contract text is the text the goal digest was taken
+    over. A record that was altered, or whose displayed text is not what the fingerprint binds, is not verified - and is then never offered for approval."""
+    def pairs(items: Any) -> Optional[tuple]:
+        if not isinstance(items, list) or not all(isinstance(item, dict) and isinstance(item.get("path"), str) and isinstance(item.get("sha256"), str) for item in items):
+            return None
+        return tuple((item["path"], item["sha256"]) for item in items)
+
+    try:
+        if not isinstance(entry, dict) or entry.get("kind") != KIND_VERIFIER_REPAIR:
+            return False
+        bindings, files = entry.get("bindings"), entry.get("verifier_files")
+        verifier, before, after = pairs(files), pairs(entry.get("pre_repair_owner_files")), pairs(entry.get("repaired_owner_files"))
+        contract = entry.get("contract_text")
+        if not isinstance(bindings, dict) or not verifier or before is None or after is None or not isinstance(contract, str):
+            return False
+        if any(not isinstance(item.get("source"), str) or hashlib.sha256(item["source"].encode("utf-8")).hexdigest() != item["sha256"] for item in files):
+            return False
+        if hashlib.sha256(contract.encode("utf-8", errors="replace")).hexdigest() != bindings.get("goal_digest") or entry.get("contract_digest") != bindings.get("goal_digest"):
+            return False
+        subject = VerifierRepairSubject(
+            run_id=bindings["run_id"], plan_hash=bindings["plan_hash"], recovery_plan_id=bindings["recovery_plan_id"],
+            recovery_generation=bindings["recovery_generation"], verifier_unit_id=entry["verifier_unit_id"], owner_unit_id=entry["owner_unit_id"],
+            verifier_files=verifier, goal_digest=bindings["goal_digest"], verification_contract_digest=bindings.get("verification_contract_digest"),
+            pre_repair_owner_files=before, repaired_owner_files=after, pre_repair_failure_identity=bindings.get("pre_repair_failure_identity"),
+            replay_failure_identity=bindings["replay_failure_identity"],
+        )
+        digest = entry.get("candidate_digest")
+        return isinstance(digest, str) and digest == entry.get("authorization_fingerprint") == subject.fingerprint
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 class ApprovalRefused(Exception):

@@ -26,6 +26,7 @@ const api = {
   executionState: () => ipcRenderer.invoke(IPC_CHANNELS.executionState),
   decideApproval: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideApproval, request),
   decideRuntimeCommand: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideRuntimeCommand, request),
+  decideVerifierRepair: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideVerifierRepair, request),
   approveConfiguration: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.approveConfiguration, request),
   initializeProject: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.initializeProject, request),
   notifyRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.notifyRun, request),

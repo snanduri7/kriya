@@ -2255,6 +2255,10 @@ class WorkflowEngine:
         # staged files as ``refused_candidate`` (an in-memory object; the enforce loop takes it off the result at once).
         carried_candidate: Optional[Any] = None,
         capture_refused_candidate: bool = False,
+        # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001 (kriya/workflow/verifier_repair.py): the one operator-authorized repair of this
+        # unit's verifier. The invocation gets ONE Developer answer, writes no stage checkpoint (a restarted run has no pre-repair owner and so no
+        # repair) and applies its candidate only after the same bytes were rejected against the pre-repair owner.
+        verifier_repair: Optional[Any] = None,
         migration_resolution: Optional["MigrationResolution"] = None,
         structured_plan: Optional["EngineeringPlan"] = None,
         current_subtask_id: Optional[str] = None,
@@ -2969,6 +2973,8 @@ class WorkflowEngine:
             def _save_stage_checkpoint(
                 stage: str, *, effective_obligation_ledger: Any = None, **extra: Any,
             ) -> None:
+                if verifier_repair is not None:
+                    return      # an authorized verifier repair is never resumable: its candidate may not outlive the in-memory pre-repair owner
                 # Checkpointing never fails the run (save_checkpoint swallows its
                 # own errors too). Without the block the checkpoint is simply
                 # UNVERIFIED on resume, never trusted.
@@ -3054,6 +3060,7 @@ class WorkflowEngine:
             execution_scope=execution_scope, reopened_owner=reopened_owner, migration_resolution=migration_resolution,
             dependent_verification_pending=dependent_verification_pending,
             carried_candidate=carried_candidate, capture_refused_candidate=capture_refused_candidate,
+            verifier_repair=verifier_repair,
             obligation_ledger=obligation_ledger, completed_subtask_ids=completed_subtask_ids,
             deterministic_failure_diagnostics=deterministic_failure_diagnostics,
         )

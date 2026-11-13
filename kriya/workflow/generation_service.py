@@ -503,9 +503,29 @@ async def _run_developer_generation(
         return await deps._run_developer_generation_as_developer(state, ctx, **kwargs)
 
 
+def _refuse_second_verifier_repair_answer(state: RunState, ctx: AttemptCtx) -> None:
+    """ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001: an authorized verifier repair is ONE Developer generation pass. Every generation of
+    every kind (first, targeted, fallback-targeted, full-set, missing-file, another model) goes through this entry, so the second one is refused
+    here whatever asked for it. Raised as a deterministic gate failure the retry strategy stops on (VERIFIER_REPAIR_FAILED)."""
+    if getattr(ctx, "verifier_repair", None) is None:
+        return
+    if ctx.developer_generation_passes >= 1:
+        from kriya.workflow.failure import Failure, QualityGateFailure
+        from kriya.workflow.verifier_repair import REFUSED_SECOND_ANSWER, VERIFIER_REPAIR_REFUSED_TYPE
+
+        message = (f"{REFUSED_SECOND_ANSWER}: the authorized verifier repair already used its one Developer answer; no further answer is "
+                   "requested.")
+        raise QualityGateFailure(Failure(
+            type=VERIFIER_REPAIR_REFUSED_TYPE, message=message, raw_output=message, source="orchestrator", attempt=state.attempt_number,
+            diagnostics={"reason_code": REFUSED_SECOND_ANSWER},
+        ))
+    ctx.developer_generation_passes += 1
+
+
 async def _run_developer_generation_as_developer(
     deps: GenerationDeps, state: RunState, ctx: AttemptCtx, **kwargs,
 ) -> List[Dict[str, str]]:
+    _refuse_second_verifier_repair_answer(state, ctx)
     targets = kwargs.get("known_target_files")
     file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
     kwargs = deps._enter_developer_model(state, ctx, kwargs)
@@ -535,7 +555,8 @@ async def _run_developer_generation_as_developer(
         try:
             result = await ctx.developer.run_generation(**kwargs)
         except deps.OutputBudgetUnsatisfiableError as refusal:
-            retry_kwargs = deps._lower_output_protocol_retry(state, ctx, kwargs, refusal, active_model)
+            retry_kwargs = (None if getattr(ctx, "verifier_repair", None) is not None      # the protocol fallback is a second Developer request
+                            else deps._lower_output_protocol_retry(state, ctx, kwargs, refusal, active_model))
             if retry_kwargs is None:
                 raise
             attempt_evidence_scope.record_authority_transition(

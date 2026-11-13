@@ -20,7 +20,9 @@ import { CANDIDATE_DIGEST_RE, LAUNCH_ID_RE, REVIEW_ID_RE } from './ipc_contract'
 export const REVIEW_CHANNEL_VERSION = 1;
 export const MAX_FRAME_BYTES = 16 * 1024;
 const CAPABILITY_RE = /^[0-9a-f]{64}$/;
-const KINDS = ['change_approval', 'runtime_command'] as const;
+// The third kind (owner rulings 2026-11-13): the operator's SEMANTIC authorization of one verifier repair. A host that does not list it refuses Kriya's review frame, so the
+// review is never offered and Kriya answers 'not authorized' (the safe routing): the table is what makes the subject reachable.
+export const KINDS = ['change_approval', 'runtime_command', 'verifier_defect_repair_authorization'] as const;
 export type ReviewKind = (typeof KINDS)[number];
 
 /** The slice of a Node socket the channel uses (net.Socket satisfies it; a test peer can too). */

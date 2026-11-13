@@ -578,7 +578,7 @@ async def _run_executing_candidate_gates(
         })
         if not compile_res["success"]:
             self_correction_result = None
-            if ctx.kernel.config.autonomy.self_correction_loop_enabled and ctx.post_source_review_guard is None:
+            if ctx.kernel.config.autonomy.self_correction_loop_enabled and ctx.post_source_review_guard is None and getattr(ctx, "verifier_repair", None) is None:
                 run_self_correction_loop = deps.load_run_self_correction_loop()
                 deps.logger.info(
                     "Compile gate failed - attempting bounded self-correction "
@@ -852,7 +852,7 @@ async def _run_executing_candidate_gates(
                 accepted_test_result = test_res
 
             if target_test and not test_res["success"]:
-                if ctx.kernel.config.autonomy.self_correction_loop_enabled and ctx.post_source_review_guard is None:
+                if ctx.kernel.config.autonomy.self_correction_loop_enabled and ctx.post_source_review_guard is None and getattr(ctx, "verifier_repair", None) is None:
                     run_repair_loop = deps.load_run_repair_loop()
                     test_repair_result = await run_repair_loop(
                         llm=ctx.developer.llm,

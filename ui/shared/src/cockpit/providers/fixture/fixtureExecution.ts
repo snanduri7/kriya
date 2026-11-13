@@ -7,10 +7,10 @@
  * The host-process side (`ExecutionHostPort`) reports only the process, exactly like the real host.
  */
 import type { ExecutionHostPort, NotifyRequest, NotifyResult } from '../../../host/HostAdapter';
-import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, ExecutionPreflight, ExecutionState, ProjectMemory, StartRunResult } from '../../../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, DecideVerifierRepairRequest, ExecutionPreflight, ExecutionState, ProjectMemory, StartRunResult } from '../../../model/kup';
 import type { RequirementTruthStatus } from '../../core/presentation';
 
-export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review' | 'runtime_review';
+export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review' | 'runtime_review' | 'verifier_review';
 
 export interface FixtureExecutionOptions {
   /** Scripted VERIFIED PROJECT MEMORY (DEV/TEST ONLY): the `memory` block of `execution.preflight` for every folder; absent = an older Kriya that reports none. */
@@ -58,6 +58,8 @@ export interface FixtureExecutionOptions {
   review?: { fault?: 'unavailable' | 'unverified'; truncated?: boolean; /** The review answers with a candidate digest that is NOT the pending review's (a host or store out of step). */ digestMismatch?: boolean };
   /** How the scripted runtime-command review behaves (DEV/TEST ONLY): Kriya cannot prove the recorded commands against their fingerprint (`unverified`), so none are shown. */
   runtimeReview?: { fault?: 'unverified' };
+  /** The verifier-repair authorization review: `unverified` = Kriya's read-time proof of the recorded verifier/contract failed (the review is served, flagged not verified). */
+  verifierReview?: { fault?: 'unverified' };
   /** A failed run whose recorded ApplicationOutcome says runtime verification could not start, with Kriya's own closed reason code (nothing was executed). */
   blockedReason?: 'MANAGED_SERVICE_APPROVAL_UNSUPPORTED' | 'REQUIRED_RUNTIME_VERIFICATION_DECLINED' | 'REQUIRED_RUNTIME_VERIFICATION_DISABLED';
   /** A failed run Kriya refused to START because the repository layer found entries it does not own in a new project folder: the run's recorded `membership_authority.unavailable` event carries its reason code and (bounded) entry names. */
@@ -70,6 +72,7 @@ export interface FixtureExecutionOptions {
   runtimeObservation?: { command: string; exitStatus: number | null; stdout: string; truncated?: boolean; stdoutLost?: boolean };
   /** The host has no runtime-command decision path (an older host): the review is shown but cannot be decided from this window. */
   noRuntimeDecisionPort?: boolean;
+  noVerifierDecisionPort?: boolean;
   /** The host refuses the start with this typed refusal (EXECUTION_BUSY is produced by the real host; here for UI tests). */
   refuseStart?: { code: string; message: string };
 }
@@ -84,6 +87,14 @@ export const RUNTIME_COMMANDS: [string, ...string[]][] = [['mvn', '-q', 'package
 export const RUNTIME_WORKTREE = '/fixture/.kriya/worktrees/candidate-1';
 export const RUNTIME_CRITERION = 'The application prints "Hello from Kriya" and exits with status 0.';
 export const RUNTIME_FINGERPRINT = 'sha256:' + '5e'.repeat(32);
+export const VERIFIER_FINGERPRINT = 'sha256:' + '7a'.repeat(32);
+export const VERIFIER_PATH = 'src/test/java/com/example/ProtocolParserTest.java';
+export const VERIFIER_SOURCE = 'class ProtocolParserTest {\n  void roundTrip() { assertEquals(0, decoded.getDataLength()); }\n}\n';
+export const VERIFIER_CONTRACT = 'dataLength is the number of bytes in body; encode and decode must not change the Protocol they are given.';
+export const VERIFIER_PRE_REPAIR_OUTCOME = 'java.nio.BufferOverflowException at ProtocolParser.encode(ProtocolParser.java:15)';
+export const VERIFIER_REPLAY_OUTCOME = 'ProtocolParserTest.roundTrip:24 expected: <0> but was: <15>';
+export const VERIFIER_QUESTION = 'Does this verifier expectation conflict with the canonical contract, authorizing one verifier repair?';
+export const VERIFIER_NOTICE = 'Kriya never repairs a verifier on its own: a failing verifier is evidence against the code it checks.';
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
 const REVIEW_FRAME = 3;
 const RECORD_KINDS = ['run.opened', 'unit.opened', 'attempt.opened', 'model.request', 'model.response', 'candidate.change', 'gate.result', 'gate.result', 'attempt.closed', 'run.closed'];
@@ -120,6 +131,7 @@ export class FixtureExecution {
   readonly decisions: DecideApprovalRequest[] = [];
   /** Every runtime-command decision request that reached Kriya (a request refused or cancelled in the host never gets here). */
   readonly runtimeDecisions: DecideRuntimeCommandRequest[] = [];
+  readonly verifierDecisions: DecideVerifierRepairRequest[] = [];
   readonly port: ExecutionHostPort;
   /** Every configuration approval request the host received, and every status read (for assertions). */
   readonly approvals: ApproveConfigurationRequest[] = [];
@@ -165,6 +177,7 @@ export class FixtureExecution {
       },
       decideApproval: async (request): Promise<DecideApprovalResult> => this.decide(request),
       ...(options.noRuntimeDecisionPort ? {} : { decideRuntimeCommand: async (request: DecideRuntimeCommandRequest): Promise<DecideRuntimeCommandResult> => this.decideRuntime(request) }),
+      ...(options.noVerifierDecisionPort ? {} : { decideVerifierRepair: async (request: DecideVerifierRepairRequest): Promise<DecideRuntimeCommandResult> => this.decideVerifier(request) }),
       ...(options.configuration?.noApprovalPort ? {} : { approveConfiguration: async (request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult> => this.confirmThenApprove(request) }),
       ...(options.configuration?.noSetupPort ? {} : { initializeProject: async (request: InitializeProjectRequest): Promise<InitializeProjectResult> => this.initializeProjectNow(request) }),
       notify: async (request): Promise<NotifyResult> => { this.notifications.push(request); return { shown: true, reason: 'shown' }; },
@@ -250,7 +263,7 @@ export class FixtureExecution {
   /** Test hook: jump to the final frame (a run waiting on an undecided review cannot be finished: it is waiting). */
   finish(): void { if (this.frame >= 0 && !this.reviewPending()) this.frame = 4; }
   /** The run is waiting on the human's decision (a pending review exists and nobody has decided it). */
-  private reviewOutcome(): boolean { return this.outcome === 'review' || this.outcome === 'runtime_review'; }
+  private reviewOutcome(): boolean { return this.outcome === 'review' || this.outcome === 'runtime_review' || this.outcome === 'verifier_review'; }
   reviewPending(): boolean { return this.reviewOutcome() && this.frame === REVIEW_FRAME && this.reviewStatus === 'PENDING'; }
   /** Test hook: the execution process is killed (SIGKILL) where it stands - the launch record stays RUNNING, the workspace lock is released, nothing is sealed. */
   killProcess(): void { this.killed = true; }
@@ -284,6 +297,7 @@ export class FixtureExecution {
   }
   private idFor(n: number): string { return n === 1 ? REVIEW_ID : 'ra-' + String(n).padStart(2, '0').repeat(12); }
   private digestFor(n: number): string { return n === 1 ? REVIEW_DIGEST : 'sha256:' + String(n).padStart(2, '0').repeat(32); }
+  private verifierFingerprint(): string { return this.reviewSequence === 1 ? VERIFIER_FINGERPRINT : 'sha256:' + String(this.reviewSequence).padStart(2, '0').repeat(32); }
   private runtimeFingerprint(): string { return this.reviewSequence === 1 ? RUNTIME_FINGERPRINT : 'sha256:' + String(this.reviewSequence).padStart(2, '0').repeat(32); }
   private reviewDigest(): string { return this.reviewSequence === 1 ? REVIEW_DIGEST : 'sha256:' + String(this.reviewSequence).padStart(2, '0').repeat(32); }
 
@@ -340,6 +354,20 @@ export class FixtureExecution {
   private pendingReview(): Json | null {
     if (!this.reviewOutcome() || this.frame < REVIEW_FRAME) return null;
     const decided = this.reviewStatus !== 'PENDING';
+    if (this.outcome === 'verifier_review') {
+      return {
+        review_id: this.reviewId(), sequence: this.reviewSequence, kind: 'verifier_defect_repair_authorization', status: this.reviewStatus, requested_at: '2026-10-10T10:11:00+00:00', expires_at: '2026-10-10T11:11:00+00:00',
+        candidate_digest: this.verifierFingerprint(), authorization_fingerprint: this.verifierFingerprint(), verified: this.options.verifierReview?.fault !== 'unverified',
+        question: VERIFIER_QUESTION, notice: VERIFIER_NOTICE, verifier_unit_id: 's5', owner_unit_id: 's3',
+        bindings: { run_id: LAUNCH_ID, plan_hash: 'sha256:' + '1b'.repeat(32), recovery_plan_id: 'recovery.s5.0', recovery_generation: 0, goal_digest: 'c0'.repeat(32), verification_contract_digest: null,
+          pre_repair_failure_identity: 'f0'.repeat(32), replay_failure_identity: 'f1'.repeat(32) },
+        verifier_files: [{ path: VERIFIER_PATH, sha256: 'a0'.repeat(32), source: VERIFIER_SOURCE }], contract_text: VERIFIER_CONTRACT, contract_digest: 'c0'.repeat(32),
+        pre_repair_owner_files: [{ path: 'src/main/java/com/example/ProtocolParser.java', sha256: '00'.repeat(32) }],
+        repaired_owner_files: [{ path: 'src/main/java/com/example/ProtocolParser.java', sha256: '01'.repeat(32) }],
+        pre_repair_outcome: VERIFIER_PRE_REPAIR_OUTCOME, replay_outcome: VERIFIER_REPLAY_OUTCOME, replay_failure_type: 'targeted_test',
+        decision: decided ? { decision: this.reviewStatus === 'APPROVED' ? 'approve' : 'reject', decided_at: '2026-10-10T10:11:30+00:00', source: 'launch-decision' } : null,
+      };
+    }
     if (this.outcome === 'runtime_review') {
       return {
         review_id: this.reviewId(), sequence: this.reviewSequence, kind: 'runtime_command', status: this.reviewStatus, requested_at: '2026-10-10T10:11:00+00:00', expires_at: '2026-10-10T11:11:00+00:00',
@@ -360,8 +388,8 @@ export class FixtureExecution {
   private statusFor(outcome: FixtureOutcome): Json | null {
     const f = this.frame;
     const lines = LINES_AT[f] ?? 0;
-    const approved = (outcome === 'review' || outcome === 'runtime_review') && this.reviewStatus === 'APPROVED';
-    const rejected = (outcome === 'review' || outcome === 'runtime_review') && this.reviewStatus === 'REJECTED';
+    const approved = (outcome === 'review' || outcome === 'runtime_review' || outcome === 'verifier_review') && this.reviewStatus === 'APPROVED';
+    const rejected = (outcome === 'review' || outcome === 'runtime_review' || outcome === 'verifier_review') && this.reviewStatus === 'REJECTED';
     const ok = outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined' || approved;
     const sealed = f === 4 && (ok || outcome === 'failure' || rejected);
     const refused = outcome === 'refused' && f === 4;
@@ -407,6 +435,7 @@ export class FixtureExecution {
     if (this.killed) return no('LAUNCH_NOT_ACTIVE', 'the run that was waiting for this decision is no longer running');
     if (this.frame === 4) return no('LAUNCH_ENDED', 'the run has already ended; there is nothing left to approve');
     if (this.outcome === 'runtime_review' && this.frame >= REVIEW_FRAME) return no('WRONG_REVIEW_KIND', 'that review asks to run commands; it is decided as a runtime-command review');
+    if (this.outcome === 'verifier_review' && this.frame >= REVIEW_FRAME) return no('WRONG_REVIEW_KIND', 'that review is a verifier repair authorization; it is decided as one');
     if (this.outcome !== 'review' || this.frame < REVIEW_FRAME) return no('NOT_PENDING', 'no change is waiting for review in this launch');
     if (this.reviewSuperseded || request.review_id !== this.reviewId() || request.candidate_digest !== this.reviewDigest()) return no('STALE_REVIEW', 'the change under review is no longer the one you were shown; review it again');
     if (this.reviewStatus !== 'PENDING') return no('ALREADY_DECIDED', `this review is already ${this.reviewStatus.toLowerCase()}`);
@@ -425,6 +454,27 @@ export class FixtureExecution {
       criterion: RUNTIME_CRITERION, commands: RUNTIME_COMMANDS, working_directory: RUNTIME_WORKTREE, working_directory_kind: 'ISOLATED_WORKTREE', input_channel: 'none', stdin_present: false, environment_names: [],
       requested_at: '2026-10-10T10:11:00+00:00', expires_at: '2026-10-10T11:11:00+00:00',
     } };
+  }
+  /** The host's verifier-repair authorization decision, scripted: an approve passes the (scripted) NATIVE confirmation first; Cancel sends nothing and leaves the review pending. The host refuses an
+   * approve Kriya did not verify (AUTHORIZATION_NOT_REVIEWABLE) before any confirmation. Kriya's closed refusals, in order, otherwise. */
+  private decideVerifier(request: DecideVerifierRepairRequest): DecideRuntimeCommandResult {
+    const no = (code: string, message: string): DecideRuntimeCommandResult => ({ accepted: false, code, message, launch_id: null, review_id: null, decision: null, decided_at: null });
+    if (request.decision === 'approve') {
+      if (this.options.verifierReview?.fault === 'unverified') return no('AUTHORIZATION_NOT_REVIEWABLE', 'Kriya could not confirm the exact verifier and contract that are waiting for your decision, so nothing was sent.');
+      this.confirmationsShown += 1;
+      if (this.nativeAnswers.length > 0 && this.nativeAnswers.shift() === false) return no('CONFIRMATION_DECLINED', 'Nothing was authorized. The request is still waiting for your decision.');
+    }
+    this.verifierDecisions.push(request);
+    if (this.frame < 0 || request.launch_id !== LAUNCH_ID) return no('LAUNCH_NOT_FOUND', `no launch ${request.launch_id} is recorded for this folder`);
+    if (request.workspace !== this.launchWorkspace) return no('WRONG_WORKSPACE', 'this launch belongs to a different workspace');
+    if (this.killed) return no('LAUNCH_NOT_ACTIVE', 'the run that was waiting for this decision is no longer running');
+    if (this.frame === 4) return no('LAUNCH_ENDED', 'the run has already ended; there is nothing left to decide');
+    if (this.outcome !== 'verifier_review' && this.reviewOutcome() && this.frame >= REVIEW_FRAME) return no('WRONG_REVIEW_KIND', 'the review waiting is not a verifier repair authorization');
+    if (this.outcome !== 'verifier_review' || this.frame < REVIEW_FRAME) return no('NOT_PENDING', 'no verifier repair authorization is waiting in this launch');
+    if (this.reviewSuperseded || request.review_id !== this.reviewId() || request.authorization_fingerprint !== this.verifierFingerprint()) return no('STALE_REVIEW', 'the request under review is no longer the one you were shown; review it again');
+    if (this.reviewStatus !== 'PENDING') return no('ALREADY_DECIDED', `this review is already ${this.reviewStatus.toLowerCase()}`);
+    this.reviewStatus = request.decision === 'approve' ? 'APPROVED' : 'REJECTED';
+    return { accepted: true, code: 'ACCEPTED', message: `${request.decision} recorded for review ${request.review_id}; the waiting run records it and continues`, launch_id: LAUNCH_ID, review_id: this.reviewId(), decision: request.decision, decided_at: '2026-10-10T10:11:30+00:00' };
   }
   /** The host's runtime-command decision, scripted: an approve passes the (scripted) NATIVE confirmation first; Cancel sends nothing and leaves the review pending. Kriya's closed refusals, in order, otherwise. */
   private decideRuntime(request: DecideRuntimeCommandRequest): DecideRuntimeCommandResult {

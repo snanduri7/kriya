@@ -132,6 +132,49 @@ def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequenc
     }
 
 
+OUTCOME_MAX_CHARS = 12000
+
+
+def build_pending_verifier_repair(launch_id: str, workspace_identity_value: str, sequence: int, subject: Any) -> Optional[Dict[str, Any]]:
+    """The pending VERIFIER-DEFECT REPAIR AUTHORIZATION review (owner rulings 2026-11-13; a third subject): the exact verifier source and digest, the canonical
+    contract text and digest, both deterministic gate outcomes and every binding, bound by ``candidate_digest`` (= the subject's fingerprint). None - the review is
+    not offered - when the subject cannot be shown exactly (``verifier_repair_reviewable``: a text the redaction owner would alter is not the bytes the digest
+    binds). The two gate outcomes are display text (redacted, bounded); their identities are in the fingerprint. The owner's pre-repair BYTES are never here."""
+    if not _owner.verifier_repair_reviewable(subject):
+        return None
+    digest = subject.fingerprint
+    requested = _now()
+    sources = dict(subject.verifier_sources)
+    return {
+        "review_id": review_identity(launch_id, workspace_identity_value, sequence, digest, _owner.VERIFIER_REPAIR_QUESTION), "sequence": sequence,
+        "kind": _owner.KIND_VERIFIER_REPAIR, "status": STATUS_PENDING, "requested_at": _stamp(requested),
+        "expires_at": _stamp(requested + timedelta(seconds=APPROVAL_WAIT_SECONDS)),
+        "candidate_digest": digest, "authorization_fingerprint": digest,
+        "question": _owner.VERIFIER_REPAIR_QUESTION, "notice": _owner.VERIFIER_REPAIR_NOTICE,
+        "verifier_unit_id": subject.verifier_unit_id, "owner_unit_id": subject.owner_unit_id,
+        "bindings": {
+            "run_id": subject.run_id, "plan_hash": subject.plan_hash, "recovery_plan_id": subject.recovery_plan_id,
+            "recovery_generation": subject.recovery_generation, "goal_digest": subject.goal_digest,
+            "verification_contract_digest": subject.verification_contract_digest,
+            "pre_repair_failure_identity": subject.pre_repair_failure_identity, "replay_failure_identity": subject.replay_failure_identity,
+        },
+        "verifier_files": [{"path": path, "sha256": sha, "source": sources[path]} for path, sha in subject.verifier_files],
+        "contract_text": subject.contract_text, "contract_digest": subject.goal_digest,
+        "pre_repair_owner_files": [{"path": path, "sha256": sha} for path, sha in subject.pre_repair_owner_files],
+        "repaired_owner_files": [{"path": path, "sha256": sha} for path, sha in subject.repaired_owner_files],
+        "pre_repair_outcome": redact_text(subject.pre_repair_outcome)[:OUTCOME_MAX_CHARS],
+        "replay_outcome": redact_text(subject.replay_outcome)[:OUTCOME_MAX_CHARS], "replay_failure_type": subject.replay_failure_type,
+        "decision": None,
+    }
+
+
+async def await_verifier_repair_decision(session: Any, review_id: str, fingerprint: str) -> Any:
+    """The verifier-repair authorization's wait: the same durable, fail-closed decision as a change review, answered with the fingerprint the authorization is
+    bound to. Anything but a durable approval (a rejection, an expiry, a host that went away, a decision that could not be recorded) is "not authorized"."""
+    outcome = await await_decision(session, review_id, fingerprint)
+    return _owner.VerifierRepairDecision(fingerprint if outcome.approved else None)
+
+
 async def await_decision(session: Any, review_id: str, digest: str) -> _owner.ApprovalOutcome:
     """Block (cooperatively) until the review is decided, expired or abandoned. APPROVED only for a durable approval; DECLINED only for a durable rejection by the person;
     UNAVAILABLE (with its reason code) when nobody decided - the review expired, the host went away, the wait was interrupted - or the decision could not be made durable."""

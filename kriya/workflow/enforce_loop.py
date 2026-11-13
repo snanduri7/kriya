@@ -38,7 +38,15 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from kriya.config.authority import AutonomyModeError, is_human_in_the_loop
 from kriya.core.state_paths import resolve_state_directory
+from kriya.policy.approval import (
+    TypedApprovalCallback,
+    VerifierRepairSubject,
+    ask_verifier_repair,
+    verifier_repair_matches,
+    verifier_repair_reviewable,
+)
 from kriya.repository.atomic_write import DurableWriteError
 from kriya.repository.bound_tree import BoundTreeError, admit_workspace_for_mutation
 from kriya.repository.git import RepositoryContentFilterRefused
@@ -58,6 +66,23 @@ from kriya.workflow.resume_support import (
     TOOL_STARTED_NOT_DURABLE,
 )
 from kriya.workflow.subtask_executor import plannable_tool_names
+from kriya.workflow.verifier_repair import (
+    REFUSED_AUTHORIZATION_STALE,
+    UNAVAILABLE_ALREADY_ASKED,
+    UNAVAILABLE_BINDING_CHANGED,
+    UNAVAILABLE_NO_CHANNEL,
+    UNAVAILABLE_NO_PRE_REPAIR_OWNER,
+    UNAVAILABLE_NOT_REVIEWABLE,
+    UNAVAILABLE_OWNER_UNCHANGED,
+    UNAVAILABLE_UNATTENDED,
+    VERIFIER_REPAIR_CONTEXT,
+    VERIFIER_REPAIR_FAILED,
+    VERIFIER_REPAIR_FAILURE_CATEGORY,
+    VERIFIER_REPAIR_ROLE,
+    PreRepairOwner,
+    VerifierRepairTransaction,
+    capture_pre_repair_owner,
+)
 from kriya.workflow.verifier_replay import (
     DEPENDENT_VERIFICATION_PENDING_CONTEXT,
     REPLAY_BYTES_MISMATCH,
@@ -1699,6 +1724,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # owner ending on the generation budget; the terminal read only the consumer's own result and reported a plan-scope conflict (run 7)
         # or a bare needs_review (run 9). Set on every unit invocation, so any later invocation clears it.
         recovery_invocation_stop: Optional[Dict[str, Any]] = None
+        # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001 (kriya/workflow/verifier_repair.py). All run-local, in memory, never persisted:
+        # the pre-repair owner (O0) of each consumer's ACTIVE recovery episode; the consumers whose episode cannot offer a repair (no exact O0);
+        # whether the operator was already asked in this run (at most once, whatever the answer); the record of that one request for the run's
+        # result; and the typed stop of an authorized repair that did not end in an applied verifier (it ends the run).
+        pre_repair_owners: Dict[str, PreRepairOwner] = {}
+        verifier_repair_ineligible: set = set()
+        verifier_repair_asked = False
+        verifier_repair_record: Optional[Dict[str, Any]] = None
+        verifier_repair_stop: Optional[Dict[str, Any]] = None
         # MA8.1 completion (2026-08-29 v2 design review): "Requirement-
         # scoped repeated owner recovery." A live PRV-06 run proved a bare
         # owner-id set (reopen each owner at most once per run) is the
@@ -1807,6 +1841,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             grounded_locations: Sequence[Mapping[str, Any]] = (),
             carried_candidate: Optional[ReplayHandle] = None,
             mutation_scope: Optional[Sequence[str]] = None,
+            verifier_repair: Optional[VerifierRepairTransaction] = None,
         ) -> Dict[str, Any]:
             target_goal = deps.build_subtask_goal_text(
                 target, target_position, total, plan=plan, grounding_goal=goal,
@@ -1923,6 +1958,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # it stops, and a consumer retry may carry that candidate in instead of generating.
                 capture_refused_candidate=bool(target.planned_files),
                 carried_candidate=carried_candidate,
+                verifier_repair=verifier_repair,
                 strict_dependency_index=bool(
                     process_profiles is not None
                     and getattr(process_profiles, "enabled", False) is True
@@ -1984,6 +2020,178 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         def _dependent_failure_identity(unit_result: Mapping[str, Any]) -> Optional[str]:
             last = unit_result.get("last_failure") or {}
             return failure_identity(last.get("type"), last.get("raw_output")) if last else None
+
+        def _drop_pre_repair_owner(consumer_id: str) -> None:
+            """The consumer's recovery episode is over (settled, refused or exhausted): its O0 goes with it."""
+            pre_repair_owners.pop(consumer_id, None)
+            verifier_repair_ineligible.discard(consumer_id)
+
+        def _capture_pre_repair_owner(
+            consumer: Subtask, owner_id: str, paths: Sequence[str], recovery_plan_id: str, generation: int,
+            consumer_result: Mapping[str, Any],
+        ) -> None:
+            """Called immediately BEFORE an owner is reopened for ``consumer``. The FIRST reopen of the episode captures O0: the exact bytes of
+            the owner's implicated files, checked against the repository's file-revision authority, bound to the consumer's refused candidate
+            (V0). A later reopen keeps that O0 (it is the state the verifier first refused); anything that makes it inexact - no refused
+            candidate to bind, an unreadable file, a second owner, a wider path set - ends the episode's eligibility instead of guessing."""
+            if consumer.id in verifier_repair_ineligible:
+                return
+            existing = pre_repair_owners.get(consumer.id)
+            if existing is not None:
+                if existing.owner_id != owner_id or not set(paths) <= set(existing.paths):
+                    pre_repair_owners.pop(consumer.id, None)
+                    verifier_repair_ineligible.add(consumer.id)
+                return
+            handle = replay_handles.get(consumer.id)
+            last = consumer_result.get("last_failure") or {}
+            captured = None if handle is None else capture_pre_repair_owner(
+                workspace_path=plan_workspace_path, paths=list(paths), journal_revision=deps.read_file_revision, run_id=run_id,
+                plan_hash=current_plan_hash, recovery_plan_id=recovery_plan_id, recovery_generation=generation, owner_id=owner_id,
+                verifier_unit_id=consumer.id, verifier_files=tuple(handle.expected_digests().items()),
+                reopening_failure_identity=_dependent_failure_identity(consumer_result),
+                reopening_outcome=str(last.get("raw_output") or last.get("message") or ""),
+            )
+            if captured is None:
+                verifier_repair_ineligible.add(consumer.id)
+                return
+            pre_repair_owners[consumer.id] = captured
+
+        async def _maybe_repair_verifier(
+            consumer: Subtask, consumer_position: int, handle: ReplayHandle, replay_result: Mapping[str, Any], recovery_plan_id: str,
+            recovery_generation: int,
+        ) -> Optional[Dict[str, Any]]:
+            """The replayed verifier failed against the repaired owner without naming it. Kriya cannot decide whether the verifier or the owner
+            is wrong, and today's routing (the failure goes back to the owner) stands unless a PERSON says the verifier conflicts with the
+            canonical contract. In human-in-the-loop mode, once per run, with an exact O0 in hand, the operator is asked. None = no repair was
+            authorized (not asked, declined, cancelled, expired, no channel): the caller continues exactly as before. Otherwise the result of
+            the ONE repair invocation; when that did not end in an applied verifier, ``verifier_repair_stop`` is set and the run ends."""
+            nonlocal verifier_repair_asked, verifier_repair_record, verifier_repair_stop
+            last = replay_result.get("last_failure") or {}
+            if (enforce_unit_gates_accepted(replay_result) or replay_result.get("plan_scope_conflict")
+                    or replay_result.get("environment_failure") or not last):
+                return None
+
+            def _unavailable(code: str) -> None:
+                deps.logger.info("VERIFIER_REPAIR_NOT_OFFERED subtask=%s reason=%s - the replay failure goes back to the owner.", consumer.id, code)
+
+            try:
+                attended = is_human_in_the_loop(getattr(getattr(kernel_config, "autonomy", None), "mode", None))
+            except AutonomyModeError:
+                attended = False      # a mode that cannot be read is never read as human-in-the-loop: no repair (the restrictive branch)
+            if not attended:
+                return _unavailable(UNAVAILABLE_UNATTENDED)
+            if verifier_repair_asked:
+                return _unavailable(UNAVAILABLE_ALREADY_ASKED)
+            pre_repair = pre_repair_owners.get(consumer.id)
+            if pre_repair is None:
+                return _unavailable(UNAVAILABLE_NO_PRE_REPAIR_OWNER)
+            replay_identity = _dependent_failure_identity(replay_result)
+
+            def _subject_now() -> Optional[VerifierRepairSubject]:
+                """The subject from the CURRENT run state (never from the one that was shown): the live replay handle, the live plan hash, the
+                owner bytes on disk now. None when O0 is no longer valid under them."""
+                live = replay_handles.get(consumer.id)
+                # (the failed replay left a NEW handle object for the same refused bytes: identity is the byte digests, not the object)
+                if (live is None or live.expected_digests() != handle.expected_digests()
+                        or not all(file.intact() for file in live.candidate.files)):
+                    return None
+                verifier_files = tuple(sorted(live.expected_digests().items()))
+                if pre_repair_owners.get(consumer.id) is not pre_repair or pre_repair.refusal(
+                    run_id=run_id, plan_hash=current_plan_hash, owner_id=pre_repair.owner_id, verifier_unit_id=consumer.id,
+                    verifier_files=verifier_files,
+                ) is not None:
+                    return None
+                return VerifierRepairSubject(
+                    run_id=run_id, plan_hash=current_plan_hash, recovery_plan_id=recovery_plan_id, recovery_generation=recovery_generation,
+                    verifier_unit_id=consumer.id, owner_unit_id=pre_repair.owner_id, verifier_files=verifier_files,
+                    goal_digest=replay_goal_digest(goal), verification_contract_digest=verification_contract.digest,
+                    pre_repair_owner_files=pre_repair.digests(),
+                    repaired_owner_files=tuple(
+                        (path, deps.read_file_revision(os.path.join(plan_workspace_path, path))) for path in pre_repair.paths
+                    ),
+                    pre_repair_failure_identity=pre_repair.reopening_failure_identity, replay_failure_identity=replay_identity or "",
+                    contract_text=goal, verifier_sources=tuple((file.path, file.content) for file in live.candidate.files),
+                    pre_repair_outcome=pre_repair.reopening_outcome[:_VERIFIER_REPAIR_OUTCOME_MAX_CHARS],
+                    replay_outcome=str(last.get("raw_output") or last.get("message") or "")[:_VERIFIER_REPAIR_OUTCOME_MAX_CHARS],
+                    replay_failure_type=str(last.get("type") or ""),
+                )
+
+            subject = _subject_now()
+            if subject is None:
+                return _unavailable(UNAVAILABLE_BINDING_CHANGED)
+            if subject.pre_repair_owner_files == subject.repaired_owner_files:
+                return _unavailable(UNAVAILABLE_OWNER_UNCHANGED)
+            callback = legacy_kwargs.get("approval_callback")
+            if not isinstance(callback, TypedApprovalCallback) or callback.verifier_repair_review is None:
+                return _unavailable(UNAVAILABLE_NO_CHANNEL)
+            if not verifier_repair_reviewable(subject):
+                return _unavailable(UNAVAILABLE_NOT_REVIEWABLE)
+            verifier_repair_asked = True          # the run's one opportunity is used from here on, whatever the answer
+            deps.logger.info(
+                "VERIFIER_REPAIR_AUTHORIZATION_REQUESTED subtask=%s owner=%s fingerprint=%s", consumer.id, pre_repair.owner_id, subject.fingerprint,
+            )
+            decision = await ask_verifier_repair(callback, subject)
+            record: Dict[str, Any] = {
+                "subtask_id": consumer.id, "owner_subtask_id": pre_repair.owner_id, "authorization_fingerprint": subject.fingerprint,
+                "authorized": decision.approved, "verifier_files": dict(subject.verifier_files),
+                "pre_repair_owner_files": dict(subject.pre_repair_owner_files), "repaired_owner_files": dict(subject.repaired_owner_files),
+                "pre_repair_failure_identity": subject.pre_repair_failure_identity, "replay_failure_identity": subject.replay_failure_identity,
+                "outcome": "not_authorized",
+            }
+            verifier_repair_record = record
+            if not decision.approved:
+                deps.logger.info(
+                    "VERIFIER_REPAIR_NOT_AUTHORIZED subtask=%s - nobody declared the verifier invalid; the replay failure goes back to the "
+                    "owner.", consumer.id,
+                )
+                return None
+
+            def _still_authorized() -> bool:
+                current = _subject_now()
+                return current is not None and verifier_repair_matches(decision, current)
+
+            def _stop(reason: str, unit_result: Dict[str, Any]) -> Dict[str, Any]:
+                nonlocal verifier_repair_stop
+                record["outcome"] = "refused"
+                record["reason"] = reason
+                verifier_repair_stop = {"subtask_id": consumer.id, "call_result": {
+                    "failure_category": VERIFIER_REPAIR_FAILURE_CATEGORY, "environment_failure": reason,
+                }}
+                deps.logger.error(
+                    "VERIFIER_REPAIR_REFUSED subtask=%s - %s. The verifier was declared invalid by the operator, so its failure is not sent "
+                    "back to the owner; the run stops for review.", consumer.id, reason,
+                )
+                return unit_result
+
+            if not _still_authorized():
+                # nothing was generated: the consumer's result is still the failed replay
+                return _stop(f"{REFUSED_AUTHORIZATION_STALE}: a binding of the authorization changed before the repair started", dict(replay_result))
+            deps.logger.info("VERIFIER_REPAIR_AUTHORIZED subtask=%s fingerprint=%s - one Developer answer.", consumer.id, subject.fingerprint)
+            transaction = VerifierRepairTransaction(
+                pre_repair=pre_repair, authorization_fingerprint=subject.fingerprint, still_authorized=_still_authorized, outcomes=[],
+            )
+            repair_result = await _invoke_bounded_subtask(
+                consumer, consumer_position,
+                recovery_context=VERIFIER_REPAIR_CONTEXT.format(
+                    failure_type=subject.replay_failure_type or "gate", evidence=subject.replay_outcome,
+                    sources="\n".join(f"File: {path}\n{text}" for path, text in subject.verifier_sources),
+                ),
+                execution_role=VERIFIER_REPAIR_ROLE, verifier_repair=transaction,
+            )
+            record["counterfactual"] = [dict(outcome) for outcome in transaction.outcomes]
+            if enforce_unit_gates_accepted(repair_result):
+                record["outcome"] = "applied"
+                record["repaired_verifier_files"] = {
+                    path: deps.read_file_revision(os.path.join(plan_workspace_path, path)) for path, _digest in subject.verifier_files
+                }
+                deps.logger.info(
+                    "VERIFIER_REPAIR_APPLIED subtask=%s - the repaired verifier passed against the repaired owner and was rejected against the "
+                    "pre-repair owner.", consumer.id,
+                )
+                return repair_result
+            repair_failure = repair_result.get("last_failure") or {}
+            detail = str(repair_failure.get("message") or repair_result.get("environment_failure") or repair_result.get("status") or "").strip()
+            return _stop(f"{VERIFIER_REPAIR_FAILED}: the authorized repair did not produce an accepted verifier ({detail[:600]})", repair_result)
 
         # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001: each verification-only unit starts ONE owner-reopen
         # episode per run (the bound), whatever its owners then produce. VERIFICATION-OWNER-REOPEN-SINGLE-OWNER-001
@@ -3192,6 +3400,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             )
 
                         targets_before, owner_before = _revisions(target_files), _revisions(owner_files)
+                        pre_repair_owners.pop(subtask.id, None)       # a MAY_CHANGE owner run is not an exact O0/O1 pair: no verifier repair
+                        verifier_repair_ineligible.add(subtask.id)
                         owner_result = await _invoke_bounded_subtask(
                             owner, owner_position, recovery_context=recovery_context,
                             execution_role="may_change_owner_recovery",
@@ -3287,6 +3497,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     invalidation = _invalidate_dependents(owner_id)   # R4: the one invalidation
                     invalidated = invalidation["invalidated"]
                     owner_bytes_before = _stage_revisions(owner)
+                    # O0, before anything can change the owner's implicated files (kriya/workflow/verifier_repair.py).
+                    _capture_pre_repair_owner(subtask, owner_id, sorted(required_owner_files), exec_plan.id, generation, call_result)
                     approved_stage_states[owner_id] = "in_progress"
                     control_state = control_state.with_updates(
                         subtask_states={**control_state.subtask_states, owner_id: "in_progress"},
@@ -3589,6 +3801,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             else:
                                 call_result = replay_result
                                 verifier_replayed = True
+                                repaired_result = await _maybe_repair_verifier(
+                                    subtask, position, replay_handle, replay_result, exec_plan.id,
+                                    recovery_plan_generation_by_subtask.get(subtask.id, 0),
+                                )
+                                if repaired_result is not None:
+                                    call_result = repaired_result
                         if not verifier_replayed:
                             call_result = await _invoke_bounded_subtask(
                                 subtask, position, recovery_context=pending_context,
@@ -3781,6 +3999,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 if plan_recovery_accepted:
                     replay_handles.pop(subtask.id, None)       # the episode settled: nothing left to replay
+                    _drop_pre_repair_owner(subtask.id)
                     # An owner an EARLIER cycle of this episode left disproved and this cycle did not run again (a carried-forward
                     # or unchanged participant): the dependent verification that just passed ran against its current bytes too.
                     for result_index, prior_result in enumerate(subtask_results):
@@ -3814,6 +4033,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # original single-owner "not owner_local_accepted"
                     # branch's own unconditional break.
                     break
+                if verifier_repair_stop is not None:
+                    # An authorized verifier repair was refused: the verifier is invalid by the operator's decision and there is no
+                    # accepted replacement. Its failure is NOT new evidence against the owner; the episode ends here.
+                    break
                 next_scope_conflict = call_result.get("plan_scope_conflict") or {}
                 last_dependent_failure = call_result.get("last_failure") or {}
                 if (
@@ -3845,6 +4068,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     break
                 continue
             replay_handles.pop(subtask.id, None)   # the recovery episode of this stage is over (settled, refused or exhausted)
+            _drop_pre_repair_owner(subtask.id)
             # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001 (BACKEND-FINAL-CLOSURE-005, measured on
             # P4-T4): a verification-only unit that fails and cannot change its own inputs used to end the run
             # right there (LR-R1-P4's truthful terminal) - but the unit whose work it judged never heard of the
@@ -4597,7 +4821,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001: a typed stop of the run's LAST invocation, made for an owner inside a recovery, is
         # what ended the run. It outranks the conflict that recovery was working on (the conflict was not refused: its recovery was cut
         # short) and the consumer's own earlier result. The recovery itself stays on record in plan_recovery_events.
-        nested_stop = recovery_invocation_stop if knowledge_gap_break is None else None
+        # A refused authorized verifier repair is likewise what ended the run (kriya/workflow/verifier_repair.py); it is set once and no later
+        # invocation follows it.
+        nested_stop = (verifier_repair_stop or recovery_invocation_stop) if knowledge_gap_break is None else None
         stopping = nested_stop or (
             terminal_unit_stop if scope_conflict_result is None and knowledge_gap_break is None else None
         )
@@ -4620,6 +4846,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["advisory_reviews_not_performed"] = advisory_reviews_not_performed
         if plan_recovery_events:
             aggregated["plan_recovery_events"] = plan_recovery_events
+        if verifier_repair_record is not None:
+            # the one authorization request of this run and what came of it (asked at most once; absent when nobody was asked)
+            aggregated["verifier_repair"] = verifier_repair_record
         if subtask_call_results:
             aggregated["last_subtask_result"] = subtask_call_results[-1]
             aggregated["subtask_retry_locality"] = [
@@ -4691,6 +4920,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
 # OWNER-RECOVERY-LOCAL-SUCCESS-KNOWLEDGE-PROMOTED-BEFORE-DEPENDENT-VERIFICATION-001: the invocations of an owner reopened inside a recovery
 # episode. Each ends, at best, "locally accepted": the unit that reopened the owner still has to be verified against the repair.
+_VERIFIER_REPAIR_OUTCOME_MAX_CHARS = 12_000    # the gate output shown to the operator and to the one repair request
+
 DEPENDENT_VERIFICATION_PENDING_ROLES = frozenset({"owner_recovery", "may_change_owner_recovery", "verification_owner_recovery"})
 
 

@@ -909,6 +909,9 @@ _AUDITED_WRITE_SITES = {
     "kriya/policy/security_demonstration.py": 2,
     "kriya/tools/validate.py": 8, "kriya/workflow/checkpoint.py": 1, "kriya/workflow/context_certification.py": 3,
     "kriya/workflow/deterministic_failure_diagnostic.py": 2, "kriya/workflow/edit_safety.py": 0,
+    # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001: controller-owned writes into an EPHEMERAL verification tree only (its own mkdtemp directory, removed
+    # in a finally): the pre-repair owner bytes overlaid on a proven copy of the candidate tree, and that directory's removal. Never a repository mutation.
+    "kriya/workflow/verifier_repair.py": 2,
     "kriya/workflow/milestone_completion.py": 1, "kriya/workflow/proposal_store.py": 3,
     "kriya/workflow/regression_attribution.py": 1, "kriya/workflow/resume_fingerprints.py": 2,
     "kriya/workflow/skill_extraction.py": 3, "kriya/workflow/workflow.py": 4,

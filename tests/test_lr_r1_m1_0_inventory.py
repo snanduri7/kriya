@@ -178,5 +178,7 @@ def test_inventory_counts_the_design_relies_on():
     # a verification_infrastructure_failure, nothing executed).
     # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001 (2026-11-12): one more typed stop (attempt._require_the_staged_candidate_is_the_carried_one:
     # VERIFIER_REPLAY_BYTES_MISMATCH, a verifier_replay_refused failure before any gate, nothing executed).
+    # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001 (2026-11-13) adds NO site: its pre-apply refusal (verifier_repair_refused) is recorded by the retry
+    # strategy's existing fallback for a failure its raise site did not record; a site of its own was proven redundant and removed.
     assert records == 98, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

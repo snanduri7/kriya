@@ -1626,6 +1626,10 @@ class AttemptContext:
     # stopping unit keeps its refused candidate for the enforce loop.
     carried_candidate: Optional[Any] = None
     capture_refused_candidate: bool = False
+    # The one authorized verifier repair (kriya/workflow/verifier_repair.py): the transaction, and how many Developer generation passes this
+    # invocation has started (the hard one-answer bound is enforced where every generation goes through).
+    verifier_repair: Optional[Any] = None
+    developer_generation_passes: int = 0
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
     # Gap B (2026-10-15): see defer_execution_until_source_review. The caller that runs the post-approval phase sets the first; run_attempt fills the second (the held

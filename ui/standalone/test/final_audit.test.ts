@@ -21,11 +21,29 @@ describe('Electron main (product files) - items 2, 7, 10, 14', () => {
     }
   });
   it('the IPC surface is exactly the typed allowlist - a new channel fails here until it is classified', () => {
-    expect(Object.keys(IPC_CHANNELS).sort()).toEqual(['approveConfiguration', 'cancelRun', 'chooseProjectParent', 'chooseWorkspace', 'clipboardWrite', 'createProject', 'decideApproval', 'decideRuntimeCommand', 'executionState', 'forgetWorkspace', 'hostInfo', 'initializeProject', 'notifyRun', 'openInIde', 'openTerminal', 'query', 'recentWorkspaces', 'recoverWorkspace', 'rememberWorkspace', 'revealWorkspace', 'settingGet', 'settingSet', 'startRun']);
-    expect(ALLOWED_CHANNELS).toHaveLength(23);
+    expect(Object.keys(IPC_CHANNELS).sort()).toEqual(['approveConfiguration', 'cancelRun', 'chooseProjectParent', 'chooseWorkspace', 'clipboardWrite', 'createProject', 'decideApproval', 'decideRuntimeCommand', 'decideVerifierRepair', 'executionState', 'forgetWorkspace', 'hostInfo', 'initializeProject', 'notifyRun', 'openInIde', 'openTerminal', 'query', 'recentWorkspaces', 'recoverWorkspace', 'rememberWorkspace', 'revealWorkspace', 'settingGet', 'settingSet', 'startRun']);
+    expect(ALLOWED_CHANNELS).toHaveLength(24); // 23 + decideVerifierRepair (the third approval kind; pinned as the ONLY addition in the next test)
     const handled = [...read(MAIN, 'main.ts').matchAll(/ipcMain\.handle\(IPC_CHANNELS\.(\w+)/g)].map((m) => m[1]).sort();
     expect(handled).toEqual(Object.keys(IPC_CHANNELS).sort()); // every channel has exactly one handler, and nothing is handled that is not in the allowlist
     expect(read(MAIN, 'main.ts')).not.toMatch(/ipcMain\.(on|once|handleOnce)\(/);
+  });
+  it('the verifier-repair approval widened the IPC surface by exactly one classified channel, and an unclassified channel still has no way in', () => {
+    // the surface BEFORE the third approval kind; the only addition is decideVerifierRepair
+    const before = ['approveConfiguration', 'cancelRun', 'chooseProjectParent', 'chooseWorkspace', 'clipboardWrite', 'createProject', 'decideApproval', 'decideRuntimeCommand',
+      'executionState', 'forgetWorkspace', 'hostInfo', 'initializeProject', 'notifyRun', 'openInIde', 'openTerminal', 'query', 'recentWorkspaces', 'recoverWorkspace',
+      'rememberWorkspace', 'revealWorkspace', 'settingGet', 'settingSet', 'startRun'];
+    expect(before.filter((name) => !(name in IPC_CHANNELS))).toEqual([]); // nothing that existed was dropped or renamed
+    expect(Object.keys(IPC_CHANNELS).filter((name) => !before.includes(name))).toEqual(['decideVerifierRepair']);
+    expect(IPC_CHANNELS.decideVerifierRepair).toBe('kriya:host:execution:decide-verifier-repair');
+    expect(new Set(ALLOWED_CHANNELS).size).toBe(ALLOWED_CHANNELS.length); // no two names share a channel (a second name could not alias the approval channel)
+    const main = read(MAIN, 'main.ts');
+    // every handler is registered for a channel CONSTANT of the table: a string literal, a variable or a pattern would be an unclassified way in
+    expect((main.match(/ipcMain\.handle\(/g) ?? []).length).toBe((main.match(/ipcMain\.handle\(IPC_CHANNELS\.\w+,/g) ?? []).length);
+    for (const f of productMain.filter((name) => name !== 'main.ts')) expect(read(MAIN, f), f).not.toMatch(/ipcMain\./);
+    // the new handler does exactly two things: the sender check every handler has, and the one host that validates the request grammar itself
+    const body = main.slice(main.indexOf('ipcMain.handle(IPC_CHANNELS.decideVerifierRepair'), main.indexOf('ipcMain.handle(IPC_CHANNELS.approveConfiguration'));
+    expect(body.replace(/\s+/g, ' ').trim()).toBe("ipcMain.handle(IPC_CHANNELS.decideVerifierRepair, async (event, raw: unknown) => { if (!fromOwnedRenderer(event)) throw new Error('unexpected sender'); return verifierRepairs.decide(raw); });");
+    expect(read(MAIN, 'verifier_repair_host.ts')).toMatch(/validateDecideVerifierRepair\(/);
   });
   it('no shell anywhere: nothing spawns through a shell and no exec/eval-style API is used in a product main file', () => {
     for (const f of productMain) {

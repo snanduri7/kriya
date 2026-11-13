@@ -47,6 +47,10 @@ class FailureAttributionKind(str, Enum):
     # TIME-BUDGET-EXHAUSTED-MODEL-ATTRIBUTION-001: the run was stopped by a resource/policy limit (its generation budget). Nobody's defect:
     # not a source file's, not the infrastructure's. Deterministic, no file, no attribution model request.
     RESOURCE_LIMIT = "RESOURCE_LIMIT"
+    # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001: Kriya's own refusal of an operator-authorized verifier repair (the repaired verifier
+    # accepts the pre-repair owner, a second Developer answer, a stale authorization, ...). A policy decision about the repair transaction: no
+    # source file owns it. Deterministic, no file, no attribution model request.
+    VERIFIER_REPAIR_REFUSAL = "VERIFIER_REPAIR_REFUSAL"
 
 
 # ENV-FAILURE-TRIAGE-MODEL-CALL-001 (Scenario-A run 8): the typed stop no source file can own. MEASURED: after CONTAINMENT_SETUP_FAILED (docker did
@@ -62,6 +66,8 @@ INFRASTRUCTURE_STOP_FAILURE_TYPES = frozenset({"containment_setup_failed"})
 # (refused at dispatch by the same exhausted deadline) and the diagnosis named a source owner nobody had observed. Owner ruling 2026-11-13: a
 # budget stop is NOT infrastructure and NOT a source defect. internal_framework_error stays out of both tables until characterized on its own.
 RESOURCE_LIMIT_FAILURE_TYPES = frozenset({"time_budget_exhausted"})
+# kriya/workflow/verifier_repair.py VERIFIER_REPAIR_REFUSED_TYPE (not imported: this module is a leaf).
+VERIFIER_REPAIR_REFUSAL_FAILURE_TYPES = frozenset({"verifier_repair_refused"})
 
 
 def classify_failure_attribution(type_: str, message: str = "") -> FailureAttributionKind:
@@ -86,6 +92,8 @@ def classify_failure_attribution(type_: str, message: str = "") -> FailureAttrib
         return FailureAttributionKind.INFRASTRUCTURE_DEFECT
     if type_ in RESOURCE_LIMIT_FAILURE_TYPES:
         return FailureAttributionKind.RESOURCE_LIMIT
+    if type_ in VERIFIER_REPAIR_REFUSAL_FAILURE_TYPES:
+        return FailureAttributionKind.VERIFIER_REPAIR_REFUSAL
     if type_ in ("plan_scope_conflict", "ambiguous_planned_file_ownership"):
         return FailureAttributionKind.PLAN_SCOPE_DEFECT
     if type_ in (

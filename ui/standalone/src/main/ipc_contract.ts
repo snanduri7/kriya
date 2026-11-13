@@ -26,6 +26,10 @@ export const IPC_CHANNELS = {
   // Demo V2: the runtime-command decision, a DIFFERENT subject from the change review above (allowing Kriya to run exact verification commands, not applying a change). ONE typed action
   // ({workspace, launch_id, review_id, command_fingerprint, decision}); an approve is re-proved by the host and confirmed by a native dialog in the main process. See runtime_command_host.ts.
   decideRuntimeCommand: 'kriya:host:execution:decide-runtime',
+  // Verifier-defect repair authorization (owner rulings 2026-11-13): a THIRD subject - the person's semantic decision that one exact verifier conflicts with the canonical contract.
+  // ONE typed action ({workspace, launch_id, review_id, authorization_fingerprint, decision}); an approve is re-proved by the host against Kriya's own launch record and confirmed by a
+  // native dialog in the main process. See verifier_repair_host.ts.
+  decideVerifierRepair: 'kriya:host:execution:decide-verifier-repair',
   // GUI configuration approval: ONE typed action ({workspace, fingerprint}) that asks Kriya to record the approval for the configuration the person reviewed.
   // Deliberately NOT part of the generic query channel (`configuration.approve` is refused there, like `workspace.create`); the renderer can never name a setting,
   // a value, a path or a digest to trust. See config_approval_host.ts.
@@ -351,6 +355,21 @@ export function validateDecideRuntimeCommand(v: unknown): ValidationResult<Decid
   if (typeof v.command_fingerprint !== 'string' || !COMMAND_FINGERPRINT_RE.test(v.command_fingerprint)) return { ok: false, message: 'command_fingerprint is malformed' };
   if (v.decision !== 'approve' && v.decision !== 'reject') return { ok: false, message: 'decision must be approve or reject' };
   return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, command_fingerprint: v.command_fingerprint, decision: v.decision } };
+}
+
+export interface DecideVerifierRepairRequest { workspace: string; launch_id: string; review_id: string; authorization_fingerprint: string; decision: 'approve' | 'reject' }
+
+/** Verifier-repair authorization decision: exactly these five fields, each in its closed grammar. There is NO field for a file, a source text, a contract or an outcome: the host re-proves
+ * the pending review through Kriya and everything shown comes from Kriya's own record. The fingerprint is the one Kriya bound the review to (the bindings of the run, the plan, the recovery,
+ * the verifier bytes, the contract and the owner states); a decision for any other fingerprint is refused by the waiting run (STALE_REVIEW). */
+export function validateDecideVerifierRepair(v: unknown): ValidationResult<DecideVerifierRepairRequest> {
+  if (!isObj(v) || Object.keys(v).sort().join() !== 'authorization_fingerprint,decision,launch_id,review_id,workspace') return { ok: false, message: 'decideVerifierRepair takes exactly workspace, launch_id, review_id, authorization_fingerprint and decision' };
+  const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+  if (typeof v.launch_id !== 'string' || !LAUNCH_ID_RE.test(v.launch_id)) return { ok: false, message: 'launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx' };
+  if (typeof v.review_id !== 'string' || !REVIEW_ID_RE.test(v.review_id)) return { ok: false, message: 'review_id is malformed' };
+  if (typeof v.authorization_fingerprint !== 'string' || !COMMAND_FINGERPRINT_RE.test(v.authorization_fingerprint)) return { ok: false, message: 'authorization_fingerprint is malformed' };
+  if (v.decision !== 'approve' && v.decision !== 'reject') return { ok: false, message: 'decision must be approve or reject' };
+  return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, authorization_fingerprint: v.authorization_fingerprint, decision: v.decision } };
 }
 
 export interface InitializeProjectRequest { workspace: string }

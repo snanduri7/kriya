@@ -3016,6 +3016,36 @@ def _runtime_command_decision(subject: Any, yes: bool) -> Any:
     return RuntimeCommandDecision(subject.fingerprint if classify_approval_answer(_approval_decision([], subject.reason, yes)).approved else None)
 
 
+def _verifier_repair_decision(subject: Any, yes: bool) -> Any:
+    """The `kriya generate` answer to a VERIFIER-DEFECT REPAIR AUTHORIZATION (owner rulings 2026-11-13; a third subject: a person's semantic decision that ONE exact
+    verifier conflicts with the canonical contract). Inside a desktop launch it is held as a typed pending review and the awaitable that resolves to the human's
+    decision is returned; a launch that cannot hold it authorizes nothing. Outside a launch the person is shown the deterministic evidence in the terminal and asked.
+
+    `--yes` NEVER authorizes: it is the operator's standing consent to apply and run what Kriya proposes, not a judgement about this verifier, so an unattended
+    `--yes` run keeps today's routing (no repair). Anything but an explicit yes at the prompt authorizes nothing."""
+    from kriya.control.launch import launch_active, request_verifier_repair_authorization
+    from kriya.policy.approval import VERIFIER_REPAIR_NOTICE, VERIFIER_REPAIR_QUESTION, VerifierRepairDecision
+
+    awaiting = request_verifier_repair_authorization(subject)
+    if awaiting is not None:
+        return awaiting
+    if launch_active() or yes:
+        return VerifierRepairDecision(None)
+    click.secho("\n[Verifier repair authorization] A verifier failed against the repaired code.", bold=True, fg="yellow")
+    click.echo(VERIFIER_REPAIR_NOTICE)
+    click.secho("\n--- Canonical contract ---", bold=True, fg="cyan")
+    click.echo(subject.contract_text)
+    for path, source in subject.verifier_sources:
+        click.secho(f"\n--- Verifier under review: {path} ---", bold=True, fg="cyan")
+        click.echo(source)
+    click.secho("\n--- Result against the code BEFORE its repair ---", bold=True, fg="cyan")
+    click.echo(redact_text(subject.pre_repair_outcome))
+    click.secho(f"\n--- Result against the REPAIRED code ({subject.replay_failure_type or 'gate'}) ---", bold=True, fg="cyan")
+    click.echo(redact_text(subject.replay_outcome))
+    answer = classify_approval_answer(_confirm_change(f"\n{VERIFIER_REPAIR_QUESTION}"))
+    return VerifierRepairDecision(subject.fingerprint if answer.approved else None)
+
+
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                    resume, resume_id, json_output, from_milestones, output, acceptance=None,
                    acceptance_approval=None, requirements_file=None, verification_authority=None,
@@ -3155,7 +3185,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
     def on_change_approval(files: List[Dict[str, str]], reason: str) -> Any:
         return _approval_decision(files, reason, yes)
 
-    on_approval = TypedApprovalCallback(on_change_approval, lambda subject: _runtime_command_decision(subject, yes))
+    on_approval = TypedApprovalCallback(on_change_approval, lambda subject: _runtime_command_decision(subject, yes),
+                                        lambda subject: _verifier_repair_decision(subject, yes))
 
     def on_skill_gap(reason: str, skill_names: List[str]) -> Optional[str]:
         from kriya.control.launch import (

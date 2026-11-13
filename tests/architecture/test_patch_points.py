@@ -159,7 +159,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
-    (W, 'WorkflowEngine.run_generation_workflow'): P(22, W, None, ()),
+    (W, 'WorkflowEngine.run_generation_workflow'): P(23, W, None, ()),
     (W, '_direct_terminal_writes'): P(1, W, ((W, 4),), ()),
     (W, '_ensure_repository_indexed'): P(2, W, ((W, 1),), ()),
     (W, '_gate_outcome_proven'): P(1, W, ((W, 2),), ()),
@@ -222,7 +222,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # per-iteration resets, Best-of-N's handed-over stop, the prelude's run-wide decisions, the terminal checks, resume,
     # the rejected baseline reuse, the terminal regression's environment stop).
     (W, 'run_attempt'): P(11, A, ((W, 1),), ()),
-    (W, 'save_checkpoint'): P(6, 'kriya.control.checkpoint', ((W, 1),), ()),
+    (W, 'save_checkpoint'): P(7, 'kriya.control.checkpoint', ((W, 1),), ()),
     # E12 characterization: 3 new rows (tests/test_e12_enforce_characterization.py patches the enforce run's call-time
     # imports of the facade where they are defined: the controller's function-local imports read them here at call time).
     # W3-3 B: +1 site (tests/test_w33_b_java_example_membership.py: the contract-stage membership stop of the direct entrypoint).
@@ -467,7 +467,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # function (the workflow no longer asks the host's java/mvn; 3 patch sites): A 113 -> 110, rows 135 -> 134. A._resolve_java_home_override
     # keeps its row and its count (two host-authority tests removed from tests/test_workflow.py, two controls of the kept seam added to
     # tests/test_gate_orchestrator.py).
-    assert totals == {A: 110, W: 104, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001 (tests/test_verifier_repair_authorization_001.py: the repair unit observed at the documented seam,
+    # and the checkpoint save observed to prove the repair writes none): W 104 -> 106.
+    assert totals == {A: 110, W: 106, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
     assert len(PATCH_POINTS) == 134  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 

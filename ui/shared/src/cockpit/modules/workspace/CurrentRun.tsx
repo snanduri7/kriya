@@ -1,6 +1,6 @@
 import { OpenInEditorButton, RevealButton } from './WorkspaceFacts';
 import { folderFact } from './Readiness';
-import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, runRecipeOf, HowToRun, ObservedOutput, RequirementTruthBlock, requirementTruthOf, requirementTruthWords, runtimeObservationOf, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, RunStepper, activityText, changeSummary, localClock, progressCounts, runPhase, useRunActivity, useWorkspaceUi, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, VerifierRepairReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, runRecipeOf, HowToRun, ObservedOutput, RequirementTruthBlock, requirementTruthOf, requirementTruthWords, runtimeObservationOf, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, RunStepper, activityText, changeSummary, localClock, progressCounts, runPhase, useRunActivity, useWorkspaceUi, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const ACTIVITY_MARK = { info: '•', ok: '✓', bad: '✕', wait: '⚠' } as const;
@@ -189,7 +189,7 @@ export function CurrentRun() {
   const outcome0 = run.outcome;
   const decided = run.status?.launch.pending_approval?.status;
   const pendingKind = run.status?.launch.pending_approval?.kind;
-  const finishing = !finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'APPROVED' && pendingKind !== 'runtime_command';
+  const finishing = !finished && !run.review && !run.runtimeReview && !run.verifierReview && run.status?.launch.phase === 'RUNNING' && decided === 'APPROVED' && pendingKind !== 'runtime_command' && pendingKind !== 'verifier_defect_repair_authorization';
   const viewDetails = (tab?: (typeof OPEN_TARGETS)[keyof typeof OPEN_TARGETS]) => {
     if (finished && run.outcome?.traceRunId) dispatch({ type: 'selectRun', runId: run.outcome.traceRunId });
     else dispatch({ type: 'selectLiveRun', launchId: run.launchId });
@@ -227,8 +227,8 @@ export function CurrentRun() {
       {phase.steps && live ? <RunStepper steps={phase.steps} waiting={phase.needsAction} /> : null}
       {live && goalLine}
       {live && finishing ? <p className="ck-detail" data-testid="finishing-note">{phase.detail}</p> : null}
-      {live && !run.review && !run.runtimeReview && nowText ? <div className="ck-now" data-testid="current-activity"><span className="ck-now-label">What Kriya is doing now</span><p>{nowText}</p></div> : null}
-      {live && !run.review && !run.runtimeReview && recent.length ? (
+      {live && !run.review && !run.runtimeReview && !run.verifierReview && nowText ? <div className="ck-now" data-testid="current-activity"><span className="ck-now-label">What Kriya is doing now</span><p>{nowText}</p></div> : null}
+      {live && !run.review && !run.runtimeReview && !run.verifierReview && recent.length ? (
         <div className="ck-recent" data-testid="recent-activity">
           <h3>Recent activity</h3>
           <ol aria-label="Recent activity">{recent.map((e) => <li key={e.key} data-tone={e.tone}><span className="mono small muted">{localClock(e.at)}</span> <span aria-hidden="true">{ACTIVITY_MARK[e.tone]}</span> {e.text}</li>)}</ol>
@@ -236,7 +236,8 @@ export function CurrentRun() {
       ) : null}
       {live && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
       {live && run.runtimeReview ? <RuntimeCommandReviewCard review={run.runtimeReview} launchId={run.launchId} /> : null}
-      {!finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> {pendingKind === 'runtime_command' ? 'Kriya will not run those commands.' : 'Kriya is ending the run; nothing will be applied.'}</div> : null}
+      {live && run.verifierReview ? <VerifierRepairReviewCard review={run.verifierReview} launchId={run.launchId} /> : null}
+      {!finished && !run.review && !run.runtimeReview && !run.verifierReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> {pendingKind === 'verifier_defect_repair_authorization' ? 'Kriya will not repair the verifier; the run continues.' : pendingKind === 'runtime_command' ? 'Kriya will not run those commands.' : 'Kriya is ending the run; nothing will be applied.'}</div> : null}
       {cancelled ? <CancelledCard /> : null}
       {finished && !cancelled && phase.state === 'COMPLETED' ? <Completed phase={phase} /> : null}
       {finished && !cancelled && phase.state !== 'COMPLETED' ? <Stopped phase={phase} /> : null}

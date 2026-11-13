@@ -561,6 +561,7 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
         reopened_owner=reopened_owner,
         carried_candidate=ctx.carried_candidate,
         capture_refused_candidate=ctx.capture_refused_candidate,
+        verifier_repair=ctx.verifier_repair,
         grounding_goal=grounding_goal,
         exit_authority_goal=(
             (work_unit.authoritative_goal if work_unit is not None else None) or grounding_goal or ""
@@ -981,6 +982,11 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
             attempt_ctx.post_source_review_guard = None
         _save_candidate_gates_checkpoint(candidate_checkpoint_fields, final_files_for_checkpoint)
 
+    # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001: an operator-authorized verifier repair is still only STAGED here (reviewed, source-
+    # approved, its gates passed against the repaired owner). Before anything is applied the same bytes must be rejected against the pre-repair owner.
+    if ctx.verifier_repair is not None:
+        await verify_repaired_verifier_before_apply(ctx, deps, run)
+
     # Worktree cleanup deliberately does NOT happen here anymore - see the
     # real live incident this fix closes, 2026-08-22 (ignite_qpid_protocol
     # milestone 2/3): compile+run-verification passing is not the same as
@@ -1048,6 +1054,89 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
     )
 
     return None
+
+
+COUNTERFACTUAL_OUTPUT_MAX_CHARS = 4000
+
+
+async def verify_repaired_verifier_before_apply(ctx: StageContext, deps: StageDeps, run: DevelopmentRun) -> None:
+    """The pre-apply guard of an authorized verifier repair (kriya/workflow/verifier_repair.py): the staged verifier (V1) is run against the owner's
+    PRE-repair bytes in an ephemeral tree, through the validator and the verification coordinator a verification-only unit uses. Returns only when a
+    deterministic gate REJECTED V1 there; every other verdict raises the typed ``verifier_repair_refused`` gate failure, so nothing is applied and
+    (one Developer answer) the unit stops. The verdict is recorded as a run event either way."""
+    from kriya.workflow.verification_coordinator import (
+        VerificationCoordinator,
+        VerificationRequest,
+        _directly_executable_verifiers,
+    )
+    from kriya.workflow.verifier_repair import (
+        OUTCOME_ACCEPTED,
+        OUTCOME_INDETERMINATE,
+        OUTCOME_REJECTED,
+        OUTCOME_UNAVAILABLE,
+        VERIFIER_REPAIR_REFUSED_TYPE,
+        VerifierRepairRefused,
+        verify_against_pre_repair_owner,
+    )
+    from kriya.workflow.verifier_replay import failure_identity
+
+    state, transaction = ctx.state, ctx.verifier_repair
+    # The unit's own declared deterministic verifiers; a unit that declares none is judged by the gates every mutating unit runs (compile, then tests).
+    verifiers = _directly_executable_verifiers(list(ctx.required_verification or [])) or [{"type": "tool", "tool_name": "quality_gates"}]
+    known_files = sorted(set(ctx.established_files or ()) | set(state.all_files_written))
+
+    async def run_gates(tree: str) -> Any:
+        # the validator's original workspace IS the copy (the convention of every git-less replay copy): no Git metadata is bound to it
+        validator = PolymorphicValidator(
+            tree, original_workspace_path=tree, autonomy_cfg=deps.config.autonomy,
+            dependency_lookup_allowed=dependency_lookup_decision(deps.config).allowed, toolchain_declaration_mutable=False,
+        )
+
+        async def no_runtime_verification() -> None:
+            return None
+
+        recorded: List[Dict[str, Any]] = []
+        try:
+            verified = await VerificationCoordinator(
+                validator, record_gate_outcome=recorded.append, run_runtime_verification=no_runtime_verification,
+            ).verify(VerificationRequest(required_verification=verifiers, known_files=known_files, attempt_number=state.attempt_number))
+        except QualityGateFailure as refused:
+            gate_failure = refused.failure
+            evidence = {"gate": gate_failure.type, "failure_identity": failure_identity(gate_failure.type, gate_failure.raw_output),
+                        "output": (gate_failure.raw_output or gate_failure.message or "")[:COUNTERFACTUAL_OUTPUT_MAX_CHARS]}
+            if gate_failure.type == "verification_infrastructure_failure":
+                return OUTCOME_UNAVAILABLE, evidence
+            return OUTCOME_REJECTED, evidence
+        return (OUTCOME_ACCEPTED if verified.gates else OUTCOME_INDETERMINATE), {"gates": list(verified.gates)}
+
+    def _record(outcome: Dict[str, Any], refusal: Optional[str]) -> None:
+        state.record_event(RunEvent(
+            kind="verifier_repair.counterfactual", attempt=state.attempt_number, source="development_loop.verify_repaired_verifier_before_apply",
+            authority=EventAuthority.AUTHORITATIVE,
+            message=("the repaired verifier was rejected against the pre-repair owner" if refusal is None
+                     else f"{refusal}: the repaired verifier is refused; nothing was applied"),
+            details={**outcome, "refusal": refusal},
+        ))
+
+    try:
+        outcome = await verify_against_pre_repair_owner(
+            transaction, sandbox_path=run.worktree_path, written=state.all_files_written, staged_digests=state.candidate_digests, run_gates=run_gates,
+        )
+    except VerifierRepairRefused as refused:
+        _record(refused.outcome, refused.code)
+        message = f"{refused.code}: {refused.detail} Nothing was applied."
+        failure = Failure(
+            type=VERIFIER_REPAIR_REFUSED_TYPE, message=message, raw_output=message, source="orchestrator", attempt=state.attempt_number,
+            diagnostics={"reason_code": refused.code},
+        )
+        # recorded once by the retry strategy's own fallback for a failure its raise site did not record (retry_strategy: 'De-dup fallback'); a record here
+        # was proven redundant (mutant G11, 2026-11-13) and removed - tests/test_verifier_repair_authorization_001.py pins exactly one recorded outcome.
+        raise QualityGateFailure(failure) from refused
+    _record(outcome, None)
+    deps.logger.info(
+        "VERIFIER_REPAIR_COUNTERFACTUAL_REJECTED gate=%s - the repaired verifier still fails against the pre-repair owner; it may be applied.",
+        outcome.get("gate"),
+    )
 
 
 def run_terminal_regression(ctx: StageContext, deps: StageDeps, run: DevelopmentRun) -> Dict[str, str]:

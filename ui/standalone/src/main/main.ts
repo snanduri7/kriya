@@ -24,6 +24,7 @@ import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
 import { ApprovalHost } from './approval_host';
 import { RuntimeCommandHost, confirmationDialog as runtimeConfirmationDialog, isRunResponse } from './runtime_command_host';
+import { VerifierRepairHost, confirmationDialog as verifierConfirmationDialog, isAuthorizeResponse } from './verifier_repair_host';
 import { ConfigApprovalHost, confirmationDialog, isApproveResponse } from './config_approval_host';
 import { ProjectSetupHost } from './project_setup_host';
 import { RecoverHost, isRecoverResponse, recoverDialog } from './recover_host';
@@ -75,6 +76,7 @@ let execution: ExecutionHost;
 let reviewChannels: ReviewChannelHost;
 let approvals: ApprovalHost;
 let runtimeCommands: RuntimeCommandHost;
+let verifierRepairs: VerifierRepairHost;
 let configApprovals: ConfigApprovalHost;
 let projectSetup: ProjectSetupHost;
 let recovery: RecoverHost;
@@ -292,6 +294,10 @@ function registerIpc() {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return runtimeCommands.decide(raw);
   });
+  ipcMain.handle(IPC_CHANNELS.decideVerifierRepair, async (event, raw: unknown) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return verifierRepairs.decide(raw);
+  });
   ipcMain.handle(IPC_CHANNELS.approveConfiguration, async (event, raw: unknown) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return configApprovals.approve(raw);
@@ -382,6 +388,16 @@ async function confirmRuntimeCommands(commands: ReadonlyArray<readonly string[]>
   return isRunResponse(result.response);
 }
 
+/** The human commitment for a verifier-repair authorization: a native confirmation created HERE, in the main process. Its text is the fixed question and consequences plus the verifier
+ * path(s) as KRIYA recorded and re-proved them (verifier_repair_host.ts). Cancel is the default and the Escape action; only `Authorize One Repair` returns true. */
+async function confirmVerifierRepair(paths: readonly string[]): Promise<boolean> {
+  if (dev?.captureActive) return dev.nextConfirmation();
+  const options = verifierConfirmationDialog(paths);
+  const parent = ownedWindow && !ownedWindow.isDestroyed() ? ownedWindow : null;
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+  return isAuthorizeResponse(result.response);
+}
+
 app.whenReady().then(async () => {
   app.setAboutPanelOptions(aboutPanelOptions(app.getVersion()));
   settings = new SettingsStore(join(app.getPath('userData'), 'kriya-ui-settings.json'));
@@ -419,6 +435,11 @@ app.whenReady().then(async () => {
     channel: reviewChannels, prepare: prepareExecution,
     reviewable: (workspace, launchId, reviewId) => kupQuery({ operation: 'runtime_command.review', workspace, launch_id: launchId, review_id: reviewId }),
     confirm: confirmRuntimeCommands, currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
+  });
+  verifierRepairs = new VerifierRepairHost({
+    channel: reviewChannels, prepare: prepareExecution,
+    status: (workspace, launchId) => kupQuery({ operation: 'launch.status', workspace, launch_id: launchId }),
+    confirm: confirmVerifierRepair, currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
   });
   workspaces = new WorkspaceRegistry({
     getRecent: () => settings.get('recentWorkspaces'), setRecent: (list) => settings.set('recentWorkspaces', list),

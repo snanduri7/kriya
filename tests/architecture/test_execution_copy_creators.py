@@ -25,6 +25,10 @@ SITES: Dict[Tuple[str, str], str] = {
     ("kriya/workflow/deterministic_failure_diagnostic.py", "replay_deterministic_verification_against_baseline"): REPLAY_NO_METADATA,
     ("kriya/workflow/deterministic_failure_diagnostic.py", "_copy_baseline_workspace"): NOT_A_VALIDATOR_TREE,          # R6: fills the directory its two replay callers created (classified above/below)
     ("kriya/workflow/regression_attribution.py", "_replay_test_ids_against_workspace"): REPLAY_NO_METADATA,
+    # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001: the ephemeral O0 verification tree of an authorized verifier repair. The validator is built by
+    # development_loop.verify_repaired_verifier_before_apply with the copy as its own original workspace (pinned in tests/test_verifier_repair_authorization_001.py).
+    ("kriya/workflow/verifier_repair.py", "verify_against_pre_repair_owner"): REPLAY_NO_METADATA,
+    ("kriya/workflow/verifier_repair.py", "build_counterfactual_tree"): NOT_A_VALIDATOR_TREE,      # fills the directory its caller (above) created
     ("kriya/workflow/workflow.py", "exported"): KEEPS_GIT,                                          # the baseline-authority export keeps .git (ignore list below)
     ("kriya/workflow/worktree.py", "_create_scoped_snapshot_sandbox"): OWN_REPOSITORY,
     ("kriya/repository/bound_tree.py", "copy_bound_tree"): NOT_A_VALIDATOR_TREE,   # W3-3 U3: the listing wrapper over the one copy primitive (copy_bound_paths); every caller that creates a directory is classified itself
