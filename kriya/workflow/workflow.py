@@ -2244,6 +2244,10 @@ class WorkflowEngine:
         # so an identical regeneration is a typed no-progress stop, never a
         # repairable no-change refusal.
         reopened_owner: bool = False,
+        # OWNER-RECOVERY-LOCAL-SUCCESS-KNOWLEDGE-PROMOTED-BEFORE-DEPENDENT-VERIFICATION-001 (run 9): this invocation is an owner reopened
+        # inside a recovery episode whose dependent verification has not run yet. Its local success is not a verified success, so the
+        # learning of stage 7 (skill accrual, lesson extraction) is not performed for it.
+        dependent_verification_pending: bool = False,
         # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001 (kriya/workflow/verifier_replay.py). ``carried_candidate``: a
         # ReplayHandle whose files replace generation on the first attempt (no Developer call), written through the write path model
         # output takes; review, approval, gates and commit are the unit's normal ones, and a gate failure ends the unit (it may not
@@ -3048,6 +3052,7 @@ class WorkflowEngine:
             authorized_semantic_regions=authorized_semantic_regions, required_verification=required_verification,
             runtime_verification_required=runtime_verification_required, strict_spec_compliance=strict_spec_compliance,
             execution_scope=execution_scope, reopened_owner=reopened_owner, migration_resolution=migration_resolution,
+            dependent_verification_pending=dependent_verification_pending,
             carried_candidate=carried_candidate, capture_refused_candidate=capture_refused_candidate,
             obligation_ledger=obligation_ledger, completed_subtask_ids=completed_subtask_ids,
             deterministic_failure_diagnostics=deterministic_failure_diagnostics,

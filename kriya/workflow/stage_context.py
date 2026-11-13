@@ -418,6 +418,7 @@ class StageContext:
     strict_spec_compliance: bool = False
     execution_scope: str = ""
     reopened_owner: bool = False
+    dependent_verification_pending: bool = False   # an owner reopened in an unsettled recovery episode: no stage-7 learning from its local success
     carried_candidate: Any = None            # verifier_replay.ReplayHandle or None (see run_generation_workflow)
     capture_refused_candidate: bool = False
     migration_resolution: Any = None

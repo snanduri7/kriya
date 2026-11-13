@@ -1909,6 +1909,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     execution_role in ("verification_owner_recovery", "may_change_owner_recovery")
                     or (execution_role == "dependent_reverification" and bool(target.planned_files))
                 ),
+                # The owner's local success is not a verified success while the unit that reopened it has not been verified again:
+                # stage-7 learning is not performed for these invocations.
+                dependent_verification_pending=execution_role in DEPENDENT_VERIFICATION_PENDING_ROLES,
                 grounding_goal=goal,
                 migration_resolution=migration_resolution,
                 # Verifier replay (kriya/workflow/verifier_replay.py): a unit that owns files hands its refused candidate back when
@@ -4670,6 +4673,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 # of what each MODEL unit committed to this run's candidate (ControlState.subtask_written_files - the evidence the
 # planned-read view (subtask_executor.reads_candidate_view), owner resolution (owner_recovery) and the abandoned-plan
 # quarantine (resume_support) read).
+
+# OWNER-RECOVERY-LOCAL-SUCCESS-KNOWLEDGE-PROMOTED-BEFORE-DEPENDENT-VERIFICATION-001: the invocations of an owner reopened inside a recovery
+# episode. Each ends, at best, "locally accepted": the unit that reopened the owner still has to be verified against the repair.
+DEPENDENT_VERIFICATION_PENDING_ROLES = frozenset({"owner_recovery", "may_change_owner_recovery", "verification_owner_recovery"})
+
 
 def owner_recovery_mutation_scope(owner: Subtask, implicated_artifacts: Sequence[str]) -> List[str]:
     """OWNER-RECOVERY-IMPLICATED-ARTIFACT-SCOPE-LOST-001: what an owner-recovery invocation may generate, must return and may write - the

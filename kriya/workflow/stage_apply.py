@@ -469,6 +469,15 @@ def prepare_lessons(ctx: StageContext, deps: StageDeps) -> Tuple[Optional[Dict[s
     (the self-corrected outcome, whether the lessons are extracted after an authoritative success)."""
     state, worktree_path, guard, logger = ctx.state, ctx.worktree_path, ctx.guard, deps.logger
 
+    # OWNER-RECOVERY-LOCAL-SUCCESS-KNOWLEDGE-PROMOTED-BEFORE-DEPENDENT-VERIFICATION-001 (Scenario-A run 9): an owner reopened inside a
+    # recovery episode passes only its OWN gates here; the dependent verification that decides whether the repair is right has not run.
+    # MEASURED: the lesson was extracted at 01:14:05Z, the dependent replay then disproved the repair at 01:16:47Z, and the "fact" came from
+    # Kriya's own scope error text. A local success that is still pending is not a verified success: nothing is learned from it (no skill
+    # accrual, no lesson extraction).
+    if ctx.dependent_verification_pending:
+        logger.info("Learning skipped: this unit's success is local to a recovery episode whose dependent verification is pending.")
+        return None, False
+
     # Phase 3: Auto-generate skill templates for solved dependencies. A
     # coordinate merely appearing in a resolver.py suggestion during some
     # retry attempt is not evidence it was ever actually used - confirmed
