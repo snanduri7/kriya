@@ -860,3 +860,15 @@ No count was bumped, no allowlist widened without a control, no assertion weaken
 **Not done at the time of this section.** Final full suite, the one pre-live gate, the fresh execution worktree and `FROZEN_RUN_10.md` - their results are recorded in a later evidence-only commit. Nothing pushed or tagged. `kriya-b141fdd` kept.
 
 Evidence: `~/kriya-evidence/product-72h-confidence/bisect-2026-11-13/`.
+
+## 41. Run 10 FROZEN on `82436eb` (evidence only; no executable change): final full suite GREEN, the one pre-live gate GREEN, app rebuilt with an identical payload, fresh execution worktree/venv/state root; NOT launched - STOPPED for the owner's GO
+
+- **Full suite, one run on `82436eb`, tree clean (MEASURED):** exit 0, 21539 passed, 7 skipped, 3h27m13s, root-pollution check clean. Accepted as the certification of the repair phase under the owner's ruling "FULL SUITE IS CERTIFICATION, NOT DEVELOPMENT FEEDBACK"; no further full suite before Run 10.
+- **Pre-live gate, one run on `82436eb` (MEASURED):** exit 0 - state_machine 1783, architecture_and_censuses 261, enforce_recovery_controls 714 (+4 skipped), ruff, pylint. Limit: its file list does not name the two verifier-repair test files (they passed in the full suite on this revision); run unmodified.
+- **Desktop app rebuilt from `82436eb`:** `package:mac` and `verify:mac-app` exit 0; payload sha256 `8fad009a...4e4670`, identical to the pre-commit build (reproducible); packaged modules recognise the third approval kind (stand-in waiter socket, not a live GUI run).
+- **Execution:** detached worktree `~/kriya-scenario-a-exec/kriya-82436eb`, clean; fresh venv with a freeze byte-identical to the gate venv's; `run_source_identity()` = `82436eb`, dirty false; new state root `state-20261113T181308Z-Plu4b0` (0 entries); config delta versus Run 9 = `paths.state` only; goal sha256 `fe29c881...` (clarified contract, `8a77013`); idle verification 0 failed.
+- **Host at freeze:** swap 95% used right after the suite and gate; no container running; idle create->start 0.46-0.72 s. To be re-read by the owner before launch.
+- **Standing policy recorded (owner ruling, same day):** focused reproducer/controls/mutants/adjacent tiers by default; the full suite only for freeze certification or one re-certification after a red broad run. `TEST-CERTIFICATION-WALL-CLOCK-001` registered (P3, after Run 10).
+- **Not done:** Run 10 is not launched. Nothing pushed or tagged. `kriya-b141fdd` kept.
+
+Record: `~/kriya-evidence/product-72h-confidence/scenario-a-run10-prerun-2026-11-13/FROZEN_RUN_10.md` (with `MANIFEST.sha256`); gate output `../run10-prelive-gate-82436eb/`; full-suite output `../bisect-2026-11-13/full_suite_final_82436eb.txt`.
