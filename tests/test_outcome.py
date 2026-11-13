@@ -196,7 +196,8 @@ def test_the_failure_category_ladder_precedence():
                                             environment_failure=stop)) == "plan_scope_revision_required"
     assert terminal_failure_category(_state(final_review_refusal=refused, environment_failure=stop)) == "static_analysis_blocked"
     assert terminal_failure_category(_state(final_review_refusal=refused, no_progress_terminated=True)) == "no_progress"   # run 9's s5
-    assert terminal_failure_category(_state(final_review_refusal=refused)) == "quality_gates_exhausted"
+    # PROMPT-BUDGET-FIT-001C (regressed by c6916bc, restored): with no typed cause of its own, the unperformed review is the typed terminal, never the catch-all
+    assert terminal_failure_category(_state(final_review_refusal=refused)) == "final_review_refused"
     assert terminal_failure_category(_state(final_review_refusal=refused, quality_gates_succeeded=True)) == "final_review_refused"
 
 

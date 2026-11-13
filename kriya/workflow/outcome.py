@@ -193,6 +193,10 @@ def terminal_failure_category(state: RunState) -> str:
         else "environment_failure" if state.environment_failure
         # PRD-026: the retry-progress invariant ended the run.
         else "no_progress" if state.no_progress_terminated
+        # PROMPT-BUDGET-FIT-001C, restored (regressed by c6916bc, which let this state fall to the catch-all): a unit whose gates are exhausted with
+        # NO typed cause of its own, and whose final review could not be performed, ends typed on that refusal. Every typed cause above still
+        # outranks the refusal of a candidate that was not applied (run 9: no_progress stays no_progress).
+        else "final_review_refused" if state.final_review_refusal is not None
         else "quality_gates_exhausted"
     )
 
