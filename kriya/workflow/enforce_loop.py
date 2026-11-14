@@ -91,6 +91,7 @@ from kriya.workflow.verifier_replay import (
     replay_facts_block,
 )
 from kriya.workflow.verifier_replay import goal_digest as replay_goal_digest
+from kriya.workflow.verifier_semantic import RunSemantics, VerifierSemanticLedger
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport
 
 
@@ -1733,6 +1734,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         verifier_repair_asked = False
         verifier_repair_record: Optional[Dict[str, Any]] = None
         verifier_repair_stop: Optional[Dict[str, Any]] = None
+        # VERIFIER-SEMANTIC-AUTHORITY-001 (kriya/workflow/verifier_semantic.py): the run's ONE generated-verifier semantic ledger. Every unit
+        # invocation of this run receives it; none builds its own.
+        verifier_semantic_ledger = VerifierSemanticLedger()
         # MA8.1 completion (2026-08-29 v2 design review): "Requirement-
         # scoped repeated owner recovery." A live PRV-06 run proved a bare
         # owner-id set (reopen each owner at most once per run) is the
@@ -1960,6 +1964,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 capture_refused_candidate=bool(target.planned_files),
                 carried_candidate=carried_candidate,
                 verifier_repair=verifier_repair,
+                verifier_semantic=RunSemantics(
+                    ledger=verifier_semantic_ledger, plan_hash=current_plan_hash,
+                    verification_contract_digest=verification_contract.digest, goal=goal),
                 strict_dependency_index=bool(
                     process_profiles is not None
                     and getattr(process_profiles, "enabled", False) is True

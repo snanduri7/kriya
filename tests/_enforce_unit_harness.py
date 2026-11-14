@@ -96,7 +96,10 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
             text_or_pair = source() if callable(source) else source
             if isinstance(text_or_pair, tuple):     # (another path, content): the scripted model answers for a file it was not asked for
                 path, text_or_pair = text_or_pair
-            content = sentinel(path, analysis="edit.", content=text_or_pair)
+            if isinstance(text_or_pair, list):      # [(search, replace), ...]: the scripted model answers with anchored edits, not a whole file
+                content = sentinel(path, analysis="edit.", edits=text_or_pair)
+            else:
+                content = sentinel(path, analysis="edit.", content=text_or_pair)
         elif "Run Verification Judge" in first:
             run.judge_calls.append(active.get("id"))
             content = json.dumps(judge_reply or {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None,

@@ -2259,6 +2259,9 @@ class WorkflowEngine:
         # unit's verifier. The invocation gets ONE Developer answer, writes no stage checkpoint (a restarted run has no pre-repair owner and so no
         # repair) and applies its candidate only after the same bytes were rejected against the pre-repair owner.
         verifier_repair: Optional[Any] = None,
+        # VERIFIER-SEMANTIC-AUTHORITY-001 (kriya/workflow/verifier_semantic.py): the controller's RunSemantics (the run's one ledger and its
+        # review bindings). None = a direct run: the unit gets a ledger of its own and regenerates nothing.
+        verifier_semantic: Optional[Any] = None,
         migration_resolution: Optional["MigrationResolution"] = None,
         structured_plan: Optional["EngineeringPlan"] = None,
         current_subtask_id: Optional[str] = None,
@@ -3060,7 +3063,7 @@ class WorkflowEngine:
             execution_scope=execution_scope, reopened_owner=reopened_owner, migration_resolution=migration_resolution,
             dependent_verification_pending=dependent_verification_pending,
             carried_candidate=carried_candidate, capture_refused_candidate=capture_refused_candidate,
-            verifier_repair=verifier_repair,
+            verifier_repair=verifier_repair, verifier_semantic=verifier_semantic,
             obligation_ledger=obligation_ledger, completed_subtask_ids=completed_subtask_ids,
             deterministic_failure_diagnostics=deterministic_failure_diagnostics,
         )

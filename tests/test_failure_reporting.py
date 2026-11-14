@@ -56,6 +56,8 @@ _REAL_FAILURE_TYPES = {
     "retry_identity_not_qualified": FailureCategory.RESOURCE,
     # PRD-020: an original requirement without accepted evidence.
     "requirements_unresolved": FailureCategory.VERIFICATION,
+    "verifier_semantic_authority_required": FailureCategory.VERIFICATION,   # VERIFIER-SEMANTIC-AUTHORITY-001: the typed stop
+    "verifier_semantic_expectation_invalid": FailureCategory.VERIFICATION,  # a passing generated verifier a person declared invalid
     "deterministic_contract_violation": FailureCategory.VERIFICATION,
     "goal_insufficient_for_verification": FailureCategory.VERIFICATION,
     # VERIFICATION-CONTRACT-003: refused before any model call, authority missing.

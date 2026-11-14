@@ -32,6 +32,8 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from kriya.code_intel.service import CandidateOverlay
 from kriya.policy.approval import (
+    REVIEW_PHASE_FAILING,
+    REVIEW_PHASE_PASSING,
     VerifierSemanticAllowance,
     VerifierSemanticDecision,
     VerifierSemanticSubject,
@@ -44,8 +46,6 @@ logger = logging.getLogger(__name__)
 # The structured report's own vocabulary (kriya/tools/test_execution.py: COMPLETE / FAILED / ERROR), as the report dict carries it.
 _REPORT_COMPLETE = "COMPLETE"
 _FAILING_STATUSES = frozenset({"failed", "error"})
-# The phase fact of a failed JVM gate (kriya/tools/test_execution.py, JVM-TEST-PHASE-001) that names no executed case at all.
-_TEST_SOURCE_COMPILE_FAILURE = "TEST_SOURCE_COMPILE_FAILURE"
 
 # The typed failure a unit stops on when a generated verifier's semantics have no authority, and the prefix of its message (the unit's terminal category
 # keys on the prefix, like every other deterministic stop).
@@ -60,10 +60,14 @@ REASON_DECISION_STALE = "VERIFIER_SEMANTIC_DECISION_STALE"
 REASON_REGENERATION_SPENT = "VERIFIER_SEMANTIC_REGENERATION_ALREADY_USED"
 REASON_SUBJECT_AMBIGUOUS = "VERIFIER_SEMANTIC_SUBJECT_AMBIGUOUS"
 REASON_SUBJECT_UNREADABLE = "VERIFIER_SEMANTIC_SUBJECT_UNREADABLE"
-REASON_TEST_SOURCE_COMPILE = "VERIFIER_SEMANTIC_TEST_SOURCE_COMPILE_WITHOUT_SUBJECT"
+REASON_REGENERATION_UNAVAILABLE = "VERIFIER_SEMANTIC_REGENERATION_UNAVAILABLE"          # no exact-path, candidate-preserving regeneration here
+REASON_REGENERATION_NOT_ADMITTED = "VERIFIER_SEMANTIC_REGENERATION_NOT_ADMITTED"        # the retry policy admits no targeted attempt for it
+REASON_REGENERATION_NOT_EXECUTED = "VERIFIER_SEMANTIC_REGENERATION_NOT_EXECUTED"        # the one answer produced no new executed verifier
 REASON_NO_PRODUCTION_OWNER = "VERIFIER_SEMANTIC_NO_PRODUCTION_OWNER_AUTHORITY"
+REASON_FULL_REGENERATION_REFUSED = "VERIFIER_SEMANTIC_FULL_REGENERATION_REFUSED"      # the next attempt would regenerate a verifier that may not change
 REVIEW_REASON_CODES = (REASON_UNATTENDED, REASON_NO_DECISION, REASON_CANNOT_DECIDE, REASON_DECISION_STALE, REASON_REGENERATION_SPENT,
-                       REASON_SUBJECT_AMBIGUOUS, REASON_SUBJECT_UNREADABLE, REASON_TEST_SOURCE_COMPILE, REASON_NO_PRODUCTION_OWNER)
+                       REASON_SUBJECT_AMBIGUOUS, REASON_SUBJECT_UNREADABLE, REASON_REGENERATION_UNAVAILABLE, REASON_REGENERATION_NOT_ADMITTED,
+                       REASON_REGENERATION_NOT_EXECUTED, REASON_NO_PRODUCTION_OWNER, REASON_FULL_REGENERATION_REFUSED)
 
 # Why a production owner was or was not selected after an accepted verifier failed (closed table).
 OWNER_SELECTED = "PRODUCTION_OWNER_SELECTED"
@@ -166,13 +170,6 @@ def derive_executed_verifiers(report: Optional[Mapping[str, Any]], authored: Map
     return VerifierDerivation(verifiers=verifiers, complete=True, ambiguous=tuple(ambiguous), unreadable=tuple(unreadable))
 
 
-def is_test_source_compile_without_subject(test_result: Any) -> bool:
-    """True when the gate's typed phase record says main compilation succeeded and test-source compilation did not: nothing executed, so no exact
-    verifier subject exists and no authority proves whose defect it is (no ordinary retry, no verifier repair, no production reopen from this fact)."""
-    phase = test_result.get("test_phase") if isinstance(test_result, Mapping) else None
-    return isinstance(phase, Mapping) and phase.get("phase_class") == _TEST_SOURCE_COMPILE_FAILURE
-
-
 # ----------------------------------------------------------------------------- semantic authority and the next action
 
 class Action(str, Enum):
@@ -251,9 +248,9 @@ def _subject_path(subject: VerifierSemanticSubject) -> str:
 
 def needs_review_message(decision: SubjectDecision) -> str:
     """The typed stop's message: the prefix the terminal category keys on, the closed reason code, the verifier path."""
-    return (f"{VERIFIER_SEMANTIC_AUTHORITY_REQUIRED}: {decision.reason_code}: the generated verifier {decision.path or '(no exact subject)'} has no "
-            f"semantic authority ({decision.detail}). A generated verifier's pass or failure is candidate evidence, never the truth about the contract; "
-            "nothing was changed and nothing was applied. The run stops for review.")
+    return (f"{VERIFIER_SEMANTIC_AUTHORITY_REQUIRED}: {decision.reason_code}: generated verifier {decision.path or '(no exact subject)'}: "
+            f"{decision.detail}. A generated verifier's pass or failure is candidate evidence, never the truth about the contract; "
+            "nothing further was changed and nothing was applied. The run stops for review.")
 
 
 # ----------------------------------------------------------------------------- production owner after expectation_valid
@@ -311,8 +308,290 @@ def production_owner_authority(
     return OwnerAuthority(OWNER_SELECTED, owner_id=owner_id, files=tuple(owners[owner_id]))
 
 
+# ----------------------------------------------------------------------------- one unit invocation (what the loop seams call)
+
+# The failure a unit's pass seam raises when a person declares a PASSING generated verifier invalid: the candidate is not accepted and the retry loop's
+# failure seam starts the verifier's one regeneration. It is not a stop.
+REGENERATE_FAILURE_TYPE = "verifier_semantic_expectation_invalid"
+_OUTCOME_MAX_CHARS = 4000
+
+
+@dataclass(frozen=True)
+class GateRuling:
+    """What a seam must do. ``stop``: the needs-review decision (the unit stops typed; nothing may be changed). ``regenerate``: the verifier path whose
+    ONE regeneration is the next generation. ``owner``: after expectation_valid, the strict production-owner result (its files are the only repair
+    targets). All None/empty = the gate involved no generated-verifier subject that needs anything: the seam's historical behaviour is unchanged."""
+
+    stop: Optional[SubjectDecision] = None
+    regenerate: Optional[str] = None
+    owner: Optional[OwnerAuthority] = None
+
+    @property
+    def unchanged(self) -> bool:
+        return self.stop is None and self.regenerate is None and self.owner is None
+
+    @property
+    def stop_message(self) -> Optional[str]:
+        return needs_review_message(self.stop) if self.stop is not None else None
+
+
+class UnitSemantics:
+    """The generated-verifier semantic state of ONE unit invocation, over the run's one ledger. The loop seams hand it facts (the test gates' result
+    dicts, the unit's authored bytes, the gate failure) and obey the ``GateRuling`` it returns; they hold no policy of their own.
+
+    ``regenerable``: the invocation runs under a validated plan with an exact allow-list write scope, so the write scope of one attempt can be the one
+    verifier path while the rest of the candidate stays in the tree read-only. A direct run has neither: expectation_invalid is needs-review there."""
+
+    def __init__(self, *, ledger: VerifierSemanticLedger, run_id: str, plan_hash: str, unit_id: str, goal: str,
+                 verification_contract_digest: Optional[str] = None, acceptance_criteria: Sequence[Tuple[str, str]] = (),
+                 invariants: Sequence[Tuple[str, str]] = (), regenerable: bool = False, attended: bool = False, callback: Any = None,
+                 read_bytes: Optional[Callable[[str], Optional[bytes]]] = None) -> None:
+        self.ledger, self.run_id, self.plan_hash, self.unit_id, self.goal = ledger, run_id, plan_hash, unit_id, goal
+        self.verification_contract_digest = verification_contract_digest
+        self.acceptance_criteria, self.invariants = tuple(acceptance_criteria), tuple(invariants)
+        self.regenerable, self.attended, self.callback, self.read_bytes = regenerable, attended, callback, read_bytes
+        self.results: List[Mapping[str, Any]] = []           # the test gates' result dicts of the CURRENT attempt, as the gates returned them
+        self.denied: set = set()                             # verifier paths no later generation of this invocation may write
+        self.pending: Optional[Tuple[str, str]] = None       # (path, sha256 of the invalid bytes): its one regeneration is the NEXT generation
+        self.regenerating: Optional[Tuple[str, str]] = None  # the same pair once that generation started, until its outcome is judged
+
+    # -- facts in
+    def observe(self, result: Any) -> None:
+        if isinstance(result, Mapping):
+            self.results.append(result)
+
+    def _authored(self, written: Iterable[str]) -> Dict[str, Optional[bytes]]:
+        authored: Dict[str, Optional[bytes]] = {}
+        for path in written:
+            try:
+                authored[path] = self.read_bytes(path) if self.read_bytes is not None else None
+            except Exception:  # unreadable now: reported by the derivation, never guessed
+                authored[path] = None
+        return authored
+
+    def _derive(self, written: Iterable[str], results: Optional[Sequence[Mapping[str, Any]]] = None) -> Tuple[List[ExecutedVerifier], List[str]]:
+        """(every run-authored executed verifier, why the provenance of an executed case is unknown) over the attempt's gate results. A verifier
+        reported by several gates is one entry; it is failing when any gate reported one of its identities failed."""
+        authored = self._authored(written)
+        merged: Dict[str, ExecutedVerifier] = {}
+        unknown: List[str] = []
+        for result in (self.results if results is None else results):
+            derivation = derive_executed_verifiers(result.get("test_execution"), authored)
+            if derivation.complete and any(isinstance(case, Mapping) for case in (result.get("test_execution") or {}).get("test_cases") or ()):
+                unknown.extend(f"ambiguous:{identity}" for identity in derivation.ambiguous)
+                unknown.extend(f"unreadable:{path}" for path in derivation.unreadable)
+            for verifier in derivation.verifiers:
+                known = merged.get(verifier.path)
+                merged[verifier.path] = verifier if known is None else ExecutedVerifier(
+                    path=verifier.path, sha256=verifier.sha256, source=verifier.source,
+                    identities=tuple(sorted(set(known.identities) | set(verifier.identities))),
+                    failed_identities=tuple(sorted(set(known.failed_identities) | set(verifier.failed_identities))))
+        return [merged[path] for path in sorted(merged)], sorted(set(unknown))
+
+    def _subject(self, verifier: ExecutedVerifier, outcome: str) -> VerifierSemanticSubject:
+        failing = bool(verifier.failed_identities)
+        return VerifierSemanticSubject(
+            run_id=self.run_id, plan_hash=self.plan_hash, verifier_unit_id=self.unit_id, verifier_files=((verifier.path, verifier.sha256),),
+            goal_digest=hashlib.sha256((self.goal or "").encode("utf-8", errors="replace")).hexdigest(),
+            verification_contract_digest=self.verification_contract_digest, acceptance_criteria=self.acceptance_criteria, invariants=self.invariants,
+            review_phase=REVIEW_PHASE_FAILING if failing else REVIEW_PHASE_PASSING,
+            failure_identity=(hashlib.sha256("\n".join(verifier.failed_identities).encode("utf-8")).hexdigest() if failing else None),
+            contract_text=self.goal, verifier_sources=((verifier.path, verifier.source),), outcome=(outcome or "")[:_OUTCOME_MAX_CHARS])
+
+    def _stop(self, reason_code: str, path: str, detail: str) -> GateRuling:
+        return GateRuling(stop=SubjectDecision(Action.NEEDS_REVIEW, path, reason_code, detail))
+
+    def _judge_regeneration(self, verifiers: Sequence[ExecutedVerifier], *, final: bool) -> Optional[GateRuling]:
+        """The one regeneration answer was given (or the attempt ended without it). The path is write-denied from here on, whatever happened: there
+        is no second regeneration. It must have produced NEW bytes that a test gate executed; ``final`` False = a later gate of this attempt may
+        still execute it."""
+        if self.regenerating is None:
+            return None
+        path, old_sha = self.regenerating
+        self.denied.add(path)
+        now = next((verifier for verifier in verifiers if verifier.path == path), None)
+        if now is not None and now.sha256 != old_sha:
+            self.regenerating = None
+            return None
+        if not final and now is None:
+            return None
+        self.regenerating = None
+        return self._stop(REASON_REGENERATION_NOT_EXECUTED, path,
+                          "its one regeneration did not produce a new verifier that a test gate executed; there is no second regeneration")
+
+    async def _settle(self, verifier: ExecutedVerifier, outcome: str) -> SubjectDecision:
+        def subject_now() -> Optional[VerifierSemanticSubject]:
+            try:
+                data = self.read_bytes(verifier.path) if self.read_bytes is not None else None
+            except Exception:
+                data = None
+            if data is None or hashlib.sha256(data).hexdigest() != verifier.sha256:
+                return None
+            return self._subject(verifier, outcome)
+        return await self.ledger.settle(subject_now, self.callback, attended=self.attended)
+
+    def _regeneration(self, decision: SubjectDecision, verifier: ExecutedVerifier) -> GateRuling:
+        """expectation_invalid: the ledger has spent the subject's one regeneration. It can only be performed where the write scope of one generation
+        can be exactly this path with the candidate kept; anywhere else nothing is regenerated."""
+        if not self.regenerable:
+            self.denied.add(verifier.path)
+            return self._stop(REASON_REGENERATION_UNAVAILABLE, decision.path,
+                              "the expectation was declared invalid, and this run has no exact-path regeneration that keeps the candidate")
+        self.pending = (verifier.path, verifier.sha256)
+        return GateRuling(regenerate=verifier.path)
+
+    # -- the failure seam (before the ordinary retry may choose targets)
+    async def on_gate_failure(self, *, written: Iterable[str], failure_type: str, outcome: str, located_paths: Sequence[str],
+                              is_workspace_artifact: Callable[[str], bool], owners_of: Callable[[str], Sequence[str]]) -> GateRuling:
+        written = list(written)
+        if failure_type == REGENERATE_FAILURE_TYPE and self.pending is not None:
+            return GateRuling(regenerate=self.pending[0])            # decided at the pass seam: the retry loop only has to start it
+        verifiers, unknown = self._derive(written)
+        judged = self._judge_regeneration(verifiers, final=True)
+        if judged is not None:
+            return judged
+        if unknown:
+            return self._stop(REASON_SUBJECT_AMBIGUOUS if unknown[0].startswith("ambiguous:") else REASON_SUBJECT_UNREADABLE, "",
+                              "a test gate executed cases, and whether they belong to a source this run wrote cannot be resolved ("
+                              + ", ".join(unknown[:5]) + ")")
+        failing = [verifier for verifier in verifiers if verifier.failed_identities]
+        if not failing:
+            return GateRuling()
+        for verifier in failing:
+            decision = await self._settle(verifier, outcome)
+            if decision.action is Action.NEEDS_REVIEW:
+                return GateRuling(stop=decision)
+            if decision.action is Action.REGENERATE_VERIFIER:
+                return self._regeneration(decision, verifier)
+            self.denied.add(verifier.path)                           # expectation_valid: these exact bytes stay as they are
+        owner = production_owner_authority(
+            executed_failure=True, located_paths=located_paths, verifier_paths=[verifier.path for verifier in verifiers],
+            is_workspace_artifact=is_workspace_artifact, owners_of=owners_of)
+        if not owner.selected:
+            return self._stop(REASON_NO_PRODUCTION_OWNER, failing[0].path,
+                              f"the expectation is valid, and no production owner has authority to be repaired from this failure: {owner.reason_code}")
+        return GateRuling(owner=owner)
+
+    # -- the pass seams (before terminal regression; after it, before apply)
+    async def on_gates_passed(self, *, written: Iterable[str], final: bool) -> GateRuling:
+        written = list(written)
+        verifiers, unknown = self._derive(written)
+        judged = self._judge_regeneration(verifiers, final=final)
+        if judged is not None:
+            return judged
+        if unknown:
+            return self._stop(REASON_SUBJECT_AMBIGUOUS if unknown[0].startswith("ambiguous:") else REASON_SUBJECT_UNREADABLE, "",
+                              "a test gate executed cases, and whether they belong to a source this run wrote cannot be resolved ("
+                              + ", ".join(unknown[:5]) + ")")
+        for verifier in verifiers:
+            decision = await self._settle(verifier, "")
+            if decision.action is Action.NEEDS_REVIEW:
+                return GateRuling(stop=decision)
+            if decision.action is Action.REGENERATE_VERIFIER:
+                return self._regeneration(decision, verifier)
+        return GateRuling()
+
+    # -- the side routes
+    def autonomous_rewrite_permitted(self, written: Iterable[str], result: Any) -> bool:
+        """May the targeted-test self-correction loop rewrite files from this failed test result? Never while a regeneration answer is being
+        judged, and never when the result identifies a failing run-authored verifier or leaves an executed case's provenance unknown: that
+        decision is the failure seam's. (The compile gate's loop needs no guard: a semantic decision exists only in an attended run, whose
+        executing gates run behind the source review with every self-correction loop off.)"""
+        if self.regenerating is not None or self.pending is not None:
+            return False
+        if not isinstance(result, Mapping):
+            return True
+        verifiers, unknown = self._derive(written, [result])
+        return not unknown and not any(verifier.failed_identities for verifier in verifiers)
+
+    def unscoped_owner_refusal(self, ruling: GateRuling) -> GateRuling:
+        """A selected production owner in an invocation whose write scope is not an allow-list: the accepted verifier could not be
+        write-denied while production is repaired, so nobody is repaired."""
+        files = ", ".join(ruling.owner.files) if ruling.owner is not None else ""
+        return self._stop(REASON_NO_PRODUCTION_OWNER, "", f"the expectation is valid, and this run has no exact write scope under which {files} "
+                          "could be repaired with the verifier write-denied")
+
+    def regeneration_admitted(self, admitted: bool) -> Optional[GateRuling]:
+        """After the failed attempt was charged: the retry policy's own decision for the next attempt. A pending regeneration that is not admitted
+        as a targeted attempt is never forced (no budget is reset): the path is closed and the unit stops for review."""
+        if self.pending is None or admitted:
+            return None
+        path, _sha = self.pending
+        self.pending = None
+        self.denied.add(path)
+        return self._stop(REASON_REGENERATION_NOT_ADMITTED, path,
+                          "the expectation was declared invalid, and the retry policy admits no targeted attempt to regenerate it")
+
+    def full_regeneration_refusal(self) -> GateRuling:
+        """A verifier of this invocation may no longer be written (accepted, or its one regeneration is used), and the retry policy's next
+        attempt would regenerate the unit's whole file set. That is neither a strict production-owner repair nor the one regeneration."""
+        path = sorted(self.denied)[0] if self.denied else ""
+        return self._stop(REASON_FULL_REGENERATION_REFUSED, path,
+                          "the retry policy's next attempt would regenerate the whole unit, including a verifier that may not be changed")
+
+    # -- the write scope of ONE attempt
+    def attempt_scope(self, ctx: Any, allowlist_mode: Any) -> "_AttemptScope":
+        return _AttemptScope(self, ctx, allowlist_mode)
+
+
+@dataclass(frozen=True)
+class RunSemantics:
+    """What the run's controller hands every unit invocation: the run's ONE ledger and the run-level bindings of a semantic review."""
+
+    ledger: VerifierSemanticLedger
+    plan_hash: str
+    verification_contract_digest: Optional[str]
+    goal: str
+
+
+NO_STRUCTURED_PLAN = "NO_STRUCTURED_PLAN"   # the plan binding of a run that has no validated plan (a direct run): it owns no file and regenerates nothing
+
+
+def unit_semantics(run: Optional[RunSemantics], *, run_id: str, unit_id: Optional[str], goal: str, structured_plan: Any, allowlist_scope: bool,
+                   attended: bool, callback: Any, read_bytes: Callable[[str], Optional[bytes]]) -> UnitSemantics:
+    """The semantic state of one unit invocation. Under a controller (``run``) with a validated plan and an allow-list scope the unit can regenerate
+    one verifier path in place; a direct run gets a ledger of its own, no plan binding and no regeneration."""
+    criteria: List[Tuple[str, str]] = []
+    invariants: List[Tuple[str, str]] = []
+    subtask = next((item for item in getattr(structured_plan, "subtasks", None) or () if item.id == unit_id), None)
+    if subtask is not None:
+        wanted_criteria, wanted_invariants = set(subtask.acceptance_criteria_ids), set(subtask.relevant_global_invariant_ids)
+        criteria = [(item.id, item.description) for item in structured_plan.acceptance_criteria if item.id in wanted_criteria]
+        invariants = [(item.id, item.statement) for item in structured_plan.global_invariants if item.id in wanted_invariants]
+    return UnitSemantics(
+        ledger=run.ledger if run is not None else VerifierSemanticLedger(), run_id=run_id,
+        plan_hash=run.plan_hash if run is not None else NO_STRUCTURED_PLAN, unit_id=unit_id or run_id,
+        goal=run.goal if run is not None else goal, verification_contract_digest=run.verification_contract_digest if run is not None else None,
+        acceptance_criteria=criteria, invariants=invariants,
+        regenerable=bool(run is not None and subtask is not None and allowlist_scope), attended=attended, callback=callback, read_bytes=read_bytes)
+
+
+class _AttemptScope:
+    """The write scope of exactly one attempt, restored on every exit (return, failure, timeout, cancellation). A pending regeneration makes the
+    scope exactly its verifier path; otherwise an allow-list scope loses the write-denied verifier paths. The attempt context's own scope is never
+    left changed, so no later attempt, unit or recovery inherits it."""
+
+    def __init__(self, unit: UnitSemantics, ctx: Any, allowlist_mode: Any) -> None:
+        self.unit, self.ctx, self.allowlist_mode = unit, ctx, allowlist_mode
+        self.saved: Optional[Tuple[List[str], Any]] = None
+
+    def __enter__(self) -> "_AttemptScope":
+        unit, ctx = self.unit, self.ctx
+        self.saved = (ctx.allowed_write_relpaths, ctx.write_scope_mode)
+        unit.results = []
+        if unit.pending is not None:
+            unit.regenerating, unit.pending = unit.pending, None
+            ctx.allowed_write_relpaths, ctx.write_scope_mode = [unit.regenerating[0]], self.allowlist_mode
+        elif unit.denied and ctx.write_scope_mode == self.allowlist_mode:
+            ctx.allowed_write_relpaths = [path for path in self.saved[0] if normalize_path(path) not in unit.denied]
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.ctx.allowed_write_relpaths, self.ctx.write_scope_mode = self.saved
+
+
 __all__ = [
     "Action", "ExecutedVerifier", "OwnerAuthority", "SubjectDecision", "VerifierDerivation", "VerifierSemanticLedger", "derive_executed_verifiers",
-    "needs_review_message", "normalize_path", "production_owner_authority", "is_test_source_compile_without_subject",
+    "needs_review_message", "normalize_path", "production_owner_authority", "UnitSemantics", "GateRuling", "REGENERATE_FAILURE_TYPE",
     "VERIFIER_SEMANTIC_AUTHORITY_REQUIRED", "VERIFIER_SEMANTIC_STOP_TYPE", "REVIEW_REASON_CODES", "OWNER_REASON_CODES",
 ]

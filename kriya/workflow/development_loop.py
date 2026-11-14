@@ -43,6 +43,7 @@ from kriya.policy.egress import dependency_lookup_decision
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.repository.bound_tree import BoundTreeError
 from kriya.repository.git import RepositoryContentFilterRefused
+from kriya.repository.snapshot import load_snapshot
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.architectural_choice import architecture_choice_invalidated_message
@@ -96,6 +97,7 @@ from kriya.workflow.validation_baseline import (
     render_blocking_regression_evidence,
 )
 from kriya.workflow.verification_coordinator import is_verification_only_unit
+from kriya.workflow.verifier_semantic import REGENERATE_FAILURE_TYPE, VERIFIER_SEMANTIC_STOP_TYPE, unit_semantics
 from kriya.workflow.worktree import WorktreeSyncError
 
 RunState = Any   # kriya.workflow.state.GenerationState (kriya/workflow/stage_context.py says why it is not imported)
@@ -576,6 +578,8 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
         requirement_set=requirement_set,
     )
 
+    attempt_ctx.verifier_semantic = _unit_verifier_semantics(ctx, deps, attempt_ctx, worktree_path)
+
     # What the review, approval/apply and lesson stages (E4) read besides the design stages' outputs (the run's
     # grounding goal, work unit and trace identity are on the StageContext from its construction).
     ctx.worktree_path, ctx.resolved_obligation_ledger = worktree_path, resolved_obligation_ledger
@@ -595,6 +599,17 @@ async def run_attempt_loop(ctx: StageContext, deps: StageDeps, run: DevelopmentR
     attempt_ctx, worktree_path, chain = run.attempt_ctx, run.worktree_path, run.chain
     max_retries, TARGETED_MAX_RETRIES = run.max_retries, run.targeted_max_retries
     fallback_routing_for_state = deps.load_fallback_routing()
+
+    async def run_scoped_attempt(attempt_state: Any, scoped_ctx: Any) -> None:
+        # VERIFIER-SEMANTIC-AUTHORITY-001: the write scope of exactly this attempt (one verifier path for its one regeneration; an accepted
+        # verifier write-denied), restored on every exit so no later attempt, unit or recovery inherits it.
+        unit = getattr(scoped_ctx, "verifier_semantic", None)
+        if unit is None:
+            await deps.run_attempt(attempt_state, scoped_ctx)
+            return
+        with unit.attempt_scope(scoped_ctx, WriteScopeMode.ALLOWLIST):
+            await deps.run_attempt(attempt_state, scoped_ctx)
+
     while (plan := plan_attempt(
         state, max_retries=max_retries,
         targeted_max_retries=TARGETED_MAX_RETRIES,
@@ -603,7 +618,7 @@ async def run_attempt_loop(ctx: StageContext, deps: StageDeps, run: DevelopmentR
         best_of_n=deps.config.autonomy.best_of_n_first_attempt, sandboxed=worktree_path != workspace_path,
     )).should_continue:
         outcome = await run_iteration(
-            plan, state, attempt_ctx, run_attempt=deps.run_attempt, load_best_of_n=deps.load_best_of_n,
+            plan, state, attempt_ctx, run_attempt=run_scoped_attempt, load_best_of_n=deps.load_best_of_n,
             # Stages 4.x-7 on the candidate this attempt produced: None = applied, the loop ends; a dict = the run
             # stops here with that result (the approval gate's abort).
             accept=lambda: accept_candidate(ctx, deps, run),
@@ -987,6 +1002,10 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
     if ctx.verifier_repair is not None:
         await verify_repaired_verifier_before_apply(ctx, deps, run)
 
+    # VERIFIER-SEMANTIC-AUTHORITY-001, pass seam A: every run-authored verifier the candidate's test gates executed must have semantic
+    # authority before the terminal regression (a generated verifier's pass is candidate evidence, never the truth about the contract).
+    await settle_generated_verifiers(ctx, run, final=False)
+
     # Worktree cleanup deliberately does NOT happen here anymore - see the
     # real live incident this fix closes, 2026-08-22 (ignite_qpid_protocol
     # milestone 2/3): compile+run-verification passing is not the same as
@@ -1018,6 +1037,10 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
     )
 
     final_candidate_contents = run_terminal_regression(ctx, deps, run)
+
+    # Pass seam B, immediately before apply: the terminal regression may have executed run-authored verifiers the candidate gates did not.
+    # A verifier already accepted with the same semantic-authority fingerprint is not asked about again.
+    await settle_generated_verifiers(ctx, run, final=True)
 
     # A semantically final-success checkpoint is legal only after
     # every required terminal gate has passed.
@@ -1054,6 +1077,61 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
     )
 
     return None
+
+
+def _observe_test_gate(attempt_ctx: Any, result: Any) -> None:
+    unit = getattr(attempt_ctx, "verifier_semantic", None)
+    if unit is not None:
+        unit.observe(result)
+
+
+def _unit_verifier_semantics(ctx: StageContext, deps: StageDeps, attempt_ctx: Any, worktree_path: str) -> Any:
+    """This invocation's generated-verifier semantic state (kriya/workflow/verifier_semantic.py): the controller's run ledger when there is one,
+    the unit's plan bindings, whether a person can be asked, and the exact current bytes of a candidate file."""
+    from kriya.config.authority import AutonomyModeError, is_human_in_the_loop
+
+    try:
+        attended = is_human_in_the_loop(deps.config.autonomy.mode)
+    except AutonomyModeError:
+        attended = False            # a mode that cannot be read is never read as human-in-the-loop (the restrictive branch)
+
+    def read_bytes(path: str) -> Optional[bytes]:
+        snapshot = load_snapshot(os.path.join(worktree_path, path))
+        return snapshot.raw_bytes if snapshot.exists and not snapshot.is_symlink else None
+
+    return unit_semantics(
+        ctx.verifier_semantic, run_id=ctx.run_id, unit_id=ctx.current_subtask_id, goal=ctx.grounding_goal or ctx.goal,
+        structured_plan=ctx.structured_plan, allowlist_scope=attempt_ctx.write_scope_mode == WriteScopeMode.ALLOWLIST,
+        attended=bool(attended and ctx.approval_callback), callback=ctx.approval_callback, read_bytes=read_bytes)
+
+
+async def settle_generated_verifiers(ctx: StageContext, run: DevelopmentRun, *, final: bool) -> None:
+    """A pass seam. Every run-authored verifier this attempt's test gates executed must be settled by the one policy owner; otherwise the candidate
+    is not accepted: a typed stop (needs-review), or the failure that starts the verifier's one regeneration."""
+    unit = getattr(run.attempt_ctx, "verifier_semantic", None)
+    if unit is None:
+        return
+    state = ctx.state
+    ruling = await unit.on_gates_passed(written=sorted(state.all_files_written), final=final)
+    if ruling.unchanged:
+        return
+    if ruling.stop is not None:
+        failure_type, message, path = VERIFIER_SEMANTIC_STOP_TYPE, ruling.stop_message, ruling.stop.path
+    else:
+        failure_type, path = REGENERATE_FAILURE_TYPE, ruling.regenerate
+        message = (f"VERIFIER_SEMANTIC_EXPECTATION_INVALID: the generated verifier {path} passed, and a person declared its expectation invalid "
+                   "under the contract. The candidate is not accepted; the verifier gets its one regeneration.")
+    state.record_event(RunEvent(
+        kind="verifier_semantic.ruling", attempt=state.attempt_number, source="development_loop.settle_generated_verifiers",
+        authority=EventAuthority.AUTHORITATIVE, message=message,
+        details={"seam": "pass_before_apply" if final else "pass_before_terminal_regression", "path": path,
+                 "action": "needs_review" if ruling.stop is not None else "regenerate_verifier",
+                 "reason_code": ruling.stop.reason_code if ruling.stop is not None else None},
+    ))
+    state.terminal_regression_succeeded = False
+    failure = Failure(type=failure_type, message=message, raw_output=message, likely_files=[path] if path else [], attempt=state.attempt_number)
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
 
 
 COUNTERFACTUAL_OUTPUT_MAX_CHARS = 4000
@@ -1178,6 +1256,7 @@ def run_terminal_regression(ctx: StageContext, deps: StageDeps, run: Development
 
     full_test_res = validator.run_tests()
     deps._stop_on_environment_gate_result(state, full_test_res, "regression_test")
+    _observe_test_gate(attempt_ctx, full_test_res)
     state.terminal_full_suite_result = full_test_res
 
     # VAL-001 brownfield validation baselining - ONLY changes
@@ -1250,6 +1329,7 @@ def run_terminal_regression(ctx: StageContext, deps: StageDeps, run: Development
     ):
         _frozen_targets = state.validation_baseline_targeted.invocation.target_test
         _targeted_test_res = validator.run_tests(target_test=_frozen_targets)
+        _observe_test_gate(attempt_ctx, _targeted_test_res)
         deps._stop_on_environment_gate_result(state, _targeted_test_res, "targeted_test")
         _post_targeted_outcome = build_validation_outcome(_targeted_test_res)
         _targeted_baseline_delta_result, _targeted_stability = classify_with_baseline_stability(

@@ -204,6 +204,18 @@ def _contained_jdk_major(deps: GateDeps, state: RunState, ctx: AttemptCtx) -> Op
     return int(identity.runtime_version)
 
 
+def _observe_test_gate(ctx: Any, result: Any) -> None:
+    """VERIFIER-SEMANTIC-AUTHORITY-001: the test gate's own result dict goes to the unit's semantic state as it is (never re-parsed text)."""
+    unit = getattr(ctx, "verifier_semantic", None)
+    if unit is not None:
+        unit.observe(result)
+
+
+def _autonomous_rewrite_permitted(ctx: Any, state: Any, result: Any) -> bool:
+    unit = getattr(ctx, "verifier_semantic", None)
+    return unit is None or unit.autonomous_rewrite_permitted(sorted(state.all_files_written), result)
+
+
 def _apply_candidate_pom_corrections(
     deps: GateDeps, state: RunState, ctx: AttemptCtx, compile_known_files: List[str],
 ) -> None:
@@ -799,6 +811,7 @@ async def _run_executing_candidate_gates(
             deps.logger.info(f"Quality Gates: Running targeted tests: {target_test}")
             test_repair_result = None
             test_res = validator.run_tests(target_test=target_test)
+            _observe_test_gate(ctx, test_res)
             deps._stop_on_environment_gate_result(state, test_res, "targeted_test")
             if not output_confirms_nonzero_test_execution(test_res.get("output", "")):
                 # A targeted command that collected zero tests says the selector
@@ -820,6 +833,7 @@ async def _run_executing_candidate_gates(
                 })
                 target_test = None
                 test_res = validator.run_tests()
+                _observe_test_gate(ctx, test_res)
                 deps._stop_on_environment_gate_result(state, test_res, "test")
                 suite_blocks, suite_evidence, suite_gate_evidence = deps._judge_candidate_suite(
                     state, ctx, test_res, deps.SCOPE_CANDIDATE_GATE)
@@ -852,7 +866,10 @@ async def _run_executing_candidate_gates(
                 accepted_test_result = test_res
 
             if target_test and not test_res["success"]:
-                if ctx.kernel.config.autonomy.self_correction_loop_enabled and ctx.post_source_review_guard is None and getattr(ctx, "verifier_repair", None) is None:
+                # VERIFIER-SEMANTIC-AUTHORITY-001: a failing run-authored verifier (or an executed case of unknown provenance) is never
+                # rewritten by this loop; the decision is the failure seam's, from the one ledger.
+                if (ctx.kernel.config.autonomy.self_correction_loop_enabled and ctx.post_source_review_guard is None
+                        and getattr(ctx, "verifier_repair", None) is None and _autonomous_rewrite_permitted(ctx, state, test_res)):
                     run_repair_loop = deps.load_run_repair_loop()
                     test_repair_result = await run_repair_loop(
                         llm=ctx.developer.llm,
@@ -934,6 +951,7 @@ async def _run_executing_candidate_gates(
             if runnable_test_files or deps._declares_test_verification(ctx.required_verification):
                 deps.logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                 test_res = validator.run_tests()
+                _observe_test_gate(ctx, test_res)
                 deps._stop_on_environment_gate_result(state, test_res, "test")
                 # CANDIDATE-GATE-BASELINE-POLICY-001 (C2-S2_A): judged against
                 # the frozen PRE baseline, never raw - a pre-existing failure
@@ -1984,6 +2002,7 @@ def _raise_unexecuted_test_delta(
     if not covered or deps.test_execution.report_from_result(result) is None:
         targeted = validator.stack == "python"
         result = validator.run_tests(target_test=sorted(changed)) if targeted else validator.run_tests()
+        _observe_test_gate(ctx, result)
         deps._stop_on_environment_gate_result(state, result, "test")
         # A targeted run executes only the changed tests - its failures are the candidate's own; a full-suite
         # run is attributed against the frozen baseline (CANDIDATE-GATE-BASELINE-POLICY-001).

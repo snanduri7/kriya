@@ -1630,6 +1630,9 @@ class AttemptContext:
     # invocation has started (the hard one-answer bound is enforced where every generation goes through).
     verifier_repair: Optional[Any] = None
     developer_generation_passes: int = 0
+    # VERIFIER-SEMANTIC-AUTHORITY-001: this invocation's generated-verifier semantic state (verifier_semantic.UnitSemantics). The test gates
+    # hand it their results; the failure seam, the pass seams and the self-correction guards obey its rulings.
+    verifier_semantic: Optional[Any] = None
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
     # Gap B (2026-10-15): see defer_execution_until_source_review. The caller that runs the post-approval phase sets the first; run_attempt fills the second (the held

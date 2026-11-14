@@ -3634,7 +3634,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     "requirements_unresolved", "contract_registry_blocked", "goal_insufficient_for_verification",
                     "verification_authority_required", "verification_authority_unavailable",
                     "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
-                    "workspace_commit_failed",
+                    "workspace_commit_failed", "verifier_semantic_authority_required",
                 ):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
@@ -4805,7 +4805,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 "requirements_unresolved", "contract_registry_blocked", "goal_insufficient_for_verification",
                     "verification_authority_required", "verification_authority_unavailable",
                 "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
-                "workspace_commit_failed",
+                "workspace_commit_failed", "verifier_semantic_authority_required",
             ):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"

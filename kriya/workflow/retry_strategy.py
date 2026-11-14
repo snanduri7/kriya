@@ -80,8 +80,10 @@ from kriya.workflow.open_findings import (
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.retry_policy import (
+    RetryAction,
     api_contract_recovery_handed_back,
     charge_failed_attempt,
+    decide_for_state,
     force_strategy_transition,
     observe_failure_family,
     reset_scoped_budgets_for_new_family,
@@ -98,6 +100,7 @@ from kriya.workflow.retry_progress import (
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.state import APIContractRecovery, GenerationState
 from kriya.workflow.verification_coordinator import is_verification_only_unit
+from kriya.workflow.verifier_semantic import REGENERATE_FAILURE_TYPE, VERIFIER_SEMANTIC_STOP_TYPE, GateRuling
 
 logger = logging.getLogger(__name__)
 
@@ -508,6 +511,85 @@ def _stop_after_a_failed_verifier_repair(state: GenerationState, ctx, failure: F
     logger.error("Quality Gates stopped - %s (authorized verifier repair, %s gate).", VERIFIER_REPAIR_FAILED, failure.type)
 
 
+async def _generated_verifier_ruling(state: GenerationState, ctx, failure: Failure) -> Optional[GateRuling]:
+    """The policy owner's ruling for this failure, or None when it involves no generated-verifier subject (the historical path, unchanged). A stop
+    ruling becomes the unit's typed stop here; the other rulings replace model attribution below. Never asked once the unit is already stopping."""
+    unit = getattr(ctx, "verifier_semantic", None)
+    if unit is None or state.environment_failure or state.plan_scope_conflict is not None or state.no_progress_terminated:
+        return None
+    plan = getattr(ctx, "structured_plan", None)
+
+    def owners_of(path: str) -> List[str]:
+        return [subtask.id for subtask in getattr(plan, "subtasks", None) or () if any(planned.path == path for planned in subtask.planned_files)]
+
+    ruling = await unit.on_gate_failure(
+        written=sorted(state.all_files_written), failure_type=failure.type, outcome=failure.raw_output or failure.message or "",
+        located_paths=[location.filepath for location in failure.file_locations],
+        is_workspace_artifact=lambda path: os.path.isfile(os.path.join(ctx.worktree_path, path)), owners_of=owners_of)
+    if ruling.unchanged:
+        return None
+    if ruling.owner is not None and getattr(ctx, "write_scope_mode", None) != WriteScopeMode.ALLOWLIST:
+        # an accepted verifier must be write-denied while production is repaired: only an allow-list scope can express that
+        ruling = unit.unscoped_owner_refusal(ruling)
+    if ruling.stop is not None:
+        state.environment_failure = ruling.stop_message
+        logger.error("Quality Gates stopped - %s", state.environment_failure)
+    state.record_event(RunEvent(
+        kind="verifier_semantic.ruling", attempt=state.attempt_number, source="retry_strategy._generated_verifier_ruling",
+        authority=EventAuthority.AUTHORITATIVE, message=ruling.stop_message or "",
+        details={"seam": "failure_before_attribution", "path": ruling.stop.path if ruling.stop is not None else ruling.regenerate,
+                 "action": ("needs_review" if ruling.stop is not None else "regenerate_verifier" if ruling.regenerate else "repair_production_owner"),
+                 "reason_code": ruling.stop.reason_code if ruling.stop is not None else None,
+                 "owner_id": ruling.owner.owner_id if ruling.owner is not None else None,
+                 "owner_files": list(ruling.owner.files) if ruling.owner is not None else []},
+    ))
+    return ruling
+
+
+def _semantic_attribution(ruling: GateRuling) -> AttributionResult:
+    """The attribution of a failure the policy owner ruled on: no model is asked whose file it is."""
+    if ruling.owner is not None:
+        return AttributionResult(
+            tier="locator", files=list(ruling.owner.files), confidence="high",
+            reasoning=("A person accepted the generated verifier's expectation; the gate's own locator names these production artifacts and the "
+                       f"validated plan gives them exactly one owner ({ruling.owner.owner_id}). The verifier is not a repair target."))
+    if ruling.regenerate:
+        return AttributionResult(
+            tier="full_set", files=[ruling.regenerate], confidence="high",
+            reasoning="A person declared the generated verifier's expectation invalid: its one regeneration, of exactly this path.")
+    return AttributionResult(
+        tier="full_set", files=[], confidence="high",
+        reasoning="A generated verifier has no semantic authority; nothing is attributed and nothing may be changed.")
+
+
+def _close_unadmitted_verifier_regeneration(state: GenerationState, ctx) -> None:
+    """After the failed attempt was charged: a verifier's one regeneration happens only as the targeted attempt the retry policy itself admits
+    next, for exactly that path. No budget is reset to make room for it; otherwise the unit stops for review."""
+    unit = getattr(ctx, "verifier_semantic", None)
+    if unit is None or (unit.pending is None and not unit.denied):
+        return
+    if unit.denied:
+        # A verifier that may no longer be written (accepted, or regenerated once) is never a generation target of a later attempt.
+        for name in ("last_implicated_files", "last_missing_files"):
+            targets = getattr(state, name)
+            if targets:
+                setattr(state, name, [path for path in targets if path not in unit.denied] or None)
+    decision = decide_for_state(
+        state, max_retries=ctx.max_retries, targeted_max_retries=ctx.targeted_max_retries,
+        has_fallback_model=fallback_routing_for_context(state, ctx).available)
+    if unit.pending is None:
+        if not (decision.should_continue and decision.action is RetryAction.FULL_SET) or state.environment_failure:
+            return
+        refusal = unit.full_regeneration_refusal()
+    else:
+        admitted = (decision.should_continue and decision.action is RetryAction.TARGETED
+                    and list(state.last_implicated_files or ()) == [unit.pending[0]] and state.plan_scope_conflict is None)
+        refusal = unit.regeneration_admitted(admitted)
+    if refusal is not None and not state.environment_failure:
+        state.environment_failure = refusal.stop_message
+        logger.error("Quality Gates stopped - %s", state.environment_failure)
+
+
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
     """Called from workflow.py's `except Exception as e:` after a failed
     run_attempt() call. Mutates state (error_context, last_implicated_files/
@@ -725,7 +807,11 @@ async def _record_attempt_failure(
             # authorize; the verification is invalid and a retry would
             # verify a tree the commit does not carry.
             "verification_tree_mutated",
+            # VERIFIER-SEMANTIC-AUTHORITY-001: a generated verifier without semantic authority (raised by a pass seam). Regeneration cannot
+            # supply a person's decision.
+            VERIFIER_SEMANTIC_STOP_TYPE,
         }
+        else None if failure.type == REGENERATE_FAILURE_TYPE
         else classify_environment_failure(
             raw_error_context,
             worktree_path=ctx.worktree_path,
@@ -983,6 +1069,9 @@ async def _record_attempt_failure(
     # any other failure does the reverse - the two trackers are mutually
     # exclusive per attempt, matching that they route to different,
     # differently-built retry prompts.
+    # VERIFIER-SEMANTIC-AUTHORITY-001, the primary interception: BEFORE attribution may choose a mutation target. A failing run-authored verifier
+    # is settled by the one policy owner (kriya/workflow/verifier_semantic.py); with no such subject the ruling is None and nothing below changes.
+    semantic_ruling = await _generated_verifier_ruling(state, ctx, failure)
     if is_incomplete_generation:
         state.last_missing_files = e.missing_files
         state.last_implicated_files = None
@@ -1081,7 +1170,9 @@ async def _record_attempt_failure(
                 self_diagnosed_files = None
         attribution_kind = classify_failure_attribution(fail_type, failure.message)
         failure.attribution_kind = attribution_kind.value
-        if attribution_kind is FailureAttributionKind.PLAN_SCOPE_DEFECT:
+        if semantic_ruling is not None:
+            attribution = _semantic_attribution(semantic_ruling)
+        elif attribution_kind is FailureAttributionKind.PLAN_SCOPE_DEFECT:
             grounded_scope_owners = list(dict.fromkeys(
                 (failure.diagnostics or {}).get("grounded_scope_owner_files", [])
             ))
@@ -1681,3 +1772,4 @@ async def _record_attempt_failure(
     _apply_declared_no_progress_stop(state, failure)
     _stop_after_a_failed_verifier_replay(state, ctx, failure)
     _stop_after_a_failed_verifier_repair(state, ctx, failure)
+    _close_unadmitted_verifier_regeneration(state, ctx)

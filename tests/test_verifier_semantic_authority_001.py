@@ -122,12 +122,13 @@ def test_a_run_authored_source_that_cannot_be_read_or_parsed_is_reported_never_g
     assert derivation.verifiers == () and derivation.unreadable == ("src/test/java/com/example/WidgetTest.java",) and derivation.undetermined
 
 
-def test_the_phase_fact_of_a_test_source_compile_failure_is_recognised_only_from_the_typed_record():
-    assert vs.is_test_source_compile_without_subject({"success": False, "test_phase": {"phase_class": "TEST_SOURCE_COMPILE_FAILURE"}})
-    for other in ({"success": False, "output": "TEST_SOURCE_COMPILE_FAILURE cannot find symbol WidgetTest.java"},        # text is never the fact
-                  {"test_phase": {"phase_class": "TEST_EXECUTION_FAILURE"}}, {"test_phase": {"phase_class": "MAIN_COMPILE_FAILURE"}},
-                  {"test_phase": {"phase_class": "SEMANTIC_AUTHORITY_REQUIRED"}}, {"test_phase": "TEST_SOURCE_COMPILE_FAILURE"}, {}, None):
-        assert not vs.is_test_source_compile_without_subject(other)
+def test_a_test_source_compile_failure_establishes_no_subject_and_the_policy_owner_has_no_phase_rule():
+    """Owner correction 2026-11-14: the phase fact alone identifies no run-authored verifier (a production change can break an unchanged test's
+    compilation). Nothing executed, so the gate result carries no report and nothing is derived; the policy owner no longer reads the phase at all."""
+    result = {"success": False, "test_phase": {"phase_class": "TEST_SOURCE_COMPILE_FAILURE"}, "output": "cannot find symbol"}
+    derivation = derive_executed_verifiers(result.get("test_execution"), {"src/test/java/com/example/WidgetTest.java": JAVA_TEST})
+    assert derivation.verifiers == () and not derivation.complete and not derivation.undetermined
+    assert not hasattr(vs, "is_test_source_compile_without_subject") and not any("COMPILE" in code for code in vs.REVIEW_REASON_CODES)
 
 
 def test_paths_are_compared_in_one_canonical_spelling():
@@ -252,7 +253,7 @@ def test_everything_but_a_bound_valid_or_invalid_decision_changes_nothing_and_is
 
 
 def test_the_closed_reason_tables():
-    assert len(set(vs.REVIEW_REASON_CODES)) == len(vs.REVIEW_REASON_CODES) == 9
+    assert len(set(vs.REVIEW_REASON_CODES)) == len(vs.REVIEW_REASON_CODES) == 12   # slice 2: -1 (the compile-phase rule), +4 (regeneration, full set)
     assert len(set(vs.OWNER_REASON_CODES)) == len(vs.OWNER_REASON_CODES) == 8
     assert [a.value for a in Action] == ["proceed", "ask", "regenerate_verifier", "needs_review"]
 

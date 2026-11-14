@@ -104,6 +104,10 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     "goal_spec_compliance": FailureCategory.VERIFICATION,
     # PRD-020: an original requirement without accepted evidence.
     "requirements_unresolved": FailureCategory.VERIFICATION,
+    # VERIFIER-SEMANTIC-AUTHORITY-001: a generated verifier whose semantics have no authority (typed stop), and a passing one a person
+    # declared invalid (retriable: its one regeneration).
+    "verifier_semantic_authority_required": FailureCategory.VERIFICATION,
+    "verifier_semantic_expectation_invalid": FailureCategory.VERIFICATION,
     # BACKEND-READINESS-V2 slot 3: a candidate that contradicts one of the user's own executable goal examples (retriable).
     "deterministic_contract_violation": FailureCategory.VERIFICATION,
     # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: refused before any model call - a

@@ -177,10 +177,15 @@ def test_test_execution_integrity_alone_stops_the_specimen(tmp_path, monkeypatch
 
 def test_a_correct_candidate_executes_its_test_delta(tmp_path, monkeypatch):
     """Control: a collected test of the right behaviour passes test-execution
-    integrity, and under the record policy the run succeeds."""
+    integrity (FS-1A: the test delta executed).
+
+    VERIFIER-SEMANTIC-AUTHORITY-001 (owner rulings 2026-11-14) changed how this unattended run ENDS, not the control: the test the
+    model wrote executed and passed, and a generated verifier's pass is candidate evidence with no semantic authority. With nobody to
+    ask, the run stops for review and applies nothing (before WS3-C it was recorded as a success under the record policy)."""
     observed = _run(tmp_path, monkeypatch, RECORD, _correct_responder)
-    assert observed.result.legacy_result["status"] == "success"
-    assert _applied_contains_only(observed.workspace, "hello", "") == "False"
+    legacy = observed.result.legacy_result
+    assert legacy["status"] != "success" and "VERIFIER_SEMANTIC_AUTHORITY_REQUIRED: VERIFIER_SEMANTIC_UNATTENDED" in json.dumps(legacy, default=str)
+    assert (observed.workspace / TESTS).read_text() == BASE_TESTS   # the unreviewed verifier was not applied
     [delta] = [d for d in _test_delta_outcomes(observed) if d["success"]]
     assert delta["reason_code"] == "TEST_DELTA_EXECUTED"
     assert delta["test_delta"]["executed"] == ["tests.test_charset.test_contains_only"]

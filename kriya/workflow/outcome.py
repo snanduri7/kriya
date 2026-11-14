@@ -169,6 +169,9 @@ def terminal_failure_category(state: RunState) -> str:
         ),
         None,
     )
+    # VERIFIER-SEMANTIC-AUTHORITY-001: same convention - a generated verifier whose semantics have no authority (kriya/workflow/
+    # verifier_semantic.py: review required or unavailable, unknown provenance of an executed case, no safe regeneration, no production owner).
+    is_verifier_semantic_stop = bool(state.environment_failure) and state.environment_failure.startswith("VERIFIER_SEMANTIC_AUTHORITY_REQUIRED:")
     return (
         # ENFORCE-TERMINAL-CAUSE-NESTED-RECOVERY-STOP-001 (run 9): the refused final review names the unit's category only when it is the reason the
         # unit is not a success - its candidate was applied (quality_gates_succeeded). MEASURED: a unit whose replayed verifier had already failed
@@ -190,6 +193,7 @@ def terminal_failure_category(state: RunState) -> str:
         else "workspace_commit_failed" if is_workspace_commit_stop
         else "file_integrity_unsupported" if is_file_integrity_stop
         else "verification_tree_mutated" if is_verification_tree_stop
+        else "verifier_semantic_authority_required" if is_verifier_semantic_stop
         else "environment_failure" if state.environment_failure
         # PRD-026: the retry-progress invariant ended the run.
         else "no_progress" if state.no_progress_terminated
