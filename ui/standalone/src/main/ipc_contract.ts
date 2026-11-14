@@ -30,6 +30,8 @@ export const IPC_CHANNELS = {
   // ONE typed action ({workspace, launch_id, review_id, authorization_fingerprint, decision}); an approve is re-proved by the host against Kriya's own launch record and confirmed by a
   // native dialog in the main process. See verifier_repair_host.ts.
   decideVerifierRepair: 'kriya:host:execution:decide-verifier-repair',
+  // The verifier SEMANTIC review decision (VERIFIER-SEMANTIC-REVIEW-001): one of three words of its own. See verifier_semantic_host.ts.
+  decideVerifierSemantic: 'kriya:host:execution:decide-verifier-semantic',
   // GUI configuration approval: ONE typed action ({workspace, fingerprint}) that asks Kriya to record the approval for the configuration the person reviewed.
   // Deliberately NOT part of the generic query channel (`configuration.approve` is refused there, like `workspace.create`); the renderer can never name a setting,
   // a value, a path or a digest to trust. See config_approval_host.ts.
@@ -370,6 +372,22 @@ export function validateDecideVerifierRepair(v: unknown): ValidationResult<Decid
   if (typeof v.authorization_fingerprint !== 'string' || !COMMAND_FINGERPRINT_RE.test(v.authorization_fingerprint)) return { ok: false, message: 'authorization_fingerprint is malformed' };
   if (v.decision !== 'approve' && v.decision !== 'reject') return { ok: false, message: 'decision must be approve or reject' };
   return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, authorization_fingerprint: v.authorization_fingerprint, decision: v.decision } };
+}
+
+export const VERIFIER_SEMANTIC_DECISION_WORDS = ['expectation_valid', 'expectation_invalid', 'cannot_decide'] as const;
+export interface DecideVerifierSemanticRequest { workspace: string; launch_id: string; review_id: string; semantic_fingerprint: string; decision: (typeof VERIFIER_SEMANTIC_DECISION_WORDS)[number] }
+
+/** Verifier semantic review decision (VERIFIER-SEMANTIC-REVIEW-001): exactly these five fields, each in its closed grammar. The decision is one of the review's OWN three words - `approve`
+ * and `reject` are refused here. There is NO field for a file, a source text, a contract, a criterion or an outcome: the host re-proves the pending review through Kriya. */
+export function validateDecideVerifierSemantic(v: unknown): ValidationResult<DecideVerifierSemanticRequest> {
+  if (!isObj(v) || Object.keys(v).sort().join() !== 'decision,launch_id,review_id,semantic_fingerprint,workspace') return { ok: false, message: 'decideVerifierSemantic takes exactly workspace, launch_id, review_id, semantic_fingerprint and decision' };
+  const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+  if (typeof v.launch_id !== 'string' || !LAUNCH_ID_RE.test(v.launch_id)) return { ok: false, message: 'launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx' };
+  if (typeof v.review_id !== 'string' || !REVIEW_ID_RE.test(v.review_id)) return { ok: false, message: 'review_id is malformed' };
+  if (typeof v.semantic_fingerprint !== 'string' || !COMMAND_FINGERPRINT_RE.test(v.semantic_fingerprint)) return { ok: false, message: 'semantic_fingerprint is malformed' };
+  const decision = VERIFIER_SEMANTIC_DECISION_WORDS.find((word) => word === v.decision);
+  if (decision === undefined) return { ok: false, message: 'decision must be expectation_valid, expectation_invalid or cannot_decide' };
+  return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, semantic_fingerprint: v.semantic_fingerprint, decision } };
 }
 
 export interface InitializeProjectRequest { workspace: string }

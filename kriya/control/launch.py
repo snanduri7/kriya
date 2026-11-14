@@ -207,6 +207,21 @@ class LaunchSession:
             return None
         return await_verifier_repair_decision(self, pending["review_id"], pending["candidate_digest"])
 
+    def request_verifier_semantic_review(self, subject: Any) -> Optional[Awaitable[Any]]:
+        """The workflow asked for the operator's SEMANTIC decision on one exact initial verifier (VERIFIER-SEMANTIC-REVIEW-001). Records the pending VERIFIER
+        SEMANTIC REVIEW (a fourth subject, the same pending-review record and waiter) and returns the awaitable that resolves to a VerifierSemanticDecision.
+        None - no semantic authority - when no review could be recorded or the subject cannot be shown exactly."""
+        from kriya.control.launch_approval import await_verifier_semantic_decision, build_pending_verifier_semantic
+
+        if self.review_channel is None:  # D2 M2: see request_change_approval
+            return None
+        self._review_sequence += 1
+        pending = build_pending_verifier_semantic(self.launch_id, self._record["workspace"]["identity"], self._review_sequence, subject)
+        if pending is None or not self._install_pending(pending):
+            self._review_sequence -= 1
+            return None
+        return await_verifier_semantic_decision(self, pending["review_id"], pending["candidate_digest"])
+
     def _install_pending(self, pending: Dict[str, Any]) -> bool:
         """Make ``pending`` THE pending review (the previous one, if undecided, is expired into the history) and persist it; False - with the record unchanged - when it cannot be saved."""
         from kriya.control.launch_approval import HISTORY_MAX, STATUS_EXPIRED, STATUS_PENDING
@@ -447,6 +462,16 @@ def request_verifier_repair_authorization(subject: Any) -> Optional[Awaitable[An
         return _ACTIVE.request_verifier_repair_authorization(subject) if _ACTIVE is not None else None
     except Exception as error:  # observational: a failure to record means nothing is authorized
         logger.error("Launch: verifier-repair authorization not requested (%s: %s)", type(error).__name__, error)
+        return None
+
+
+def request_verifier_semantic_review(subject: Any) -> Optional[Awaitable[Any]]:
+    """For the verifier-semantic channel of `kriya generate`: inside a desktop launch, the awaitable that resolves to a VerifierSemanticDecision. None outside a
+    launch or when no review could be recorded."""
+    try:
+        return _ACTIVE.request_verifier_semantic_review(subject) if _ACTIVE is not None else None
+    except Exception as error:  # observational: a failure to record means no semantic authority
+        logger.error("Launch: verifier semantic review not requested (%s: %s)", type(error).__name__, error)
         return None
 
 

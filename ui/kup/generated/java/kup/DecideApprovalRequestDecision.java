@@ -5,7 +5,7 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum DecisionEnum {
+public enum DecideApprovalRequestDecision {
     APPROVE, REJECT;
 
     @JsonValue
@@ -18,9 +18,9 @@ public enum DecisionEnum {
     }
 
     @JsonCreator
-    public static DecisionEnum forValue(String value) throws IOException {
+    public static DecideApprovalRequestDecision forValue(String value) throws IOException {
         if (value.equals("approve")) return APPROVE;
         if (value.equals("reject")) return REJECT;
-        throw new IOException("Cannot deserialize DecisionEnum");
+        throw new IOException("Cannot deserialize DecideApprovalRequestDecision");
     }
 }

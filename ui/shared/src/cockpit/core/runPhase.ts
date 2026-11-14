@@ -76,7 +76,18 @@ export function runPhase(run: RunView): RunPhase {
   if (run.verifierReview) {
     return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your decision about a verifier', detail: 'Kriya paused the run. A verifier is never repaired unless you decide it conflicts with the contract.', tone: 'warn', needsAction: true, steps: steps(3) };
   }
+  if (run.semanticReview) {
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your decision about what a verifier expects', detail: 'Kriya paused the run. A generated verifier is evidence, not the truth: only your decision gives its expectation authority.', tone: 'warn', needsAction: true, steps: steps(3) };
+  }
   const pendingApproval = run.status?.launch.pending_approval;
+  if (pendingApproval?.kind === 'verifier_semantic_review' && run.status?.launch.phase === 'RUNNING' && pendingApproval.status !== 'PENDING') {
+    const word = pendingApproval.status === 'DECIDED' ? pendingApproval.decision?.decision ?? null : null;
+    const detail = word === 'expectation_valid' ? 'You recorded that the verifier expectation is valid. Kriya continues with that expectation.'
+      : word === 'expectation_invalid' ? 'You recorded that the verifier expectation is invalid. Kriya regenerates that verifier once.'
+        : word === 'cannot_decide' ? 'You recorded that you cannot decide. Kriya changes nothing and sends the run to review.'
+          : 'The verifier semantic review ended with no decision. Kriya changes nothing and sends the run to review.';
+    return { ...base, state: 'RUNNING', label: 'Verifying', detail, tone: 'info', steps: steps(3) };
+  }
   const approved = pendingApproval?.status === 'APPROVED' && run.status?.launch.phase === 'RUNNING';
   if (approved && pendingApproval?.kind === 'runtime_command') {
     return { ...base, state: 'RUNNING', label: 'Verifying your application', detail: 'You allowed the reviewed commands. Kriya is running them in its isolated worktree and checking the result.', tone: 'info', steps: steps(3), verifyingApplication: true };

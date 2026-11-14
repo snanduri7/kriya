@@ -6,12 +6,13 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum ApprovalHistoryStatus {
-    APPROVED, EXPIRED, PENDING, REJECTED;
+    APPROVED, DECIDED, EXPIRED, PENDING, REJECTED;
 
     @JsonValue
     public String toValue() {
         switch (this) {
             case APPROVED: return "APPROVED";
+            case DECIDED: return "DECIDED";
             case EXPIRED: return "EXPIRED";
             case PENDING: return "PENDING";
             case REJECTED: return "REJECTED";
@@ -22,6 +23,7 @@ public enum ApprovalHistoryStatus {
     @JsonCreator
     public static ApprovalHistoryStatus forValue(String value) throws IOException {
         if (value.equals("APPROVED")) return APPROVED;
+        if (value.equals("DECIDED")) return DECIDED;
         if (value.equals("EXPIRED")) return EXPIRED;
         if (value.equals("PENDING")) return PENDING;
         if (value.equals("REJECTED")) return REJECTED;

@@ -95,8 +95,10 @@ def _run(ws, scenario, subject=None):
 
 
 def test_the_third_kind_is_in_the_one_closed_kind_table_and_the_two_existing_kinds_are_unchanged():
-    assert KINDS == ("change_approval", "runtime_command", "verifier_defect_repair_authorization")
-    assert (KIND_CHANGE, KIND_RUNTIME, KIND_VERIFIER_REPAIR) == KINDS
+    # VERIFIER-SEMANTIC-REVIEW-001 added a fourth kind after these three (tests/test_verifier_semantic_review_001.py pins the whole table): OLD pinned the
+    # table at exactly three; NEW INVARIANT: the three earlier kinds keep their names and order; the old pin was a count tripwire, not a behaviour.
+    assert KINDS[:3] == ("change_approval", "runtime_command", "verifier_defect_repair_authorization")
+    assert (KIND_CHANGE, KIND_RUNTIME, KIND_VERIFIER_REPAIR) == KINDS[:3]
 
 
 def test_an_approval_over_the_channel_is_bound_to_the_authorization_fingerprint_and_durable_before_the_loop_resumes(ws):
@@ -279,6 +281,8 @@ def test_in_a_terminal_only_an_explicit_yes_authorizes_and_the_yes_flag_never_do
 def test_the_generate_callback_carries_the_third_channel():
     import kriya.cli as cli
     source = inspect.getsource(cli)
-    assert "lambda subject: _verifier_repair_decision(subject, yes))" in source
+    # VERIFIER-SEMANTIC-REVIEW-001: a fourth channel now follows this one in the same call (OLD pinned the call's closing parenthesis; NEW INVARIANT: the
+    # third channel is still wired with exactly this lambda; the old text pinned punctuation, not the wiring).
+    assert "lambda subject: _verifier_repair_decision(subject, yes)," in source
     typed = TypedApprovalCallback(lambda files, reason: True, lambda subject: None, lambda subject: VerifierRepairDecision(subject.fingerprint))
     assert asyncio.run(ask_verifier_repair(typed, _subject())).approved

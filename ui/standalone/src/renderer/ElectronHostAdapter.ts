@@ -1,4 +1,4 @@
-import type { CancelRunResult, RecoverWorkspaceResult, ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideVerifierRepairRequest, DecideRuntimeCommandResult, ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult, NotifyRequest, NotifyResult } from '@kriya-ui/shared';
+import type { CancelRunResult, RecoverWorkspaceResult, ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideVerifierRepairRequest, DecideVerifierSemanticRequest, DecideRuntimeCommandResult, ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult, NotifyRequest, NotifyResult } from '@kriya-ui/shared';
 
 export interface KriyaHostBridge {
   query(request: unknown): Promise<unknown>;
@@ -22,6 +22,7 @@ export interface KriyaHostBridge {
   decideApproval(request: unknown): Promise<unknown>;
   decideRuntimeCommand(request: unknown): Promise<unknown>;
   decideVerifierRepair(request: unknown): Promise<unknown>;
+  decideVerifierSemantic(request: unknown): Promise<unknown>;
   approveConfiguration(request: unknown): Promise<unknown>;
   initializeProject(request: unknown): Promise<unknown>;
   notifyRun(request: unknown): Promise<unknown>;
@@ -53,6 +54,7 @@ export class ElectronHostAdapter implements HostAdapter {
       decideApproval: (request: DecideApprovalRequest) => bridge.decideApproval(request) as Promise<DecideApprovalResult>,
       decideRuntimeCommand: (request: DecideRuntimeCommandRequest) => bridge.decideRuntimeCommand(request) as Promise<DecideRuntimeCommandResult>,
       decideVerifierRepair: (request: DecideVerifierRepairRequest) => bridge.decideVerifierRepair(request) as Promise<DecideRuntimeCommandResult>,
+      decideVerifierSemantic: (request: DecideVerifierSemanticRequest) => bridge.decideVerifierSemantic(request) as Promise<DecideRuntimeCommandResult>,
       approveConfiguration: (request: ApproveConfigurationRequest) => bridge.approveConfiguration(request) as Promise<ApproveConfigurationResult>,
       initializeProject: (request: InitializeProjectRequest) => bridge.initializeProject(request) as Promise<InitializeProjectResult>,
       notify: (request: NotifyRequest) => bridge.notifyRun(request) as Promise<NotifyResult>,

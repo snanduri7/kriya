@@ -40,7 +40,9 @@ function harness(over: Partial<VerifierRepairDeps> = {}, answer: ChannelAnswer |
 
 describe('the third review kind is a subject of its own', () => {
   it('is in the channel table next to the two existing kinds, which are unchanged', () => {
-    expect([...KINDS]).toEqual(['change_approval', 'runtime_command', 'verifier_defect_repair_authorization']);
+    // VERIFIER-SEMANTIC-REVIEW-001 added a fourth kind after these (verifier_semantic_host.test.ts pins the whole table). OLD pinned exactly three; NEW INVARIANT: the three
+    // earlier kinds keep their names and order; the old pin was a count tripwire.
+    expect([...KINDS].slice(0, 3)).toEqual(['change_approval', 'runtime_command', 'verifier_defect_repair_authorization']);
     expect(VERIFIER_REPAIR_KIND).toBe('verifier_defect_repair_authorization');
   });
   it('has its own IPC channel, distinct from the change review and the runtime-command review', () => {

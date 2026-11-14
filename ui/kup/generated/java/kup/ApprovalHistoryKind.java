@@ -6,7 +6,7 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum ApprovalHistoryKind {
-    CHANGE_APPROVAL, RUNTIME_COMMAND, VERIFIER_DEFECT_REPAIR_AUTHORIZATION;
+    CHANGE_APPROVAL, RUNTIME_COMMAND, VERIFIER_DEFECT_REPAIR_AUTHORIZATION, VERIFIER_SEMANTIC_REVIEW;
 
     @JsonValue
     public String toValue() {
@@ -14,6 +14,7 @@ public enum ApprovalHistoryKind {
             case CHANGE_APPROVAL: return "change_approval";
             case RUNTIME_COMMAND: return "runtime_command";
             case VERIFIER_DEFECT_REPAIR_AUTHORIZATION: return "verifier_defect_repair_authorization";
+            case VERIFIER_SEMANTIC_REVIEW: return "verifier_semantic_review";
         }
         return null;
     }
@@ -23,6 +24,7 @@ public enum ApprovalHistoryKind {
         if (value.equals("change_approval")) return CHANGE_APPROVAL;
         if (value.equals("runtime_command")) return RUNTIME_COMMAND;
         if (value.equals("verifier_defect_repair_authorization")) return VERIFIER_DEFECT_REPAIR_AUTHORIZATION;
+        if (value.equals("verifier_semantic_review")) return VERIFIER_SEMANTIC_REVIEW;
         throw new IOException("Cannot deserialize ApprovalHistoryKind");
     }
 }

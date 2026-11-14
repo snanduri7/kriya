@@ -27,6 +27,8 @@ export { activityEntries, activityFromLaunch, activityFromRecords, resultsFromRe
 export { attemptRejections, failedDuring, rejectionOf, retrySummary, DELIVERY_WORDS, type AttemptRejection, type RetrySummary } from './retryFacts';
 export { RuntimeCommandReviewCard, useRuntimeCommandReview, displayCommand, displayArg } from './RuntimeCommandReview';
 export { VerifierRepairReviewCard, verifierReviewViewable } from './VerifierRepairReview';
+export { VerifierSemanticReviewCard, semanticReviewViewable, SEMANTIC_BUTTONS } from './VerifierSemanticReview';
+export { activeVerifierSemanticReview, createVerifierSemanticDecider, VERIFIER_SEMANTIC_WORDS, type PendingVerifierSemanticReview, type SemanticDecisionState, type VerifierSemanticWord } from './execution';
 export { FileDiff } from './ChangeDiff';
 export * from './presentation';
 export { RunCardView } from './RunCardView';

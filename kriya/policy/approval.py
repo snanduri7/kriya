@@ -227,11 +227,14 @@ class TypedApprovalCallback:
     """The approval callback of a desktop launch: a plain ``callback(files, reason)`` for every legacy approval AND one typed channel for the runtime-command subject."""
 
     def __init__(self, change_callback: Callable[[List[Any], str], Any], runtime_command_callback: Callable[[RuntimeCommandSubject], Any],
-                 verifier_repair_callback: Optional[Callable[["VerifierRepairSubject"], Any]] = None) -> None:
+                 verifier_repair_callback: Optional[Callable[["VerifierRepairSubject"], Any]] = None,
+                 verifier_semantic_callback: Optional[Callable[["VerifierSemanticSubject"], Any]] = None) -> None:
         self._change_callback = change_callback
         self.runtime_command_review = runtime_command_callback
         # The third typed subject (VERIFIER_DEFECT_REPAIR_AUTHORIZATION). None = this channel cannot put it to a person: it is then never asked.
         self.verifier_repair_review = verifier_repair_callback
+        # The fourth typed subject (VERIFIER_SEMANTIC_REVIEW, WS3-B). None = never asked: no semantic authority is obtained.
+        self.verifier_semantic_review = verifier_semantic_callback
 
     def __call__(self, files: List[Any], reason: str) -> Any:
         return self._change_callback(files, reason)
@@ -464,7 +467,26 @@ REFUSAL_CODES = ("INVALID_REQUEST", "LAUNCH_NOT_FOUND", "LAUNCH_RECORD_UNREADABL
 # approve a runtime-command review, nor the reverse.
 KIND_CHANGE, KIND_RUNTIME = "change_approval", "runtime_command"
 KIND_VERIFIER_REPAIR = "verifier_defect_repair_authorization"
-KINDS = (KIND_CHANGE, KIND_RUNTIME, KIND_VERIFIER_REPAIR)
+KIND_VERIFIER_SEMANTIC = "verifier_semantic_review"
+KINDS = (KIND_CHANGE, KIND_RUNTIME, KIND_VERIFIER_REPAIR, KIND_VERIFIER_SEMANTIC)
+
+# VERIFIER-SEMANTIC-REVIEW-001 (WS3-B): a decision is valid per REVIEW KIND, never globally. The three earlier kinds keep exactly the binary vocabulary; the
+# semantic review has its own three words and accepts neither "approve" nor "reject" (on the replay card "approve" means the verifier is WRONG - the opposite
+# polarity - so the words are never shared). The one closed table; the wire owner (kriya/control/review_channel.py) and the waiter both read it.
+DECISION_APPROVE, DECISION_REJECT = "approve", "reject"
+BINARY_DECISIONS = (DECISION_APPROVE, DECISION_REJECT)
+EXPECTATION_VALID, EXPECTATION_INVALID, CANNOT_DECIDE = "expectation_valid", "expectation_invalid", "cannot_decide"
+VERIFIER_SEMANTIC_DECISIONS = (EXPECTATION_VALID, EXPECTATION_INVALID, CANNOT_DECIDE)
+DECISIONS_BY_KIND: Dict[str, Tuple[str, ...]] = {
+    KIND_CHANGE: BINARY_DECISIONS, KIND_RUNTIME: BINARY_DECISIONS, KIND_VERIFIER_REPAIR: BINARY_DECISIONS,
+    KIND_VERIFIER_SEMANTIC: VERIFIER_SEMANTIC_DECISIONS,
+}
+ALL_DECISIONS = tuple(dict.fromkeys(word for words in DECISIONS_BY_KIND.values() for word in words))
+
+
+def decision_valid_for_kind(kind: Any, decision: Any) -> bool:
+    """True only when ``decision`` is one of the closed words of exactly ``kind`` (an unknown kind has none)."""
+    return isinstance(kind, str) and isinstance(decision, str) and decision in DECISIONS_BY_KIND.get(kind, ())
 WORKING_DIRECTORY_KIND = "ISOLATED_WORKTREE"   # Kriya runs verification in its isolated candidate worktree, never in the project folder
 
 
@@ -498,6 +520,197 @@ def verifier_repair_entry_verified(entry: Any) -> bool:
         )
         digest = entry.get("candidate_digest")
         return isinstance(digest, str) and digest == entry.get("authorization_fingerprint") == subject.fingerprint
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+# ----------------------------------------------------------------------------- verifier semantic review (VERIFIER-SEMANTIC-REVIEW-001, WS3-B, owner ruling 2026-11-14)
+
+VERIFIER_SEMANTIC_QUESTION = "Is what this verifier expects correct under the canonical contract?"
+VERIFIER_SEMANTIC_NOTICE = (
+    "A generated verifier is candidate evidence: neither its pass nor its failure is the truth about the contract. Only your decision here gives its "
+    "expectation semantic authority, for exactly these verifier bytes in this run. 'Expectation is valid' accepts the expectation; it does not say which "
+    "code is wrong and authorizes no change. 'Expectation is invalid' permits ONE regeneration of this verifier, reviewed and gated as source. "
+    "'Cannot decide' changes nothing and sends the run to review."
+)
+REVIEW_PHASE_PASSING, REVIEW_PHASE_FAILING = "passing_verifier", "failing_verifier"
+VERIFIER_SEMANTIC_PHASES = (REVIEW_PHASE_PASSING, REVIEW_PHASE_FAILING)
+VERIFIER_SEMANTIC_MAX_ITEMS = 64          # criteria + invariants shown on one review
+VERIFIER_SEMANTIC_NOT_ASKED = "VERIFIER_SEMANTIC_NOT_ASKED"   # no typed channel, or the subject cannot be shown exactly: nobody was asked
+
+
+@dataclass(frozen=True)
+class VerifierSemanticSubject:
+    """What the person is asked about an INITIAL generated verifier (distinct from the replay-specific ``VerifierRepairSubject``, which is untouched): whether the
+    expectation of ONE exact verifier candidate is correct under the canonical contract. ``fingerprint`` covers every binding; a decision is bound to it and the
+    caller recomputes it before acting (``verifier_semantic_matches``).
+
+    Bindings: run, plan hash, verifier unit, the verifier's paths and byte digests, the goal and verification-contract digests, the plan-declared acceptance
+    criteria and global invariants of the unit (id and exact text), the review phase (a decision about a PASSING verifier is never authority about a failing
+    one) and, for a failing verifier only, the identity of the deterministic gate failure under review. ``outcome`` is the gate's own output, shown only.
+    No model conclusion, diagnosis or locator label is a field."""
+
+    run_id: str
+    plan_hash: str
+    verifier_unit_id: str
+    verifier_files: Tuple[Tuple[str, str], ...]              # (path, sha256 of the exact bytes)
+    goal_digest: str
+    verification_contract_digest: Optional[str]
+    acceptance_criteria: Tuple[Tuple[str, str], ...]         # (plan criterion id, its exact text)
+    invariants: Tuple[Tuple[str, str], ...]                  # (plan global-invariant id, its exact text)
+    review_phase: str
+    failure_identity: Optional[str] = None
+    # shown, not separately bound (each is the text a bound digest was taken over, or a gate's own output)
+    contract_text: str = ""
+    verifier_sources: Tuple[Tuple[str, str], ...] = ()       # (path, exact text)
+    outcome: str = ""
+
+    @property
+    def fingerprint(self) -> str:
+        return _sha(json.dumps({
+            "kind": KIND_VERIFIER_SEMANTIC, "run_id": self.run_id, "plan_hash": self.plan_hash, "verifier_unit_id": self.verifier_unit_id,
+            "verifier_files": [list(pair) for pair in self.verifier_files], "goal_digest": self.goal_digest,
+            "verification_contract_digest": self.verification_contract_digest,
+            "acceptance_criteria": [list(pair) for pair in self.acceptance_criteria], "invariants": [list(pair) for pair in self.invariants],
+            "review_phase": self.review_phase, "failure_identity": self.failure_identity,
+        }, separators=(",", ":"), sort_keys=True))
+
+    @property
+    def subject_key(self) -> str:
+        """The identity of the verifier SUBJECT across its candidates (run + verifier unit; never the bytes): what the one-regeneration allowance is keyed on, so
+        a regenerated verifier (new bytes, new fingerprint) is the SAME subject and gets no second regeneration."""
+        return _sha(json.dumps({"run_id": self.run_id, "verifier_unit_id": self.verifier_unit_id}, separators=(",", ":"), sort_keys=True))
+
+
+def verifier_semantic_reviewable(subject: VerifierSemanticSubject) -> bool:
+    """A review that cannot be shown exactly is never offered: every verifier file's text and the contract text must be present, bounded and unchanged by the one
+    redaction owner; identities must be present; the phase must be one of the two, with a failure identity exactly when the verifier failed."""
+    paths = [path for path, _digest in subject.verifier_files]
+    sources = dict(subject.verifier_sources)
+    if not paths or len(paths) > VERIFIER_REPAIR_MAX_FILES or sorted(sources) != sorted(paths):
+        return False
+    if not subject.run_id or not subject.plan_hash or not subject.verifier_unit_id or not subject.goal_digest or not subject.contract_text:
+        return False
+    if subject.review_phase not in VERIFIER_SEMANTIC_PHASES or (subject.review_phase == REVIEW_PHASE_FAILING) != bool(subject.failure_identity):
+        return False
+    items = [*subject.acceptance_criteria, *subject.invariants]
+    if len(items) > VERIFIER_SEMANTIC_MAX_ITEMS or any(not isinstance(i, str) or not i or not isinstance(t, str) for i, t in items):
+        return False
+    texts = [*sources.values(), subject.contract_text]
+    return (all(isinstance(text, str) and 0 < len(text) <= VERIFIER_REPAIR_MAX_SOURCE_CHARS and redact_value(text) == text for text in texts)
+            and all(redact_value(text) == text for _id, text in items))
+
+
+@dataclass(frozen=True)
+class VerifierSemanticDecision:
+    """A person's semantic decision, bound to the subject fingerprint it was made for - or NO decision. ``decision`` is one of VERIFIER_SEMANTIC_DECISIONS exactly
+    when ``fingerprint`` is set. No decision (``decision`` None: not asked, declined to answer, expired, channel unavailable, not durably recorded) is NOT
+    ``cannot_decide``: that word is a real, recorded answer. It has no truth value: read ``.valid`` / ``.invalid`` / ``.cannot_decide`` / ``.decided``."""
+
+    decision: Optional[str]
+    fingerprint: Optional[str]
+    no_decision_reason: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.decision is None:
+            if self.fingerprint is not None or not self.no_decision_reason:
+                raise ValueError("a verifier semantic non-decision carries no fingerprint and must say why nobody decided")
+        elif self.decision not in VERIFIER_SEMANTIC_DECISIONS or not self.fingerprint or self.no_decision_reason is not None:
+            raise ValueError(f"verifier semantic decision {self.decision!r} is not a bound decision of the closed table")
+
+    def __bool__(self) -> bool:
+        raise TypeError("a VerifierSemanticDecision has no truth value; read .valid / .invalid / .cannot_decide / .decided")
+
+    @classmethod
+    def decided_as(cls, decision: str, fingerprint: str) -> "VerifierSemanticDecision":
+        return cls(decision, fingerprint)
+
+    @classmethod
+    def none(cls, reason: str) -> "VerifierSemanticDecision":
+        return cls(None, None, reason)
+
+    @property
+    def decided(self) -> bool:
+        return self.decision is not None
+
+    @property
+    def valid(self) -> bool:
+        return self.decision == EXPECTATION_VALID
+
+    @property
+    def invalid(self) -> bool:
+        return self.decision == EXPECTATION_INVALID
+
+    @property
+    def cannot_decide(self) -> bool:
+        return self.decision == CANNOT_DECIDE
+
+
+async def ask_verifier_semantic(callback: Any, subject: VerifierSemanticSubject) -> VerifierSemanticDecision:
+    """Ask for the semantic decision. ONLY a typed callback with a verifier-semantic channel is asked (a plain ``callback(files, reason)`` cannot show the subject
+    or bind an answer, and an auto-approving caller is not a person's judgement). Anything but a ``VerifierSemanticDecision`` answer is no decision."""
+    review = getattr(callback, "verifier_semantic_review", None) if isinstance(callback, TypedApprovalCallback) else None
+    if review is None or not verifier_semantic_reviewable(subject):
+        return VerifierSemanticDecision.none(VERIFIER_SEMANTIC_NOT_ASKED)
+    with human_wait():
+        answer = await await_if_awaitable(review(subject))
+    return answer if isinstance(answer, VerifierSemanticDecision) else VerifierSemanticDecision.none(APPROVAL_RESULT_UNRECOGNIZED)
+
+
+def verifier_semantic_matches(decision: VerifierSemanticDecision, subject_now: VerifierSemanticSubject) -> bool:
+    """True only when a real decision is bound to exactly the subject as it is NOW (any drifted binding makes it stale)."""
+    return isinstance(decision, VerifierSemanticDecision) and decision.decided and decision.fingerprint == subject_now.fingerprint
+
+
+class VerifierSemanticAllowance:
+    """The per-SUBJECT regeneration allowance of one run (never run-global, and never the replay path's ``verifier_repair_asked``, which is untouched): an
+    ``expectation_invalid`` decision bound to the subject as it is now permits ONE regeneration (V1) of that verifier subject. Keyed on ``subject_key``, so the
+    regenerated verifier is the same subject: there is no V2. ``expectation_valid`` and ``cannot_decide`` permit nothing here."""
+
+    def __init__(self) -> None:
+        self._regenerated: Dict[str, str] = {}   # subject_key -> the fingerprint whose INVALID decision was spent
+
+    def regeneration_spent(self, subject: VerifierSemanticSubject) -> bool:
+        return subject.subject_key in self._regenerated
+
+    def take_regeneration(self, decision: VerifierSemanticDecision, subject_now: VerifierSemanticSubject) -> bool:
+        """Spend the subject's one regeneration. True only for an INVALID decision bound to ``subject_now`` whose subject has not regenerated before."""
+        if not verifier_semantic_matches(decision, subject_now) or not decision.invalid or self.regeneration_spent(subject_now):
+            return False
+        self._regenerated[subject_now.subject_key] = subject_now.fingerprint
+        return True
+
+
+def verifier_semantic_entry_verified(entry: Any) -> bool:
+    """Kriya's read-time proof of a recorded verifier-semantic review, for whoever is about to show it: the fingerprint re-computed from the recorded bindings is
+    the digest a decision must carry, every shown verifier source is the bytes its bound digest names, and the contract text is the text the goal digest was
+    taken over. A record that was altered is not verified - and is then never offered for a decision."""
+    try:
+        if not isinstance(entry, dict) or entry.get("kind") != KIND_VERIFIER_SEMANTIC:
+            return False
+        bindings, files, contract = entry.get("bindings"), entry.get("verifier_files"), entry.get("contract_text")
+        if not isinstance(bindings, dict) or not isinstance(files, list) or not files or not isinstance(contract, str):
+            return False
+        if any(not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("source"), str)
+               or hashlib.sha256(item["source"].encode("utf-8")).hexdigest() != item.get("sha256") for item in files):
+            return False
+        if hashlib.sha256(contract.encode("utf-8", errors="replace")).hexdigest() != bindings.get("goal_digest") or entry.get("contract_digest") != bindings.get("goal_digest"):
+            return False
+
+        def items(key: str) -> tuple:
+            listed = entry[key]
+            if not isinstance(listed, list) or not all(isinstance(i, dict) and isinstance(i.get("id"), str) and isinstance(i.get("text"), str) for i in listed):
+                raise ValueError(key)
+            return tuple((i["id"], i["text"]) for i in listed)
+
+        subject = VerifierSemanticSubject(
+            run_id=bindings["run_id"], plan_hash=bindings["plan_hash"], verifier_unit_id=entry["verifier_unit_id"],
+            verifier_files=tuple((item["path"], item["sha256"]) for item in files), goal_digest=bindings["goal_digest"],
+            verification_contract_digest=bindings.get("verification_contract_digest"), acceptance_criteria=items("acceptance_criteria"),
+            invariants=items("invariants"), review_phase=entry["review_phase"], failure_identity=bindings.get("failure_identity"),
+        )
+        digest = entry.get("candidate_digest")
+        return isinstance(digest, str) and digest == entry.get("semantic_fingerprint") == subject.fingerprint
     except (KeyError, TypeError, ValueError):
         return False
 

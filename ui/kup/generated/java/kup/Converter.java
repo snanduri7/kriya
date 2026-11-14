@@ -72,6 +72,7 @@
 //     DecideRuntimeCommandRequest data = Converter.DecideRuntimeCommandRequestFromJsonString(jsonString);
 //     DecideRuntimeCommandResult data = Converter.DecideRuntimeCommandResultFromJsonString(jsonString);
 //     DecideVerifierRepairRequest data = Converter.DecideVerifierRepairRequestFromJsonString(jsonString);
+//     DecideVerifierSemanticRequest data = Converter.DecideVerifierSemanticRequestFromJsonString(jsonString);
 //     ApproveConfigurationRequest data = Converter.ApproveConfigurationRequestFromJsonString(jsonString);
 //     ApproveConfigurationResult data = Converter.ApproveConfigurationResultFromJsonString(jsonString);
 //     List<String> data = Converter.RecentWorkspacesFromJsonString(jsonString);
@@ -611,6 +612,14 @@ public class Converter {
 
     public static String DecideVerifierRepairRequestToJsonString(DecideVerifierRepairRequest obj) throws JsonProcessingException {
         return getDecideVerifierRepairRequestObjectWriter().writeValueAsString(obj);
+    }
+
+    public static DecideVerifierSemanticRequest DecideVerifierSemanticRequestFromJsonString(String json) throws IOException {
+        return getDecideVerifierSemanticRequestObjectReader().readValue(json);
+    }
+
+    public static String DecideVerifierSemanticRequestToJsonString(DecideVerifierSemanticRequest obj) throws JsonProcessingException {
+        return getDecideVerifierSemanticRequestObjectWriter().writeValueAsString(obj);
     }
 
     public static ApproveConfigurationRequest ApproveConfigurationRequestFromJsonString(String json) throws IOException {
@@ -2495,6 +2504,37 @@ public class Converter {
     private static ObjectWriter getDecideVerifierRepairRequestObjectWriter() {
         if (DecideVerifierRepairRequestWriter == null) instantiateDecideVerifierRepairRequestMapper();
         return DecideVerifierRepairRequestWriter;
+    }
+
+    private static ObjectReader DecideVerifierSemanticRequestReader;
+    private static ObjectWriter DecideVerifierSemanticRequestWriter;
+
+    private static void instantiateDecideVerifierSemanticRequestMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        DecideVerifierSemanticRequestReader = mapper.readerFor(DecideVerifierSemanticRequest.class);
+        DecideVerifierSemanticRequestWriter = mapper.writerFor(DecideVerifierSemanticRequest.class);
+    }
+
+    private static ObjectReader getDecideVerifierSemanticRequestObjectReader() {
+        if (DecideVerifierSemanticRequestReader == null) instantiateDecideVerifierSemanticRequestMapper();
+        return DecideVerifierSemanticRequestReader;
+    }
+
+    private static ObjectWriter getDecideVerifierSemanticRequestObjectWriter() {
+        if (DecideVerifierSemanticRequestWriter == null) instantiateDecideVerifierSemanticRequestMapper();
+        return DecideVerifierSemanticRequestWriter;
     }
 
     private static ObjectReader ApproveConfigurationRequestReader;

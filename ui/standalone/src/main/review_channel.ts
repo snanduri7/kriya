@@ -22,8 +22,22 @@ export const MAX_FRAME_BYTES = 16 * 1024;
 const CAPABILITY_RE = /^[0-9a-f]{64}$/;
 // The third kind (owner rulings 2026-11-13): the operator's SEMANTIC authorization of one verifier repair. A host that does not list it refuses Kriya's review frame, so the
 // review is never offered and Kriya answers 'not authorized' (the safe routing): the table is what makes the subject reachable.
-export const KINDS = ['change_approval', 'runtime_command', 'verifier_defect_repair_authorization'] as const;
+// The fourth kind (VERIFIER-SEMANTIC-REVIEW-001, owner ruling 2026-11-14): the person's semantic decision about one INITIAL generated verifier. Same rule: a host that does not list it
+// refuses the review frame (the channel fails closed before anything is recorded), so Kriya obtains no decision.
+export const KINDS = ['change_approval', 'runtime_command', 'verifier_defect_repair_authorization', 'verifier_semantic_review'] as const;
 export type ReviewKind = (typeof KINDS)[number];
+/** A decision word is valid per REVIEW KIND, never globally (the mirror of kriya/policy/approval.py DECISIONS_BY_KIND). The semantic review has its own three words and never
+ * approve/reject: on the verifier-repair card "approve" means the verifier is WRONG, the opposite polarity, so the words are not shared. */
+export const BINARY_DECISIONS = ['approve', 'reject'] as const;
+export const VERIFIER_SEMANTIC_DECISIONS = ['expectation_valid', 'expectation_invalid', 'cannot_decide'] as const;
+export type BinaryDecision = (typeof BINARY_DECISIONS)[number];
+export type VerifierSemanticDecisionWord = (typeof VERIFIER_SEMANTIC_DECISIONS)[number];
+export type ReviewDecision = BinaryDecision | VerifierSemanticDecisionWord;
+export const DECISIONS_BY_KIND: Readonly<Record<ReviewKind, readonly ReviewDecision[]>> = {
+  change_approval: BINARY_DECISIONS, runtime_command: BINARY_DECISIONS, verifier_defect_repair_authorization: BINARY_DECISIONS,
+  verifier_semantic_review: VERIFIER_SEMANTIC_DECISIONS,
+};
+export const decisionValidForKind = (kind: ReviewKind, decision: string): boolean => (DECISIONS_BY_KIND[kind] as readonly string[]).includes(decision);
 
 /** The slice of a Node socket the channel uses (net.Socket satisfies it; a test peer can too). */
 export interface ChannelSocket {
@@ -34,7 +48,7 @@ export interface ChannelSocket {
   destroy(): unknown;
 }
 
-export interface ChannelDecisionRequest { launch_id: string; review_id: string; kind: ReviewKind; candidate_digest: string; decision: 'approve' | 'reject' }
+export interface ChannelDecisionRequest { launch_id: string; review_id: string; kind: ReviewKind; candidate_digest: string; decision: ReviewDecision }
 export interface ChannelAnswer { accepted: boolean; code: string }
 
 export interface ReviewChannelDeps {
@@ -115,6 +129,8 @@ export class ReviewChannelHost {
     if (!review) return { accepted: false, code: 'REVIEW_CHANNEL_NOT_READY' };
     if (review.review_id !== request.review_id || review.candidate_digest !== request.candidate_digest) return { accepted: false, code: 'STALE_REVIEW' };
     if (review.kind !== request.kind) return { accepted: false, code: 'WRONG_REVIEW_KIND' };
+    // Refused HERE, before a frame exists: a word of another kind's vocabulary is never sent (the waiter refuses it again with the same code).
+    if (!decisionValidForKind(review.kind, request.decision)) return { accepted: false, code: 'WRONG_DECISION_FOR_REVIEW_KIND' };
     if (channel.awaiting) return { accepted: false, code: 'DECISION_IN_FLIGHT' };
     return new Promise<ChannelAnswer>((resolve) => {
       let timer: NodeJS.Timeout | undefined;
@@ -187,6 +203,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   REVIEW_CHANNEL_NOT_READY: 'Kriya has not presented this review on its private channel (yet), so nothing was sent. Wait a moment and try again.',
   STALE_REVIEW: 'the change under review is no longer the one you were shown; review it again',
   WRONG_REVIEW_KIND: 'the review waiting is not of this kind; nothing was recorded',
+  WRONG_DECISION_FOR_REVIEW_KIND: 'that decision does not exist for this kind of review; nothing was recorded',
   REVIEW_EXPIRED: 'this review expired; nothing was applied',
   CAPABILITY_MISMATCH: 'Kriya did not accept the decision (it did not match the live review); nothing was recorded',
   DECISION_IN_FLIGHT: 'a decision is already being recorded',

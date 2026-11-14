@@ -39,7 +39,12 @@ from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recov
 from kriya.control.run_ownership import probe_run_lock
 from kriya.core.state_paths import StateDirectoryError, resolve_state_directory, trace_db_path
 from kriya.foundation.redaction import redact_value, safe_endpoint
-from kriya.policy.approval import KIND_VERIFIER_REPAIR, verifier_repair_entry_verified
+from kriya.policy.approval import (
+    KIND_VERIFIER_REPAIR,
+    KIND_VERIFIER_SEMANTIC,
+    verifier_repair_entry_verified,
+    verifier_semantic_entry_verified,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +164,10 @@ def _launch_view(record: Dict[str, Any]) -> Dict[str, Any]:
     # verifier source and contract are the bytes its fingerprint binds. The host and the renderer never offer an approval for a review that is not verified.
     for key in ("pending_approval", "approval_history"):
         entries = view[key] if isinstance(view[key], list) else [view[key]]
-        proved = [{**entry, "verified": verifier_repair_entry_verified(entry)} if isinstance(entry, dict) and entry.get("kind") == KIND_VERIFIER_REPAIR else entry
+        proved = [{**entry, "verified": verifier_repair_entry_verified(entry)} if isinstance(entry, dict) and entry.get("kind") == KIND_VERIFIER_REPAIR
+                  # VERIFIER-SEMANTIC-REVIEW-001: the same read-time proof for the verifier semantic review (its own fingerprint over its own bindings)
+                  else {**entry, "verified": verifier_semantic_entry_verified(entry)} if isinstance(entry, dict) and entry.get("kind") == KIND_VERIFIER_SEMANTIC
+                  else entry
                   for entry in entries]
         view[key] = proved if isinstance(view[key], list) else proved[0]
     process = record.get("process")

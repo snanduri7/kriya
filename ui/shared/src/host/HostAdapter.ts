@@ -1,4 +1,4 @@
-import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideVerifierRepairRequest, DecideRuntimeCommandResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideVerifierRepairRequest, DecideVerifierSemanticRequest, DecideRuntimeCommandResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
 
 /**
  * The ONE host boundary (gate A-2, P-R1). Every capability a host supplies to
@@ -95,6 +95,10 @@ export interface ExecutionHostPort {
    * authorizing ONE repair of it. The host re-proves the pending review against Kriya's own launch record, shows a NATIVE confirmation (main process) and only then relays ONE typed decision
    * over the run's private review channel. A native Cancel answers `CONFIRMATION_DECLINED` and sends nothing. Absent on a host that cannot: the review is then never offered. */
   decideVerifierRepair?(request: DecideVerifierRepairRequest): Promise<DecideRuntimeCommandResult>;
+  /** Verifier semantic review (VERIFIER-SEMANTIC-REVIEW-001): a FOURTH subject - the person's decision whether the expectation of the exact INITIAL generated verifier Kriya shows is correct
+   * under the canonical contract, as one of its own three words (`expectation_valid` / `expectation_invalid` / `cannot_decide`; never approve/reject). The host re-proves the pending review
+   * and shows a NATIVE confirmation for the two words that carry authority. A native Cancel answers `CONFIRMATION_DECLINED` and sends nothing. Absent on a host that cannot. */
+  decideVerifierSemantic?(request: DecideVerifierSemanticRequest): Promise<DecideRuntimeCommandResult>;
   /** Configuration approval: the host forwards ONE typed request ({workspace, fingerprint of the configuration the person reviewed}) to Kriya's `configuration.approve` and reports Kriya's answer.
    * It never approves "whatever is current", never carries a setting, value or path, and holds no authority: Kriya re-resolves the configuration and refuses (APPROVAL_STALE) if it changed. Absent on a host with no execution backend. */
   approveConfiguration?(request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult>;

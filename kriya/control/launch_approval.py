@@ -59,8 +59,11 @@ logger = logging.getLogger(__name__)
 
 REVIEW_ID_RE = re.compile(r"^ra-[0-9a-f]{24}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-DECISIONS = ("approve", "reject")
+DECISIONS = _owner.BINARY_DECISIONS   # the binary kinds' words; validity is per kind (kriya.policy.approval.DECISIONS_BY_KIND)
 STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_EXPIRED = "PENDING", "APPROVED", "REJECTED", "EXPIRED"
+# VERIFIER-SEMANTIC-REVIEW-001: the one decided status of a verifier SEMANTIC review. It has no polarity: the semantic word itself is the authoritative
+# ``decision.decision`` field. APPROVED / REJECTED keep exactly their meaning and are never written for that kind.
+STATUS_DECIDED = "DECIDED"
 APPROVAL_WAIT_SECONDS = 3600.0   # a review nobody answers ends UNAVAILABLE (approval_required), never left holding the workspace forever
 REASON_MAX_CHARS = 60000
 HISTORY_MAX = 20
@@ -175,11 +178,68 @@ async def await_verifier_repair_decision(session: Any, review_id: str, fingerpri
     return _owner.VerifierRepairDecision(fingerprint if outcome.approved else None)
 
 
+def build_pending_verifier_semantic(launch_id: str, workspace_identity_value: str, sequence: int, subject: Any) -> Optional[Dict[str, Any]]:
+    """The pending VERIFIER SEMANTIC REVIEW (VERIFIER-SEMANTIC-REVIEW-001, a fourth subject): the exact verifier source and digests, the canonical contract text
+    and digest, the unit's plan-declared criteria and invariants, the review phase and every binding, bound by ``candidate_digest`` (= the subject's
+    fingerprint). ``decisions`` lists the only words this review accepts. None - not offered - when the subject cannot be shown exactly."""
+    if not _owner.verifier_semantic_reviewable(subject):
+        return None
+    digest = subject.fingerprint
+    requested = _now()
+    sources = dict(subject.verifier_sources)
+    return {
+        "review_id": review_identity(launch_id, workspace_identity_value, sequence, digest, _owner.VERIFIER_SEMANTIC_QUESTION), "sequence": sequence,
+        "kind": _owner.KIND_VERIFIER_SEMANTIC, "status": STATUS_PENDING, "requested_at": _stamp(requested),
+        "expires_at": _stamp(requested + timedelta(seconds=APPROVAL_WAIT_SECONDS)),
+        "candidate_digest": digest, "semantic_fingerprint": digest,
+        "question": _owner.VERIFIER_SEMANTIC_QUESTION, "notice": _owner.VERIFIER_SEMANTIC_NOTICE,
+        "decisions": list(_owner.VERIFIER_SEMANTIC_DECISIONS),
+        "verifier_unit_id": subject.verifier_unit_id, "review_phase": subject.review_phase,
+        "bindings": {
+            "run_id": subject.run_id, "plan_hash": subject.plan_hash, "goal_digest": subject.goal_digest,
+            "verification_contract_digest": subject.verification_contract_digest, "failure_identity": subject.failure_identity,
+        },
+        "verifier_files": [{"path": path, "sha256": sha, "source": sources[path]} for path, sha in subject.verifier_files],
+        "contract_text": subject.contract_text, "contract_digest": subject.goal_digest,
+        "acceptance_criteria": [{"id": item_id, "text": text} for item_id, text in subject.acceptance_criteria],
+        "invariants": [{"id": item_id, "text": text} for item_id, text in subject.invariants],
+        "outcome": redact_text(subject.outcome)[:OUTCOME_MAX_CHARS],
+        "decision": None,
+    }
+
+
+async def await_verifier_semantic_decision(session: Any, review_id: str, fingerprint: str) -> Any:
+    """The verifier semantic review's wait, over the SAME durable, fail-closed waiter as every other review (capability, staleness, expiry, durable-before-
+    resume, audit document). A durably recorded word of the closed table is the decision, bound to the fingerprint; everything else - expiry, the host gone,
+    the channel unavailable, a decision that could not be recorded - is NO decision with its reason code, never ``cannot_decide``."""
+    recorded = await _await_recorded(session, review_id, fingerprint, _semantic_status)
+    if isinstance(recorded, str) and recorded in _owner.VERIFIER_SEMANTIC_DECISIONS:
+        return _owner.VerifierSemanticDecision.decided_as(recorded, fingerprint)
+    reason = recorded.reason_code if isinstance(recorded, _owner.ApprovalOutcome) else _owner.APPROVAL_RESULT_UNRECOGNIZED
+    return _owner.VerifierSemanticDecision.none(reason)
+
+
+def _binary_status(decision: str) -> str:
+    return STATUS_APPROVED if decision == _owner.DECISION_APPROVE else STATUS_REJECTED
+
+
+def _semantic_status(_decision: str) -> str:
+    return STATUS_DECIDED
+
+
 async def await_decision(session: Any, review_id: str, digest: str) -> _owner.ApprovalOutcome:
     """Block (cooperatively) until the review is decided, expired or abandoned. APPROVED only for a durable approval; DECLINED only for a durable rejection by the person;
     UNAVAILABLE (with its reason code) when nobody decided - the review expired, the host went away, the wait was interrupted - or the decision could not be made durable."""
+    recorded = await _await_recorded(session, review_id, digest, _binary_status)
+    if isinstance(recorded, _owner.ApprovalOutcome):
+        return recorded
+    return _owner.ApprovalOutcome.approve() if recorded == _owner.DECISION_APPROVE else _owner.ApprovalOutcome.decline()
+
+
+async def _await_recorded(session: Any, review_id: str, digest: str, status_of: Any) -> Any:
+    """The one wait every review kind uses: the durably recorded decision WORD, or the UNAVAILABLE ApprovalOutcome that says why nobody decided."""
     try:
-        return await _wait(session, review_id, digest)
+        return await _wait(session, review_id, digest, status_of)
     except BaseException:  # the terminal's own cancellation (SIGINT -> KeyboardInterrupt) or a cancelled task: the review ends undecided, and the record says so
         if getattr(session, "review_channel", None) is not None:
             session.review_channel.abandon()  # its capability is forgotten with it
@@ -211,7 +271,7 @@ def _write_audit_decision(session: Any, review_id: str, digest: str, decision: s
         logger.warning("Launch %s: audit decision record not written (%s)", session.launch_id, type(error).__name__)
 
 
-async def _wait(session: Any, review_id: str, digest: str) -> _owner.ApprovalOutcome:
+async def _wait(session: Any, review_id: str, digest: str, status_of: Any = _binary_status) -> Any:
     # The expiry is the WALL-CLOCK instant Kriya recorded, not a monotonic timer that stops while the machine sleeps. The decision arrives ONLY over the private
     # review channel; a launch without one has no way to be approved (the review was not offered in the first place - this is the guard for a channel that went away).
     channel = session.review_channel
@@ -225,12 +285,15 @@ async def _wait(session: Any, review_id: str, digest: str) -> _owner.ApprovalOut
         return _unavailable(session, review_id, "channel-unavailable", _owner.APPROVAL_CHANNEL_UNAVAILABLE)
     outcome = await channel.await_decision(expires)
     if outcome.kind == OUTCOME_DECIDED:
-        approved = outcome.decision == "approve"
+        decision = str(outcome.decision)
+        if not _owner.decision_valid_for_kind(pending.get("kind", KIND_CHANGE), decision):
+            # The channel already refuses a word of another kind; this is the waiter's own guard: such a word is never recorded and never a rejection.
+            return _unavailable(session, review_id, "wrong-decision-for-kind", _owner.APPROVAL_RESULT_UNRECOGNIZED)
         decided_at = _stamp(_now())
-        _write_audit_decision(session, review_id, digest, str(outcome.decision), decided_at)
-        # DURABLE BEFORE RESUME: the record says APPROVED before the workflow is allowed to continue; if that cannot be written, nothing is applied
-        if session.resolve_review(review_id, STATUS_APPROVED if approved else STATUS_REJECTED, {"decision": outcome.decision, "decided_at": decided_at, "source": "review-channel"}):
-            return _owner.ApprovalOutcome.approve() if approved else _owner.ApprovalOutcome.decline()
+        _write_audit_decision(session, review_id, digest, decision, decided_at)
+        # DURABLE BEFORE RESUME: the record holds the decision before the workflow is allowed to continue; if that cannot be written, nothing is applied
+        if session.resolve_review(review_id, status_of(decision), {"decision": decision, "decided_at": decided_at, "source": "review-channel"}):
+            return decision
         return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_DECISION_NOT_RECORDED)
     if outcome.kind == OUTCOME_EXPIRED:
         return _unavailable(session, review_id, "timeout", _owner.APPROVAL_REVIEW_EXPIRED)

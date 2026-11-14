@@ -3046,6 +3046,60 @@ def _verifier_repair_decision(subject: Any, yes: bool) -> Any:
     return VerifierRepairDecision(subject.fingerprint if answer.approved else None)
 
 
+def _verifier_semantic_decision(subject: Any, yes: bool) -> Any:
+    """The `kriya generate` answer to a VERIFIER SEMANTIC REVIEW (VERIFIER-SEMANTIC-REVIEW-001; a fourth subject: a person's decision whether ONE exact initial
+    verifier's expectation is correct under the canonical contract). Inside a desktop launch it is held as a typed pending review and the awaitable that resolves
+    to the decision is returned; a launch that cannot hold it yields no decision. Outside a launch the person is shown the evidence and types one of the three
+    words.
+
+    `--yes` NEVER decides (standing consent to apply and run is not a judgement about this verifier). Anything but one of the three exact words - EOF, a bare
+    Enter, Ctrl-C, another word - is NO decision; it is never read as ``cannot_decide``, which is a real answer."""
+    from kriya.control.launch import launch_active, request_verifier_semantic_review
+    from kriya.policy.approval import (
+        APPROVAL_DECISION_NOT_RECORDED,
+        APPROVAL_LAUNCH_CANNOT_ASK,
+        REVIEW_PHASE_FAILING,
+        VERIFIER_SEMANTIC_DECISIONS,
+        VERIFIER_SEMANTIC_NOT_ASKED,
+        VERIFIER_SEMANTIC_NOTICE,
+        VERIFIER_SEMANTIC_QUESTION,
+        VerifierSemanticDecision,
+    )
+
+    awaiting = request_verifier_semantic_review(subject)
+    if awaiting is not None:
+        return awaiting
+    if launch_active():
+        return VerifierSemanticDecision.none(APPROVAL_LAUNCH_CANNOT_ASK)
+    if yes:
+        return VerifierSemanticDecision.none(VERIFIER_SEMANTIC_NOT_ASKED)
+    failing = subject.review_phase == REVIEW_PHASE_FAILING
+    click.secho(f"\n[Verifier semantic review] A generated verifier {'FAILED' if failing else 'PASSED'}; neither outcome is the truth about the contract.",
+                bold=True, fg="yellow")
+    click.echo(VERIFIER_SEMANTIC_NOTICE)
+    click.secho("\n--- Canonical contract ---", bold=True, fg="cyan")
+    click.echo(subject.contract_text)
+    for label, items in (("Acceptance criteria", subject.acceptance_criteria), ("Global invariants", subject.invariants)):
+        if items:
+            click.secho(f"\n--- {label} of this verifier unit ---", bold=True, fg="cyan")
+            for item_id, text in items:
+                click.echo(f"  {item_id}: {text}")
+    for path, source in subject.verifier_sources:
+        click.secho(f"\n--- Verifier under review: {path} ---", bold=True, fg="cyan")
+        click.echo(source)
+    if subject.outcome:
+        click.secho("\n--- The verifier's deterministic gate output ---", bold=True, fg="cyan")
+        click.echo(redact_text(subject.outcome))
+    try:
+        typed = click.prompt(f"\n{VERIFIER_SEMANTIC_QUESTION}\nType one of: {', '.join(VERIFIER_SEMANTIC_DECISIONS)}", default="", show_default=False)
+    except (click.Abort, EOFError, KeyboardInterrupt):
+        typed = ""
+    word = typed.strip() if isinstance(typed, str) else ""
+    if word not in VERIFIER_SEMANTIC_DECISIONS:
+        return VerifierSemanticDecision.none(APPROVAL_DECISION_NOT_RECORDED)
+    return VerifierSemanticDecision.decided_as(word, subject.fingerprint)
+
+
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                    resume, resume_id, json_output, from_milestones, output, acceptance=None,
                    acceptance_approval=None, requirements_file=None, verification_authority=None,
@@ -3186,7 +3240,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         return _approval_decision(files, reason, yes)
 
     on_approval = TypedApprovalCallback(on_change_approval, lambda subject: _runtime_command_decision(subject, yes),
-                                        lambda subject: _verifier_repair_decision(subject, yes))
+                                        lambda subject: _verifier_repair_decision(subject, yes),
+                                        lambda subject: _verifier_semantic_decision(subject, yes))
 
     def on_skill_gap(reason: str, skill_names: List[str]) -> Optional[str]:
         from kriya.control.launch import (

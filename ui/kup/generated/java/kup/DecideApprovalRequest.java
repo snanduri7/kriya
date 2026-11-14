@@ -21,7 +21,7 @@ public class DecideApprovalRequest {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private String candidateDigest;
-    private DecisionEnum decision;
+    private DecideApprovalRequestDecision decision;
     private String launchid;
     private String reviewid;
     private String workspace;
@@ -32,9 +32,9 @@ public class DecideApprovalRequest {
     public void setCandidateDigest(String value) { this.candidateDigest = value; }
 
     @JsonProperty("decision")
-    public DecisionEnum getDecision() { return decision; }
+    public DecideApprovalRequestDecision getDecision() { return decision; }
     @JsonProperty("decision")
-    public void setDecision(DecisionEnum value) { this.decision = value; }
+    public void setDecision(DecideApprovalRequestDecision value) { this.decision = value; }
 
     @JsonProperty("launch_id")
     public String getLaunchid() { return launchid; }

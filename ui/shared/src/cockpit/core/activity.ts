@@ -64,6 +64,16 @@ export function activityFromLaunch(status: LaunchStatus | null): ActivityEntry[]
   out.push({ key: 'launch.requested', text: 'Run started', tone: 'info', at: launch.requested_at ?? null, source: 'launch.requested_at' });
   const reviews = [...(launch.approval_history ?? []), ...(launch.pending_approval ? [launch.pending_approval] : [])];
   for (const review of reviews) {
+    if (review.kind === 'verifier_semantic_review') {
+      // the fourth subject: whether an INITIAL verifier expects the right thing. The recorded WORD is shown; an expiry is not a decision.
+      out.push({ key: `${review.review_id}:asked`, text: 'Waiting for your decision about what a verifier expects', tone: 'wait', at: review.requested_at ?? null, source: 'launch.pending_approval.requested_at' });
+      const word = review.decision?.decision ?? null;
+      if (review.status === 'DECIDED' && word === 'expectation_valid') out.push({ key: `${review.review_id}:decided`, text: 'You recorded: the verifier expectation is valid', tone: 'ok', at: review.decision?.decided_at ?? null, source: 'launch.pending_approval.decision' });
+      else if (review.status === 'DECIDED' && word === 'expectation_invalid') out.push({ key: `${review.review_id}:decided`, text: 'You recorded: the verifier expectation is invalid (one regeneration permitted)', tone: 'info', at: review.decision?.decided_at ?? null, source: 'launch.pending_approval.decision' });
+      else if (review.status === 'DECIDED' && word === 'cannot_decide') out.push({ key: `${review.review_id}:decided`, text: 'You recorded: cannot decide; the run goes to review', tone: 'info', at: review.decision?.decided_at ?? null, source: 'launch.pending_approval.decision' });
+      else if (review.status === 'EXPIRED') out.push({ key: `${review.review_id}:expired`, text: 'The verifier semantic review ended with no decision', tone: 'info', at: review.decision?.decided_at ?? null, source: 'launch.pending_approval.status' });
+      continue;
+    }
     if (review.kind === 'verifier_defect_repair_authorization') {
       // the third subject: a decision ABOUT a verifier. Neither answer applies or runs anything by itself.
       out.push({ key: `${review.review_id}:asked`, text: 'Waiting for your decision about a verifier', tone: 'wait', at: review.requested_at ?? null, source: 'launch.pending_approval.requested_at' });

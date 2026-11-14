@@ -850,11 +850,21 @@ export interface LaunchStatus {
     /**
      * The review the run is waiting on (or last waited on): a CHANGE review (the exact candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya asks to run), discriminated by `kind`. Only a PENDING review can be decided, over the run's private review channel for its own kind; the waiting process records the decision BEFORE the run continues.
      */
-    pending_approval?: null | PendingChangeReview | PendingRuntimeCommandReview | PendingVerifierRepairAuthorization;
+    pending_approval?:
+      | null
+      | PendingChangeReview
+      | PendingRuntimeCommandReview
+      | PendingVerifierRepairAuthorization
+      | PendingVerifierSemanticReview;
     /**
      * Earlier reviews of this launch (a retry produced a new candidate), oldest first; none of them can be decided any more.
      */
-    approval_history?: (PendingChangeReview | PendingRuntimeCommandReview | PendingVerifierRepairAuthorization)[];
+    approval_history?: (
+      | PendingChangeReview
+      | PendingRuntimeCommandReview
+      | PendingVerifierRepairAuthorization
+      | PendingVerifierSemanticReview
+    )[];
     /**
      * The human decision the run reached and the desktop cannot make (never auto-approved): which kind, the reason Kriya gave, and the recorded details.
      */
@@ -1067,6 +1077,105 @@ export interface PendingVerifierRepairAuthorization {
   replay_failure_type: string;
   decision: {
     decision?: string | null;
+    decided_at?: string | null;
+    source?: string;
+    [k: string]: unknown;
+  } | null;
+  [k: string]: unknown;
+}
+/**
+ * A VERIFIER SEMANTIC REVIEW (VERIFIER-SEMANTIC-REVIEW-001, owner ruling 2026-11-14; a fourth subject, distinct from the replay-specific verifier-repair authorization): the person's decision whether the expectation of ONE exact INITIAL generated verifier is correct under the canonical contract. A generated verifier's pass or failure is candidate evidence, never the truth. Its decision vocabulary is its own: `expectation_valid`, `expectation_invalid`, `cannot_decide` - never approve/reject. A decided review has status DECIDED (no polarity) and the word in `decision.decision`; EXPIRED with a null decision means nobody decided, which is NOT `cannot_decide`. `semantic_fingerprint` (= candidate_digest) covers every binding (run, plan, verifier unit and bytes, goal and contract digests, the unit's plan-declared criteria and invariants, the review phase and, for a failing verifier, the failure identity). `verified` is Kriya's own read-time re-proof; a review that is not verified is never offered for a decision.
+ */
+export interface PendingVerifierSemanticReview {
+  review_id: string;
+  sequence: number;
+  kind: 'verifier_semantic_review';
+  status: 'PENDING' | 'DECIDED' | 'EXPIRED';
+  requested_at: string;
+  expires_at: string;
+  /**
+   * Equal to semantic_fingerprint: the digest the decision must carry.
+   */
+  candidate_digest: string;
+  /**
+   * Digest over every binding of the review.
+   */
+  semantic_fingerprint: string;
+  /**
+   * Present in a served status: Kriya re-derived the fingerprint from the recorded bindings and re-checked every shown text against its bound digest.
+   */
+  verified?: boolean;
+  /**
+   * The exact question the person decides.
+   */
+  question: string;
+  /**
+   * Kriya's fixed statement of what each of the three decisions does and does not do.
+   */
+  notice: string;
+  /**
+   * The only decision words this review accepts.
+   */
+  decisions: ('expectation_valid' | 'expectation_invalid' | 'cannot_decide')[];
+  verifier_unit_id: string;
+  /**
+   * Whether the verifier passed or failed its deterministic gate; a decision for one phase is never authority for the other.
+   */
+  review_phase: 'passing_verifier' | 'failing_verifier';
+  bindings: {
+    run_id: string;
+    plan_hash: string;
+    goal_digest: string;
+    verification_contract_digest?: string | null;
+    failure_identity?: string | null;
+    [k: string]: unknown;
+  };
+  /**
+   * The verifier candidate under review: each file's path, the digest of its exact bytes and its exact source.
+   *
+   * @minItems 1
+   */
+  verifier_files: [
+    {
+      path: string;
+      sha256: string;
+      source: string;
+      [k: string]: unknown;
+    },
+    ...{
+      path: string;
+      sha256: string;
+      source: string;
+      [k: string]: unknown;
+    }[]
+  ];
+  /**
+   * The canonical goal/contract text, exactly as bound by contract_digest.
+   */
+  contract_text: string;
+  contract_digest: string;
+  /**
+   * The plan-declared acceptance criteria of the verifier unit (id and exact text), bound by the fingerprint.
+   */
+  acceptance_criteria: {
+    id: string;
+    text: string;
+    [k: string]: unknown;
+  }[];
+  /**
+   * The plan-declared global invariants relevant to the verifier unit (id and exact text), bound by the fingerprint.
+   */
+  invariants: {
+    id: string;
+    text: string;
+    [k: string]: unknown;
+  }[];
+  /**
+   * The verifier's own deterministic gate output (bounded, display-redacted); shown, not bound.
+   */
+  outcome: string;
+  decision: {
+    decision?: 'expectation_valid' | 'expectation_invalid' | 'cannot_decide' | null;
     decided_at?: string | null;
     source?: string;
     [k: string]: unknown;
@@ -2299,6 +2408,21 @@ export interface DecideVerifierRepairRequest {
   review_id: string;
   authorization_fingerprint: string;
   decision: 'approve' | 'reject';
+}
+
+// ---- DecideVerifierSemanticRequest (host-contract.schema.json#/$defs/DecideVerifierSemanticRequest) ----
+/**
+ * Verifier semantic review decision (VERIFIER-SEMANTIC-REVIEW-001, owner ruling 2026-11-14): ONE human decision for the VERIFIER SEMANTIC REVIEW that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, semantic fingerprint) and one of the review's own three decision words - never approve/reject, and never a file, a source text, a contract or an outcome. expectation_valid = the shown verifier expectation is correct under the contract (it names no defective code and authorizes no change); expectation_invalid = the expectation is wrong and ONE regeneration of that verifier is permitted; cannot_decide = an explicit non-decision that sends the run to review.
+ */
+export interface DecideVerifierSemanticRequest {
+  /**
+   * Absolute path without control characters.
+   */
+  workspace: string;
+  launch_id: string;
+  review_id: string;
+  semantic_fingerprint: string;
+  decision: 'expectation_valid' | 'expectation_invalid' | 'cannot_decide';
 }
 
 // ---- ApproveConfigurationRequest (host-contract.schema.json#/$defs/ApproveConfigurationRequest) ----

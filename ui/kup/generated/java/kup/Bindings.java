@@ -15,11 +15,12 @@ public class Bindings {
     private String goalDigest;
     private String planHash;
     private String preRepairFailureIdentity;
-    private long recoveryGeneration;
+    private Long recoveryGeneration;
     private String recoveryPlanid;
     private String replayFailureIdentity;
     private String runid;
     private String verificationContractDigest;
+    private String failureIdentity;
 
     @JsonProperty("goal_digest")
     public String getGoalDigest() { return goalDigest; }
@@ -37,9 +38,9 @@ public class Bindings {
     public void setPreRepairFailureIdentity(String value) { this.preRepairFailureIdentity = value; }
 
     @JsonProperty("recovery_generation")
-    public long getRecoveryGeneration() { return recoveryGeneration; }
+    public Long getRecoveryGeneration() { return recoveryGeneration; }
     @JsonProperty("recovery_generation")
-    public void setRecoveryGeneration(long value) { this.recoveryGeneration = value; }
+    public void setRecoveryGeneration(Long value) { this.recoveryGeneration = value; }
 
     @JsonProperty("recovery_plan_id")
     public String getRecoveryPlanid() { return recoveryPlanid; }
@@ -60,4 +61,9 @@ public class Bindings {
     public String getVerificationContractDigest() { return verificationContractDigest; }
     @JsonProperty("verification_contract_digest")
     public void setVerificationContractDigest(String value) { this.verificationContractDigest = value; }
+
+    @JsonProperty("failure_identity")
+    public String getFailureIdentity() { return failureIdentity; }
+    @JsonProperty("failure_identity")
+    public void setFailureIdentity(String value) { this.failureIdentity = value; }
 }

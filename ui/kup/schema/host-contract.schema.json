@@ -1242,6 +1242,19 @@
       },
       "additionalProperties": false
     },
+    "DecideVerifierSemanticRequest": {
+      "description": "Verifier semantic review decision (VERIFIER-SEMANTIC-REVIEW-001, owner ruling 2026-11-14): ONE human decision for the VERIFIER SEMANTIC REVIEW that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, semantic fingerprint) and one of the review's own three decision words - never approve/reject, and never a file, a source text, a contract or an outcome. expectation_valid = the shown verifier expectation is correct under the contract (it names no defective code and authorizes no change); expectation_invalid = the expectation is wrong and ONE regeneration of that verifier is permitted; cannot_decide = an explicit non-decision that sends the run to review.",
+      "type": "object",
+      "required": ["workspace", "launch_id", "review_id", "semantic_fingerprint", "decision"],
+      "properties": {
+        "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." },
+        "launch_id": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$" },
+        "review_id": { "type": "string", "pattern": "^ra-[0-9a-f]{24}$" },
+        "semantic_fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "decision": { "type": "string", "enum": ["expectation_valid", "expectation_invalid", "cannot_decide"] }
+      },
+      "additionalProperties": false
+    },
     "DecideRuntimeCommandResult": {
       "description": "Answer to a runtime-command decision. accepted=true means Kriya durably recorded the decision for the waiting run; the run's outcome is only ever in Kriya's durable records. accepted=false carries Kriya's or the host's closed code; `CONFIRMATION_DECLINED` means the person pressed Cancel on the native confirmation: nothing was sent, nothing was approved, and the review is still waiting.",
       "type": "object",

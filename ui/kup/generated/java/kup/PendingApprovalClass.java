@@ -25,6 +25,19 @@ import java.util.List;
  * and is what the decision must carry. `verified` is Kriya's own re-proof, at read time,
  * that the recorded texts are the bytes the fingerprint binds; a review that is not
  * verified is never offered for approval.
+ *
+ * A VERIFIER SEMANTIC REVIEW (VERIFIER-SEMANTIC-REVIEW-001, owner ruling 2026-11-14; a
+ * fourth subject, distinct from the replay-specific verifier-repair authorization): the
+ * person's decision whether the expectation of ONE exact INITIAL generated verifier is
+ * correct under the canonical contract. A generated verifier's pass or failure is candidate
+ * evidence, never the truth. Its decision vocabulary is its own: `expectation_valid`,
+ * `expectation_invalid`, `cannot_decide` - never approve/reject. A decided review has
+ * status DECIDED (no polarity) and the word in `decision.decision`; EXPIRED with a null
+ * decision means nobody decided, which is NOT `cannot_decide`. `semantic_fingerprint` (=
+ * candidate_digest) covers every binding (run, plan, verifier unit and bytes, goal and
+ * contract digests, the unit's plan-declared criteria and invariants, the review phase and,
+ * for a failing verifier, the failure identity). `verified` is Kriya's own read-time
+ * re-proof; a review that is not verified is never offered for a decision.
  */
 public class PendingApprovalClass {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
@@ -71,11 +84,19 @@ public class PendingApprovalClass {
     private Boolean verified;
     private List<VerifierFile> verifierFiles;
     private String verifierUnitid;
+    private List<AcceptanceCriterion> acceptanceCriteria;
+    private List<DecisionElement> decisions;
+    private List<Invariant> invariants;
+    private String outcome;
+    private ReviewPhase reviewPhase;
+    private String semanticFingerprint;
 
     /**
      * Equal to command_fingerprint: the digest the decision must carry.
      *
      * Equal to authorization_fingerprint: the digest the decision must carry.
+     *
+     * Equal to semantic_fingerprint: the digest the decision must carry.
      */
     @JsonProperty("candidate_digest")
     public String getCandidateDigest() { return candidateDigest; }
@@ -229,6 +250,8 @@ public class PendingApprovalClass {
     /**
      * Kriya's fixed statement that automatic verifier repair is otherwise forbidden and what an
      * approval does and does not do.
+     *
+     * Kriya's fixed statement of what each of the three decisions does and does not do.
      */
     @JsonProperty("notice")
     public String getNotice() { return notice; }
@@ -310,4 +333,56 @@ public class PendingApprovalClass {
     public String getVerifierUnitid() { return verifierUnitid; }
     @JsonProperty("verifier_unit_id")
     public void setVerifierUnitid(String value) { this.verifierUnitid = value; }
+
+    /**
+     * The plan-declared acceptance criteria of the verifier unit (id and exact text), bound by
+     * the fingerprint.
+     */
+    @JsonProperty("acceptance_criteria")
+    public List<AcceptanceCriterion> getAcceptanceCriteria() { return acceptanceCriteria; }
+    @JsonProperty("acceptance_criteria")
+    public void setAcceptanceCriteria(List<AcceptanceCriterion> value) { this.acceptanceCriteria = value; }
+
+    /**
+     * The only decision words this review accepts.
+     */
+    @JsonProperty("decisions")
+    public List<DecisionElement> getDecisions() { return decisions; }
+    @JsonProperty("decisions")
+    public void setDecisions(List<DecisionElement> value) { this.decisions = value; }
+
+    /**
+     * The plan-declared global invariants relevant to the verifier unit (id and exact text),
+     * bound by the fingerprint.
+     */
+    @JsonProperty("invariants")
+    public List<Invariant> getInvariants() { return invariants; }
+    @JsonProperty("invariants")
+    public void setInvariants(List<Invariant> value) { this.invariants = value; }
+
+    /**
+     * The verifier's own deterministic gate output (bounded, display-redacted); shown, not
+     * bound.
+     */
+    @JsonProperty("outcome")
+    public String getOutcome() { return outcome; }
+    @JsonProperty("outcome")
+    public void setOutcome(String value) { this.outcome = value; }
+
+    /**
+     * Whether the verifier passed or failed its deterministic gate; a decision for one phase is
+     * never authority for the other.
+     */
+    @JsonProperty("review_phase")
+    public ReviewPhase getReviewPhase() { return reviewPhase; }
+    @JsonProperty("review_phase")
+    public void setReviewPhase(ReviewPhase value) { this.reviewPhase = value; }
+
+    /**
+     * Digest over every binding of the review.
+     */
+    @JsonProperty("semantic_fingerprint")
+    public String getSemanticFingerprint() { return semanticFingerprint; }
+    @JsonProperty("semantic_fingerprint")
+    public void setSemanticFingerprint(String value) { this.semanticFingerprint = value; }
 }

@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Deque, Dict, List, Optional, Set
 
-from kriya.policy.approval import KINDS
+from kriya.policy.approval import ALL_DECISIONS, BINARY_DECISIONS, KINDS, decision_valid_for_kind
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ _READ_CHUNK = 4096
 _POLL_SECONDS = 0.25
 
 FRAME_REVIEW, FRAME_DECISION, FRAME_RESULT = "review", "decision", "result"
-DECISIONS = ("approve", "reject")
+DECISIONS = BINARY_DECISIONS   # the binary kinds' words (kept under this name); validity is per kind: kriya.policy.approval.DECISIONS_BY_KIND
 
 LAUNCH_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 REVIEW_ID_RE = re.compile(r"^ra-[0-9a-f]{24}$")
@@ -64,7 +64,8 @@ PROTOCOL_ERROR_CODES = (MALFORMED_JSON, FRAME_TOO_LARGE, NOT_AN_OBJECT, UNKNOWN_
 # What a well-formed decision frame can be REFUSED with without failing the channel (the live capability is not consumed).
 RESULT_ACCEPTED = "ACCEPTED"
 RESULT_CAPABILITY_MISMATCH, RESULT_STALE_REVIEW, RESULT_WRONG_KIND, RESULT_EXPIRED = "CAPABILITY_MISMATCH", "STALE_REVIEW", "WRONG_REVIEW_KIND", "REVIEW_EXPIRED"
-RESULT_CODES = (RESULT_ACCEPTED, RESULT_CAPABILITY_MISMATCH, RESULT_STALE_REVIEW, RESULT_WRONG_KIND, RESULT_EXPIRED)
+RESULT_WRONG_DECISION = "WRONG_DECISION_FOR_REVIEW_KIND"   # a word of another kind's vocabulary: refused, the review stays open and undecided
+RESULT_CODES = (RESULT_ACCEPTED, RESULT_CAPABILITY_MISMATCH, RESULT_STALE_REVIEW, RESULT_WRONG_KIND, RESULT_EXPIRED, RESULT_WRONG_DECISION)
 
 OUTCOME_DECIDED, OUTCOME_EXPIRED, OUTCOME_EOF, OUTCOME_FAILED = "decided", "expired", "eof", "failed"
 
@@ -128,7 +129,9 @@ def parse_frame(line: bytes) -> Dict[str, Any]:
         if not isinstance(capability, str) or not capability or len(capability) > CAPABILITY_MAX_CHARS:
             raise ChannelProtocolError(INVALID_FIELDS)
     else:
-        if payload["decision"] not in DECISIONS:
+        # VERIFIER-SEMANTIC-REVIEW-001: a word outside EVERY kind's vocabulary is a malformed frame (the channel fails closed, as before). A known word that
+        # belongs to ANOTHER kind is well-formed and is refused in ``_handle`` with a typed result (WRONG_DECISION_FOR_REVIEW_KIND) - never read as a rejection.
+        if not isinstance(payload["decision"], str) or payload["decision"] not in ALL_DECISIONS:
             raise ChannelProtocolError(INVALID_FIELDS)
         if capability is not None and (not isinstance(capability, str) or len(capability) > CAPABILITY_MAX_CHARS):
             raise ChannelProtocolError(INVALID_FIELDS)
@@ -389,6 +392,10 @@ class ReviewChannel:
             refusal = RESULT_CAPABILITY_MISMATCH
         elif self._clock() > expires_at:
             refusal = RESULT_EXPIRED
+        elif not decision_valid_for_kind(review.kind, frame["decision"]):
+            # the right review, the live capability, in time - but a word this kind does not have. Nothing is consumed, recorded or resumed.
+            refusal = RESULT_WRONG_DECISION
+            logger.warning("review channel refused a decision: %s (review kind %s)", RESULT_WRONG_DECISION, review.kind)
         if refusal is not None:
             await self._send({"v": PROTOCOL_VERSION, "type": FRAME_RESULT, "review_id": frame["review_id"], "accepted": False, "code": refusal})
             if refusal == RESULT_EXPIRED:

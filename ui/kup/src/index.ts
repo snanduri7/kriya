@@ -4,7 +4,7 @@
  * the validators are precompiled Ajv code with its one helper inlined, so they run under a CSP without eval.
  */
 import type { ErrorObject } from 'ajv';
-import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, WorkspaceDescribe, ExecutionPreflight, LaunchStatus, RunLog, WorkspaceCreate, ExecutionContext, ExecutionModelProbe, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState, ConfigurationApprovalStatus, ConfigurationApprove, ChangeApprovalReview, RuntimeCommandReview, ProjectInitialize, InitializeProjectRequest, InitializeProjectResult, ApproveConfigurationRequest, ApproveConfigurationResult, WorkspaceChoice, RecentWorkspaces, StartRunRequest, StartRunResult, ExecutionState, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideVerifierRepairRequest, DecideRuntimeCommandResult, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify, EvidenceRecords, EvidenceChangeContent, EvidenceCallContent } from '../generated/ts/kup';
+import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, WorkspaceDescribe, ExecutionPreflight, LaunchStatus, RunLog, WorkspaceCreate, ExecutionContext, ExecutionModelProbe, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState, ConfigurationApprovalStatus, ConfigurationApprove, ChangeApprovalReview, RuntimeCommandReview, ProjectInitialize, InitializeProjectRequest, InitializeProjectResult, ApproveConfigurationRequest, ApproveConfigurationResult, WorkspaceChoice, RecentWorkspaces, StartRunRequest, StartRunResult, ExecutionState, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideVerifierRepairRequest, DecideVerifierSemanticRequest, DecideRuntimeCommandResult, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify, EvidenceRecords, EvidenceChangeContent, EvidenceCallContent } from '../generated/ts/kup';
 import * as validators from '../generated/validators.mjs';
 
 export * from '../generated/ts/kup';
@@ -73,6 +73,7 @@ export const validate = {
   decideRuntimeCommandRequest: (x: unknown) => run<DecideRuntimeCommandRequest>('validateDecideRuntimeCommandRequest', x),
   decideRuntimeCommandResult: (x: unknown) => run<DecideRuntimeCommandResult>('validateDecideRuntimeCommandResult', x),
   decideVerifierRepairRequest: (x: unknown) => run<DecideVerifierRepairRequest>('validateDecideVerifierRepairRequest', x),
+  decideVerifierSemanticRequest: (x: unknown) => run<DecideVerifierSemanticRequest>('validateDecideVerifierSemanticRequest', x),
   section: (x: unknown) => run<Section>('validateSection', x),
   kupRequest: (x: unknown) => run<KupRequest>('validateKupRequest', x),
   openInIdeRequest: (x: unknown) => run<OpenInIdeRequest>('validateOpenInIdeRequest', x),
