@@ -118,6 +118,18 @@ def plan_requested_window(plan: Any) -> Optional[int]:
     return state.requested if state is not None else None
 
 
+def identity_window(budget: Any, plan: Any) -> Optional[int]:
+    """The window the served runtime is held against after a call: the
+    REQUESTED one the dispatch state recorded, never the admission budget
+    (MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001: under an admission
+    ceiling the budget is smaller than the identity, and comparing the served
+    window with it would refuse a correctly served runtime). Without a
+    recorded requested window: the preferred window, then the plan's - what
+    this check used before a budget could differ from the identity."""
+    requested = (getattr(budget, "context_state", None) or {}).get("requested_context_window")
+    return requested or budget.preferred_context_window or plan_requested_window(plan)
+
+
 def dispatched_bytes(messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]]) -> int:
     """Size of everything a request asks the model to read, whitespace runs
     counted once (the prompt-consumption check's basis)."""
@@ -1086,7 +1098,7 @@ class LLMClient:
         )
         await self._check_after_call(
             result, runtime, model=model, base_url=url_to_check, api_key=api_key,
-            requested_window=budget.preferred_context_window or plan_requested_window(plan),
+            requested_window=identity_window(budget, plan),
             dispatched_bytes=dispatched_bytes(messages, None), limits=self._limits(fingerprint, settings),
             identified=fingerprint.exact)
         self._finish(result, started=start_time, budget=budget)
@@ -1376,7 +1388,7 @@ class LLMClient:
             result.parser_status = "ok"
         await self._check_after_call(
             result, runtime, model=model, base_url=url_to_check, api_key=api_key,
-            requested_window=budget.preferred_context_window or plan_requested_window(plan),
+            requested_window=identity_window(budget, plan),
             dispatched_bytes=dispatched_bytes(messages, tools), limits=self._limits(fingerprint, settings),
             identified=fingerprint.exact)
         self._finish(result, started=start_time, budget=budget)

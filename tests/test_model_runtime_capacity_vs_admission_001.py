@@ -212,6 +212,102 @@ def test_the_ceiling_is_not_the_runtime_identity(fake):
     assert refused.value.reason_code == RUNTIME_CONTEXT_IDENTITY_MISMATCH
 
 
+# --- the served window is observed (a real runtime): before and after the call -------------------------
+
+class _ObservingRuntime(FakeRuntimeAdapter):
+    """A runtime whose loaded window can be observed, as a real one's is
+    (the plain fake reports no observation, so the after-call identity check
+    never runs against it)."""
+
+    loaded = SERVED
+
+    @property
+    def provider_capabilities(self):
+        from kriya.core.provider_contract import ProviderCapabilities, Support
+
+        base = super().provider_capabilities
+        return ProviderCapabilities(settings=dict(base.settings),
+                                    features={"served_context_observation": Support.OBSERVABLE_ONLY})
+
+    def observe_served_context_state(self, *, base_url, model, api_key=""):
+        from kriya.core.model_runtime import OBSERVED, ServedContextObservation
+
+        return ServedContextObservation(OBSERVED, window=self.loaded)
+
+
+@pytest.fixture(params=[False, True], ids=["server_configured_window", "per_request_window"])
+def observing(request, monkeypatch):
+    """``per_request_window`` is the native shape: the request itself carries
+    the window, so the wire must carry the served identity, never the ceiling."""
+    monkeypatch.setenv(model_runtime.PROBE_ENV_VAR, "1")
+    monkeypatch.setattr(model_runtime, "record_fingerprint", lambda *a, **k: None)
+    adapter = _ObservingRuntime("observing", per_request_context_window=request.param, served_window=SERVED)
+    register_runtime_adapter(adapter)
+    model_runtime.clear_model_runtime_cache()
+    yield adapter
+    unregister_runtime_adapter(adapter.name)
+    model_runtime.clear_model_runtime_cache()
+
+
+def _observing_config(**kwargs):
+    config = _config(**kwargs)
+    config.llm.inference_runtime = "observing"
+    return config
+
+
+def test_an_observed_served_window_above_the_ceiling_is_not_an_identity_violation(observing):
+    """Production, the loaded window observed before and after the call: the
+    identity compared is requested vs served (65536 == 65536); the admission
+    budget (32768) is never what the served window is held against."""
+    from _fake_inference_runtime import FAKE_WINDOW_FIELD
+
+    result = _send(_observing_config(), 20000)
+    assert result.status is CompletionStatus.OK and result.error is None
+    assert result.budget["context_state"]["served_context_provenance"] == "server_observed"
+    assert result.budget["context_window"] == CEILING
+    contract = result.protocol["provider_contract"]
+    assert contract["served_context_window_after_call"] == SERVED and "violation" not in contract
+    [request] = observing.requests
+    if observing.capabilities.per_request_context_window:
+        assert request.extra_body[FAKE_WINDOW_FIELD] == SERVED  # the wire asks for the identity, not the ceiling
+    else:
+        assert FAKE_WINDOW_FIELD not in (request.extra_body or {})
+
+
+def test_the_tool_call_path_holds_the_served_window_against_the_identity_too(observing):
+    tools = [{"type": "function", "function": {"name": "noop", "description": "does nothing",
+                                               "parameters": {"type": "object", "properties": {}}}}]
+    config = _observing_config()
+    config.llm.capabilities.native_tool_calls = True
+    result = asyncio.run(LLMClient(config).complete_with_tools_result(
+        [{"role": "system", "content": "system"}, {"role": "user", "content": _prompt_of(20000)}], tools))
+    assert result.status is CompletionStatus.OK and result.error is None
+    assert result.budget["context_window"] == CEILING
+    assert "violation" not in result.protocol["provider_contract"]
+    assert result.protocol["provider_contract"]["served_context_window_after_call"] == SERVED
+
+
+def test_a_served_window_that_is_not_the_requested_one_is_still_a_violation_after_the_call(observing):
+    """Control: the after-call check still compares against the requested
+    identity - a runtime found loaded at another window is refused."""
+    if observing.capabilities.per_request_context_window:
+        pytest.skip("a per-request runtime serves what the request carries; the mismatch control is the server-configured shape")
+    config = _observing_config()
+    llm = LLMClient(config)
+    calls = {"n": 0}
+    original = observing.observe_served_context_state
+
+    def drifting(**kwargs):
+        calls["n"] += 1
+        observing.loaded = SERVED if calls["n"] == 1 else 2 * SERVED
+        return original(**kwargs)
+
+    observing.observe_served_context_state = drifting
+    result = asyncio.run(llm.complete_result("system", _prompt_of(100)))
+    assert result.status is CompletionStatus.PROVIDER_CONTRACT_VIOLATION
+    assert result.error.reason_code == RUNTIME_CONTEXT_IDENTITY_MISMATCH
+
+
 # --- every budget consumer -----------------------------------------------------------------------------
 
 def test_allocation_routing_and_transition_use_the_same_admission_window(fake):
