@@ -1710,7 +1710,8 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
     is built from), every request carrying ``settings`` (the temperature,
     reasoning flag and extra_body qualified; LLMClient otherwise sends the
     primary binding's), and a strict budget policy so no case is itself sent
-    with a different window."""
+    with a different window, with no admission ceiling (controller policy is
+    not part of what a record certifies)."""
     from kriya.core.inference_runtime import runtime_for_binding
     from kriya.core.inference_settings import request_settings
     from kriya.core.model_runtime import binding_object, requested_context_window
@@ -1746,6 +1747,11 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
         policy = getattr(policy_owner, "context_policy", None)
         if policy is not None:
             policy.mode = "strict"
+            # MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001: a record
+            # certifies the runtime at the window it serves; the controller's
+            # admission ceiling is run policy and never bounds a case (the
+            # capacity probe is sized to the served window).
+            policy.max_context_tokens = None
     return copy
 
 

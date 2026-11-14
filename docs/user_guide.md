@@ -731,6 +731,14 @@ ceilings and the call's elapsed time. Ollama sizes a model's context when it loa
 `num_ctx` can make it reload the model (check with `ollama ps` on your host): an expansion can cost a reload and more
 memory, and calls alternating between windows can repeat it. Qualify a tier only if the host can hold it.
 
+`llm.context_policy.max_context_tokens` is also an admission ceiling for the binding it is set on: Kriya never admits a
+request above it, the preferred window included. The binding's `context_window` stays what the model is asked to serve,
+what `kriya model pin` pins and what `kriya model qualify` certifies; the ceiling only limits how much of that window
+Kriya fills. A model served and qualified at 65536 with `max_context_tokens: 32768` is sent prompts sized for 32768,
+and a larger one is refused before anything is sent. Changing the ceiling does not require qualifying the model again,
+but a run checkpointed under one ceiling does not resume its saved work under another. Set it on every binding it
+should apply to (`llm` and each `llm_chain` entry); a binding without one is limited only by its window.
+
 When nothing allowed fits, a Developer file request is first sent once more without the contents of the files already
 written in the same batch (names only; `model.optional_context_reduced`). If it still cannot fit it is refused before
 inference: `CONTEXT_BUDGET_UNSATISFIABLE` when the prompt itself cannot fit, `OUTPUT_BUDGET_UNSATISFIABLE` when the prompt fits but the grounded output cannot. For a full-file

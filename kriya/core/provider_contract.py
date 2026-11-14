@@ -230,25 +230,38 @@ class ContextWindowState:
     - served: what the provider has loaded, with its provenance (None when
       unobserved);
     - budget: what prompt admission uses - never above requested, never
-      above an observed served window."""
+      above an observed served window, never above the controller's
+      admission ceiling;
+    - admission_ceiling: the controller's own limit on what it admits
+      (MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001), None when none is
+      configured. Controller policy only: it is never part of ``requested``
+      or ``served``, which are the runtime's identity."""
 
     requested: Optional[int]
     served: Optional[int]
     served_provenance: Provenance
     budget: Optional[int]
+    admission_ceiling: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"requested_context_window": self.requested, "served_context_window": self.served,
-                "served_context_provenance": self.served_provenance.value, "budget_context_window": self.budget}
+        state = {"requested_context_window": self.requested, "served_context_window": self.served,
+                 "served_context_provenance": self.served_provenance.value, "budget_context_window": self.budget}
+        if self.admission_ceiling is not None:
+            state["admission_ceiling"] = self.admission_ceiling
+        return state
 
 
 def context_window_state(requested: Optional[int], served: Optional[int],
-                         served_provenance: Provenance, *, exact: bool) -> ContextWindowState:
+                         served_provenance: Provenance, *, exact: bool,
+                         ceiling: Optional[int] = None) -> ContextWindowState:
     """The budget window for ``requested`` given an observation. A served
     window below the requested one is always refused (the prompt Kriya
     admits could be truncated); a different served window under an exact
     identity policy is refused too. Otherwise the budget is the requested
-    window (never enlarged because the server happens to serve more)."""
+    window (never enlarged because the server happens to serve more),
+    bounded by the controller's admission ``ceiling`` when one is set. The
+    identity checks compare ``requested`` with ``served`` only: the ceiling
+    never takes part in them."""
     if served is not None and requested is not None:
         if served < requested:
             raise ProviderContractError(
@@ -261,20 +274,44 @@ def context_window_state(requested: Optional[int], served: Optional[int],
                 f"the provider serves a {served}-token context window; the runtime identity requires exactly "
                 f"{requested}. Pin the served window in the model's server configuration (kriya model pin)",
                 {"requested": requested, "served": served, "provenance": served_provenance.value})
-    budget = requested if requested is not None else served
+    ceiling = _admission_ceiling(ceiling)
+    budget = _bounded(requested if requested is not None else served, ceiling)
     return ContextWindowState(requested, served, served_provenance if served is not None else Provenance.UNVERIFIED,
-                              budget)
+                              budget, ceiling)
 
 
-def budget_window(requested: Optional[int], served: Optional[int]) -> Optional[int]:
+def _admission_ceiling(ceiling: Optional[int]) -> Optional[int]:
+    """A configured admission ceiling, or None (absent or not a positive
+    integer: no ceiling, never a zero budget)."""
+    return ceiling if isinstance(ceiling, int) and not isinstance(ceiling, bool) and ceiling > 0 else None
+
+
+def _bounded(window: Optional[int], ceiling: Optional[int]) -> Optional[int]:
+    """``window`` never above ``ceiling``. A ceiling bounds a known window;
+    it is never itself a window (an unknown window stays unknown)."""
+    if window and ceiling:
+        return min(window, ceiling)
+    return window
+
+
+def budget_window(requested: Optional[int], served: Optional[int],
+                  ceiling: Optional[int] = None) -> Optional[int]:
     """The window prompts are sized to before dispatch: the requested one,
     never enlarged because the provider happens to serve more (and never
-    above what it serves - dispatch refuses that request anyway). The one
-    rule allocation, routing and qualification share with the dispatch
-    check (context_window_state)."""
+    above what it serves - dispatch refuses that request anyway), and never
+    above the controller's admission ``ceiling``
+    (MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001: the binding's
+    ``context_policy.max_context_tokens``, read through
+    ``model_runtime.admission_ceiling``). The one rule allocation, routing
+    and transition profiles share with the dispatch check
+    (context_window_state). The ceiling is controller policy: the runtime
+    may serve more than Kriya chooses to consume, and what it serves stays
+    its identity."""
     if requested and served:
-        return min(requested, served)
-    return requested or served
+        window: Optional[int] = min(requested, served)
+    else:
+        window = requested or served
+    return _bounded(window, _admission_ceiling(ceiling))
 
 
 # Tokenizer bound used when a runtime's own is not measured: calibrated

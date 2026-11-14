@@ -599,7 +599,14 @@ class LLMClient:
             # INF-001: a runtime that takes no per-request window and cannot
             # report one serves whatever it was started with.
             served, provenance, source = None, Provenance.UNVERIFIED, "provider_managed"
-        state = context_window_state(requested, served, provenance, exact=self._strict_identity())
+        # MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001: the binding's
+        # admission ceiling bounds the budget only; the identity checks
+        # compare requested with served, and the request still carries the
+        # requested window.
+        from kriya.core.model_runtime import admission_ceiling
+
+        state = context_window_state(requested, served, provenance, exact=self._strict_identity(),
+                                     ceiling=admission_ceiling(binding))
         window = state.budget
         reasoning = 0
         reasoning_source = None

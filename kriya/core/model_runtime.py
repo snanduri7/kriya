@@ -205,6 +205,18 @@ def requested_context_window(extra_body: Optional[Dict[str, Any]], declared: Opt
     return int(declared) if isinstance(declared, int) and declared > 0 else None
 
 
+def admission_ceiling(binding: Any) -> Optional[int]:
+    """MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001: the controller's
+    admission ceiling of a binding (a config binding or LLMClient's binding
+    mapping): its ``context_policy.max_context_tokens``, None when unset.
+    Controller policy, not runtime identity: requested_context_window is
+    what the runtime is asked to serve and is qualified at; this only bounds
+    what Kriya admits into it (provider_contract.budget_window)."""
+    policy = binding.get("context_policy") if isinstance(binding, dict) else getattr(binding, "context_policy", None)
+    value = getattr(policy, "max_context_tokens", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
 def request_extra_body(extra_body: Optional[Dict[str, Any]], declared: Optional[int],
                        runtime: Any = None) -> Optional[Dict[str, Any]]:
     """``extra_body`` as sent: carrying the requested window in the
@@ -1457,7 +1469,7 @@ register_runtime_adapter(OllamaNativeRuntimeAdapter())
 __all__ = [
     "EXACT_REQUIRED_COMPONENTS", "FINGERPRINT_SCHEMA_VERSION", "MODEL_PROTOCOL_ADAPTER_VERSION",
     "ModelRuntimeFingerprint", "PROBE_ENV_VAR", "UNAVAILABLE", "clear_model_runtime_cache",
-    "CONTEXT_WINDOW_REQUEST_OPTION", "configured_context_window", "context_window_overrides", "endpoint_identity",
+    "CONTEXT_WINDOW_REQUEST_OPTION", "admission_ceiling", "configured_context_window", "context_window_overrides", "endpoint_identity",
     "OllamaRuntimeAdapter", "fingerprint_store_dir", "kriya_protocol_identity", "request_extra_body",
     "requested_context_window",
     "supports_per_request_context_window", "with_context_window", "without_context_window",

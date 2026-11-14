@@ -657,15 +657,20 @@ def request_capacity(config: Any, binding: Any = None, *, role: str = "developer
     for that call (kriya/core/llm.py::complete_result)."""
     from kriya.core.inference_runtime import runtime_for_binding
     from kriya.core.llm import reasoning_max_tokens
-    from kriya.core.model_runtime import binding_output_tokens, requested_context_window
+    from kriya.core.model_runtime import admission_ceiling, binding_output_tokens, requested_context_window
     from kriya.core.provider_contract import budget_window
     from kriya.core.token_budget import DISPATCH_SAFETY_MARGIN_TOKENS, TWO_MESSAGE_FRAMING_TOKENS
 
     binding = binding if binding is not None else config.llm
     # The window this binding's requests carry (FALLBACK-CONTEXT-WINDOW-001),
     # bounded below by the window the runtime reports serving, when known
-    # (PROVIDER-CONTRACT-001: never enlarged to a larger served window).
-    window = requested_context_window(binding.extra_body, binding.context_window, runtime_for_binding(binding))
+    # (PROVIDER-CONTRACT-001: never enlarged to a larger served window), and
+    # by the binding's own admission ceiling whether or not the runtime
+    # resolves (MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001).
+    ceiling = admission_ceiling(binding)
+    window = budget_window(
+        requested_context_window(binding.extra_body, binding.context_window, runtime_for_binding(binding)),
+        None, ceiling)
     limits: Dict[str, Any] = {}
     tokenizer = None
     try:
@@ -677,7 +682,7 @@ def request_capacity(config: Any, binding: Any = None, *, role: str = "developer
             config, binding.model, base_url=binding.base_url, api_key=binding.api_key,
             extra_body=binding.extra_body or {},
         )
-        window = budget_window(window, fingerprint.effective_context_window)
+        window = budget_window(window, fingerprint.effective_context_window, ceiling)
         limits = measured_limits_for(fingerprint, config, settings=binding_inference_settings(config, role, binding))
         tokenizer = fingerprint.tokenizer_digest if fingerprint.tokenizer_digest != "unavailable" else None
     except Exception as error:  # never blocks context assembly

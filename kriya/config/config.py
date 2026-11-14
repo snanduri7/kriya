@@ -46,8 +46,14 @@ class ContextPolicyConfig(BaseModel):
     exists for that tier - one listed in ``declared_safe_context_tiers``; and
     lets the output grow above max_tokens for a grounded expectation.
     ``strict`` never exceeds the preferred values. Ceilings are hard limits
-    for either. SECURITY_AUTHORITY under SEC-009: a repository cannot grant
-    itself a larger window."""
+    for either. ``max_context_tokens`` is also the controller's ADMISSION
+    ceiling (MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001): no request
+    to this binding is admitted above it, the preferred window included, so
+    a binding may be served and qualified at a larger window (its runtime
+    identity) than Kriya chooses to fill. It never changes what the runtime
+    is asked to serve and is not part of a qualification record.
+    SECURITY_AUTHORITY under SEC-009: a repository cannot grant itself a
+    larger window."""
 
     mode: str = Field(default="adaptive")
     declared_safe_context_tiers: List[int] = Field(default_factory=list)

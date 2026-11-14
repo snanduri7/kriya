@@ -95,6 +95,7 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
     from kriya.core.model_capabilities import resolve_model_capability_profile
     from kriya.core.model_qualification import assess, measured_limits_for, policy_digest_for, required_capabilities
     from kriya.core.model_runtime import (
+        admission_ceiling,
         binding_output_tokens,
         endpoint_identity,
         resolve_configured_model_runtime,
@@ -150,8 +151,9 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
         streaming=bool(caps.streaming),
         edit_protocol=str(caps.preferred_edit_protocol),
         reasoning=bool(binding.reasoning),
-        # The window requests are budgeted at (never a larger served one).
-        context_window=budget_window(binding.context_window, served_window),
+        # The window requests are budgeted at (never a larger served one,
+        # never above this binding's own admission ceiling).
+        context_window=budget_window(binding.context_window, served_window, admission_ceiling(binding)),
         allocation_window=allocation_window(config, binding),
         output_tokens=int(output),
         context_policy=binding.context_policy.mode,

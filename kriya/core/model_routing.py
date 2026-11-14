@@ -338,14 +338,15 @@ def _served_window(fingerprint: Any, binding: Any) -> Optional[int]:
     """The window a request to the candidate is budgeted at: the one
     requested of it (FALLBACK-CONTEXT-WINDOW-001: an explicit provider option
     wins), bounded by the window the runtime reports serving - never a
-    larger served window (PROVIDER-CONTRACT-001)."""
+    larger served window (PROVIDER-CONTRACT-001), never above the binding's
+    admission ceiling."""
     from kriya.core.inference_runtime import runtime_for_binding
-    from kriya.core.model_runtime import requested_context_window
+    from kriya.core.model_runtime import admission_ceiling, requested_context_window
     from kriya.core.provider_contract import budget_window
 
     return budget_window(requested_context_window(
         getattr(binding, "extra_body", None), getattr(binding, "context_window", None), runtime_for_binding(binding)),
-        getattr(fingerprint, "effective_context_window", None))
+        getattr(fingerprint, "effective_context_window", None), admission_ceiling(binding))
 
 
 def candidate_evidence(config: Any, role: str, model: str, *, order: int, explicit: bool,
@@ -439,7 +440,7 @@ def plan_routes(config: Any, *, mode: Optional[str] = None,
             try:
                 need = _served_window(resolve_configured_model_runtime(config, default.model), default)
             except Exception:
-                need = default.context_window
+                need = _served_window(None, default)
         plan.decisions[role] = choose_route(role, evidence, min_calls=routing.min_calls, min_context_window=need,
                                             table_digest=plan.table_digest, default_model=default.model)
     return plan
