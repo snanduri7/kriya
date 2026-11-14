@@ -423,6 +423,8 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.triage", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.validation_baseline", "kriya.tools.test_execution"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.workflow", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
+    # VERIFIER-SEMANTIC-AUTHORITY-001 (WS3-C): the structural declaration of a run-authored test source (which executed identities a file declares)
+    ("kriya.workflow.verifier_semantic", "kriya.code_intel.parsing"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.workflow", "kriya.code_intel.model"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.workflow", "kriya.control.launch_approval"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.workflow", "kriya.core.completion"): ("P2", _P2),  # non-public PROVIDER module

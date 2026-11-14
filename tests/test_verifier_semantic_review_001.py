@@ -160,6 +160,8 @@ def test_the_pending_review_holds_the_evidence_every_binding_and_its_own_three_w
     pending = outcome["pending"]
     assert pending["kind"] == KIND_VERIFIER_SEMANTIC and pending["status"] == "PENDING" and pending["decision"] is None
     assert pending["candidate_digest"] == pending["semantic_fingerprint"] == subject.fingerprint
+    # the one durable review record also carries what a VALID decision is authority FOR (no phase, no failure identity): there is no second store
+    assert pending["semantic_authority_fingerprint"] == subject.semantic_authority_fingerprint != subject.fingerprint
     assert pending["question"] == policy.VERIFIER_SEMANTIC_QUESTION and pending["notice"] == policy.VERIFIER_SEMANTIC_NOTICE
     assert pending["decisions"] == ["expectation_valid", "expectation_invalid", "cannot_decide"]
     assert pending["verifier_files"] == [{"path": TEST, "sha256": _hex(SOURCE), "source": SOURCE}]
@@ -397,12 +399,14 @@ def test_what_is_only_shown_is_not_in_the_fingerprint_and_a_non_decision_matches
     lambda e: e.__setitem__("verifier_unit_id", "s6"),
     lambda e: e.__setitem__("candidate_digest", "sha256:" + "dd" * 32),
     lambda e: e.__setitem__("semantic_fingerprint", "sha256:" + "dd" * 32),
+    lambda e: e.__setitem__("semantic_authority_fingerprint", "sha256:" + "dd" * 32),
+    lambda e: e.pop("semantic_authority_fingerprint"),
     lambda e: e.__setitem__("kind", KIND_VERIFIER_REPAIR),
     lambda e: e.pop("bindings"),
     lambda e: e.__setitem__("verifier_files", []),
     lambda e: e.pop("invariants"),
 ], ids=["source", "source-digest", "contract", "run", "plan", "failure", "contract-digest", "criterion-text", "invariant-id", "phase", "unit",
-        "candidate-digest", "fingerprint", "kind", "no-bindings", "no-files", "no-invariants"])
+        "candidate-digest", "fingerprint", "authority-fingerprint", "no-authority-fingerprint", "kind", "no-bindings", "no-files", "no-invariants"])
 def test_an_altered_record_is_not_verified(tamper):
     entry = build_pending_verifier_semantic(LID, "identity", 1, _subject())
     assert entry is not None and verifier_semantic_entry_verified(entry)

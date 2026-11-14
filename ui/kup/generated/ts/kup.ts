@@ -1098,9 +1098,13 @@ export interface PendingVerifierSemanticReview {
    */
   candidate_digest: string;
   /**
-   * Digest over every binding of the review.
+   * Digest over every binding of the review EVENT (includes the review phase and, for a failing verifier, the failure identity).
    */
   semantic_fingerprint: string;
+  /**
+   * What an expectation_valid decision is authority for: the exact verifier content under the exact contract (run, plan, verifier unit, verifier path and bytes, goal and contract digests, criteria and invariants). The review phase and failure identity are not in it.
+   */
+  semantic_authority_fingerprint?: string;
   /**
    * Present in a served status: Kriya re-derived the fingerprint from the recorded bindings and re-checked every shown text against its bound digest.
    */

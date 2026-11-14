@@ -192,6 +192,9 @@ def build_pending_verifier_semantic(launch_id: str, workspace_identity_value: st
         "kind": _owner.KIND_VERIFIER_SEMANTIC, "status": STATUS_PENDING, "requested_at": _stamp(requested),
         "expires_at": _stamp(requested + timedelta(seconds=APPROVAL_WAIT_SECONDS)),
         "candidate_digest": digest, "semantic_fingerprint": digest,
+        # WS3-C ruling 1: what an expectation_valid decision on this review is authority FOR (no phase, no failure identity). Carried in the one durable
+        # review record; there is no second store.
+        "semantic_authority_fingerprint": subject.semantic_authority_fingerprint,
         "question": _owner.VERIFIER_SEMANTIC_QUESTION, "notice": _owner.VERIFIER_SEMANTIC_NOTICE,
         "decisions": list(_owner.VERIFIER_SEMANTIC_DECISIONS),
         "verifier_unit_id": subject.verifier_unit_id, "review_phase": subject.review_phase,

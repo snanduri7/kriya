@@ -89,6 +89,7 @@ public class ApprovalHistory {
     private List<Invariant> invariants;
     private String outcome;
     private ReviewPhase reviewPhase;
+    private String semanticAuthorityFingerprint;
     private String semanticFingerprint;
 
     /**
@@ -379,7 +380,18 @@ public class ApprovalHistory {
     public void setReviewPhase(ReviewPhase value) { this.reviewPhase = value; }
 
     /**
-     * Digest over every binding of the review.
+     * What an expectation_valid decision is authority for: the exact verifier content under the
+     * exact contract (run, plan, verifier unit, verifier path and bytes, goal and contract
+     * digests, criteria and invariants). The review phase and failure identity are not in it.
+     */
+    @JsonProperty("semantic_authority_fingerprint")
+    public String getSemanticAuthorityFingerprint() { return semanticAuthorityFingerprint; }
+    @JsonProperty("semantic_authority_fingerprint")
+    public void setSemanticAuthorityFingerprint(String value) { this.semanticAuthorityFingerprint = value; }
+
+    /**
+     * Digest over every binding of the review EVENT (includes the review phase and, for a
+     * failing verifier, the failure identity).
      */
     @JsonProperty("semantic_fingerprint")
     public String getSemanticFingerprint() { return semanticFingerprint; }

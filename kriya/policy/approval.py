@@ -576,10 +576,25 @@ class VerifierSemanticSubject:
         }, separators=(",", ":"), sort_keys=True))
 
     @property
+    def semantic_authority_fingerprint(self) -> str:
+        """WHAT an ``expectation_valid`` decision is authority FOR (WS3-C ruling 1): the exact verifier semantic content under the exact contract - run, plan,
+        verifier unit, verifier source identity and bytes, goal and contract digests, criteria and invariants (id and text). The review phase and the failure
+        identity are NOT in it: they identify the review EVENT (``fingerprint``, which binds the wire, staleness and audit), and a verifier's outcome changing
+        from fail to pass does not change what it expects. Any byte, goal, contract, criterion, invariant, plan, run or source-identity change is another value."""
+        return _sha(json.dumps({
+            "kind": KIND_VERIFIER_SEMANTIC, "purpose": "semantic_authority", "run_id": self.run_id, "plan_hash": self.plan_hash,
+            "verifier_unit_id": self.verifier_unit_id, "verifier_files": [list(pair) for pair in self.verifier_files],
+            "goal_digest": self.goal_digest, "verification_contract_digest": self.verification_contract_digest,
+            "acceptance_criteria": [list(pair) for pair in self.acceptance_criteria], "invariants": [list(pair) for pair in self.invariants],
+        }, separators=(",", ":"), sort_keys=True))
+
+    @property
     def subject_key(self) -> str:
-        """The identity of the verifier SUBJECT across its candidates (run + verifier unit; never the bytes): what the one-regeneration allowance is keyed on, so
-        a regenerated verifier (new bytes, new fingerprint) is the SAME subject and gets no second regeneration."""
-        return _sha(json.dumps({"run_id": self.run_id, "verifier_unit_id": self.verifier_unit_id}, separators=(",", ":"), sort_keys=True))
+        """The identity of the verifier SUBJECT across its candidates: run + verifier unit + the canonical workspace-relative verifier source path(s) - never the
+        bytes. It is what the one-regeneration allowance is keyed on, so a regenerated verifier (new bytes, new fingerprints) is the SAME subject and gets no
+        second regeneration, while another verifier file of the same unit is another subject with its own allowance (WS3-C ruling 2)."""
+        return _sha(json.dumps({"run_id": self.run_id, "verifier_unit_id": self.verifier_unit_id,
+                                "verifier_paths": sorted(path for path, _digest in self.verifier_files)}, separators=(",", ":"), sort_keys=True))
 
 
 def verifier_semantic_reviewable(subject: VerifierSemanticSubject) -> bool:
@@ -710,7 +725,8 @@ def verifier_semantic_entry_verified(entry: Any) -> bool:
             invariants=items("invariants"), review_phase=entry["review_phase"], failure_identity=bindings.get("failure_identity"),
         )
         digest = entry.get("candidate_digest")
-        return isinstance(digest, str) and digest == entry.get("semantic_fingerprint") == subject.fingerprint
+        return (isinstance(digest, str) and digest == entry.get("semantic_fingerprint") == subject.fingerprint
+                and entry.get("semantic_authority_fingerprint") == subject.semantic_authority_fingerprint)
     except (KeyError, TypeError, ValueError):
         return False
 
