@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from kriya.code_intel.parsing import is_structural_path, parse_file
+from kriya.code_intel.service import CandidateOverlay
 from kriya.policy.approval import (
     VerifierSemanticAllowance,
     VerifierSemanticDecision,
@@ -133,14 +133,18 @@ def derive_executed_verifiers(report: Optional[Mapping[str, Any]], authored: Map
     unreadable: List[str] = []
     for raw_path in sorted(authored):
         path = normalize_path(raw_path)
-        if not is_structural_path(path):
-            continue                                   # not a source the parser models: it declares no test callable Kriya can map
         data = authored[raw_path]
         try:
+            # RETRIEVAL's public seam (kriya.code_intel.service): an in-memory overlay of this one file, parsed by the structural parser. Nothing
+            # is indexed or written. One overlay per file, so a file the parser cannot handle never hides what another declares. A path the
+            # parser has no grammar for gets no structure: it declares no test callable Kriya can map. Empty bytes stand in for an unreadable
+            # file only to ask that question.
+            structure = CandidateOverlay({path: data if data is not None else b""}).structures.get(path)
+            if structure is None:
+                continue
             if data is None:
                 raise ValueError("unreadable")
             text = data.decode("utf-8")
-            structure = parse_file(path, data)
             if getattr(structure, "error_count", 0):
                 raise ValueError("parse errors")
         except Exception:  # what the file declares is unknown: reported, never guessed
