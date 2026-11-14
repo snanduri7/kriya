@@ -116,15 +116,29 @@ class GradleBuildAdapter(BuildAdapter):
         """``module`` (a declared Gradle project directory such as ``core`` or ``a/b``) runs that project's ``test``
         task only (``:core:test``); without it the selector names every project's ``test`` task, and a project with
         no match for ``--tests`` fails the build."""
+        from kriya.tools import test_execution
         from kriya.workflow.jvm_module_ownership import gradle_project_path
 
-        tasks = [f"{gradle_project_path(module)}:test" if module else "test"]
+        prefix = f"{gradle_project_path(module)}:" if module else ""
+        tasks = [f"{prefix}test"]
         if test_class:
             tasks.extend(["--tests", test_class])
-        res = v._run_gradle_cmd(self.command(v.workspace_path), tasks, cwd=v.workspace_path)
+        gradle_cmd = self.command(v.workspace_path)
+        res = v._run_gradle_cmd(gradle_cmd, tasks, cwd=v.workspace_path)
         binding = getattr(v, "test_report_binding", None)
         if binding is not None:
             binding.observe(res)  # FS-1A: build/test-results is read after this run
-        return v._validation_result(
+        result = v._validation_result(
             res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res,
         )
+        if res["returncode"] != 0:
+            # JVM-TEST-PHASE-001 (WS3-A): a PASS runs nothing more. ``classes`` / ``testClasses`` are the main and the test source
+            # set's whole compilation (every language and resource step of the set, not only ``compileJava``), through the same
+            # contained, acquisition-aware command, and only when the structured report proves no executed failure.
+            result["test_phase"] = test_execution.classify_failed_jvm_test_run(
+                res, test_execution.collect(binding) if binding is not None else None,
+                run_main_compile=lambda: v._run_gradle_cmd(gradle_cmd, [f"{prefix}classes"], cwd=v.workspace_path),
+                run_test_source_compile=lambda: v._run_gradle_cmd(gradle_cmd, [f"{prefix}testClasses"], cwd=v.workspace_path),
+                propagate=(ContainmentSetupError,),
+            )
+        return result

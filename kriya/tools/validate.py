@@ -1628,6 +1628,8 @@ class PolymorphicValidator:
             for key in ("environment_reason_code", "gradle_distribution"):
                 if command_result.get(key) is not None:
                     result[key] = command_result[key]
+            if command_result.get("acquisition_incomplete") is True:
+                result["acquisition_incomplete"] = True  # JVM-TEST-PHASE-001: typed transport of the acquisition-incomplete marker
             diagnostic = command_result.get("infrastructure_diagnostic")
             if (result.get("environment_reason_code") is None and command_result.get("target_started") is False and isinstance(diagnostic, dict)
                     and diagnostic.get("reason_code") == BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST):
@@ -1769,6 +1771,7 @@ class PolymorphicValidator:
     def _gradle_acquisition_incomplete(self, result: Dict[str, Any], tasks: List[str], why: str, *,
                                        marker: str = "GRADLE_ACQUISITION_INCOMPLETE:") -> Dict[str, Any]:
         marked = dict(result)
+        marked["acquisition_incomplete"] = True  # JVM-TEST-PHASE-001: the typed transport of this fact (see _acquisition_incomplete)
         marked["stderr"] = (
             f"{marker} offline execution for tasks {tasks!r} reports a missing dependency/plugin/distribution: {why} - "
             f"this is a dependency-acquisition gap, not necessarily a defect in the generated code.\n{result.get('stderr', '')}"
@@ -2049,6 +2052,9 @@ class PolymorphicValidator:
         ``MAVEN_ACQUISITION_INCOMPLETE:`` marker callers classify), never as
         a defect of the generated code."""
         marked = dict(result)
+        # JVM-TEST-PHASE-001 (WS3-A): the same fact as the stderr marker below, as a typed field, so a consumer never re-reads the text. It is NOT
+        # stronger evidence than the closed missing-dependency signature classifier that produced it: it only transports that demotion.
+        marked["acquisition_incomplete"] = True
         marked["stderr"] = (
             f"{self._MAVEN_ACQUISITION_INCOMPLETE_MARKER} offline execution for goals {goals!r} "
             f"reports a missing dependency/plugin: {why} - this is a dependency-acquisition gap, "

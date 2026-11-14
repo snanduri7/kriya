@@ -37,7 +37,7 @@ import re
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -538,3 +538,113 @@ def failure_details(result: Any) -> Dict[str, str]:
         if case.detail and case.status in (FAILED, ERROR):
             details.setdefault(case.identity, case.detail)
     return details
+
+
+# --- JVM-TEST-PHASE-001 (WS3-A): which execution phase of a failed JVM test gate failed -------------------------------------
+# A PHASE FACT only. It says where the build stopped; it never says whose source is wrong, who repairs it or which files may
+# change (attribution and mutation authority belong to the workflow's canonical owner, not to an adapter). Positive classes come
+# from invocation identity + started / timeout / return-code facts + the structured test report of the invocation. Build, javac
+# or test OUTPUT TEXT is never read here: text can only DEMOTE upstream (the existing closed dependency/acquisition signature
+# classifier, transported as the typed ``acquisition_incomplete`` fact), never create a positive class.
+TEST_PHASE_RECORD_VERSION = 1
+
+PHASE_TEST = "test"
+PHASE_MAIN_COMPILE = "main_compile"
+PHASE_TEST_SOURCE_COMPILE = "test_source_compile"
+
+TEST_EXECUTION_FAILURE = "TEST_EXECUTION_FAILURE"                # a COMPLETE report of this invocation holds a failed/errored case
+TEST_SOURCE_COMPILE_FAILURE = "TEST_SOURCE_COMPILE_FAILURE"      # main compilation exited 0, test-source compilation did not
+MAIN_COMPILE_FAILURE = "MAIN_COMPILE_FAILURE"                    # the main compilation step did not exit 0
+SEMANTIC_AUTHORITY_REQUIRED = "SEMANTIC_AUTHORITY_REQUIRED"      # no proof of which phase failed, or mixed evidence
+TEST_PHASE_NOT_STARTED = "TEST_PHASE_NOT_STARTED"                # preserved no-verdict categories of the step that hit them
+TEST_PHASE_ENVIRONMENT = "TEST_PHASE_ENVIRONMENT"
+TEST_PHASE_TIMEOUT = "TEST_PHASE_TIMEOUT"
+TEST_PHASE_ACQUISITION_INCOMPLETE = "TEST_PHASE_ACQUISITION_INCOMPLETE"
+
+TEST_PHASE_CLASSES = frozenset({
+    TEST_EXECUTION_FAILURE, TEST_SOURCE_COMPILE_FAILURE, MAIN_COMPILE_FAILURE, SEMANTIC_AUTHORITY_REQUIRED,
+    TEST_PHASE_NOT_STARTED, TEST_PHASE_ENVIRONMENT, TEST_PHASE_TIMEOUT, TEST_PHASE_ACQUISITION_INCOMPLETE,
+})
+
+BASIS_EXECUTED_FAILED_CASE = "COMPLETE_REPORT_WITH_FAILED_CASE"
+BASIS_STEP_FACT = "STEP_FACT"                                    # a started / environment / timeout / acquisition fact of one step
+BASIS_STEP_RETURNCODE = "STEP_RETURNCODE"
+BASIS_REPORT_WITHOUT_AUTHORITATIVE_FAILURE = "REPORTED_CASES_WITHOUT_AUTHORITATIVE_FAILURE"
+BASIS_COMPILE_PHASES_PASSED = "COMPILE_PHASES_PASSED_WITHOUT_EXECUTED_FAILURE"
+BASIS_STEP_RESULT_MALFORMED = "STEP_RESULT_MALFORMED"
+BASIS_LADDER_EXCEPTION = "LADDER_EXCEPTION"
+
+
+def _phase_step(phase: str, result: Any) -> Dict[str, Any]:
+    """The typed facts of one invocation (never its text)."""
+    if not isinstance(result, dict):
+        return {"phase": phase, "returncode": None, "timeout": False, "target_started": None,
+                "environment_reason_code": None, "acquisition_incomplete": False}
+    returncode = result.get("returncode")
+    return {"phase": phase, "returncode": returncode if isinstance(returncode, int) and not isinstance(returncode, bool) else None,
+            "timeout": bool(result.get("timeout")), "target_started": result.get("target_started") is not False,
+            "environment_reason_code": result.get("environment_reason_code") or None,
+            "acquisition_incomplete": result.get("acquisition_incomplete") is True}
+
+
+def _preserved_phase_class(step: Dict[str, Any]) -> Optional[str]:
+    """The no-verdict category a step carries by its own typed facts, or None."""
+    if step["target_started"] is False:
+        return TEST_PHASE_NOT_STARTED
+    if step["environment_reason_code"]:
+        return TEST_PHASE_ENVIRONMENT
+    if step["timeout"]:
+        return TEST_PHASE_TIMEOUT
+    if step["acquisition_incomplete"]:
+        return TEST_PHASE_ACQUISITION_INCOMPLETE
+    return None
+
+
+def classify_failed_jvm_test_run(
+    test_result: Any, report: Optional[TestExecutionReport], *,
+    run_main_compile: Callable[[], Any], run_test_source_compile: Callable[[], Any],
+    propagate: Tuple[type, ...] = (),
+) -> Dict[str, Any]:
+    """The phase record of a JVM test invocation that did NOT exit 0 (callers never call this for a passing run).
+
+    ``report`` is the structured report of exactly that invocation (None = none bound). The two callables are the adapter's
+    diagnostic invocations (same candidate tree, module selection, containment and acquisition path as the test run); they are
+    called only when the test run itself proves nothing: main compilation first, test-source compilation only after main
+    compilation exited 0. An exception of a diagnostic step is "no proof" (logged with its traceback); the exception types
+    in ``propagate`` (a containment setup failure) are re-raised, never classified."""
+    steps: List[Dict[str, Any]] = [_phase_step(PHASE_TEST, test_result)]
+
+    def record(phase_class: str, basis: str) -> Dict[str, Any]:
+        return {"version": TEST_PHASE_RECORD_VERSION, "phase_class": phase_class, "basis": basis,
+                "ladder_ran": len(steps) > 1, "steps": steps}
+
+    if steps[0]["returncode"] is None:
+        return record(SEMANTIC_AUTHORITY_REQUIRED, BASIS_STEP_RESULT_MALFORMED)
+    preserved = _preserved_phase_class(steps[0])
+    if preserved is not None:
+        return record(preserved, BASIS_STEP_FACT)
+    cases = list(report.cases) if report is not None else []
+    if cases:
+        if report is not None and report.complete and any(case.status in (FAILED, ERROR) for case in cases):
+            return record(TEST_EXECUTION_FAILURE, BASIS_EXECUTED_FAILED_CASE)
+        # cases ran (or were reported) but nothing authoritative failed while the process did: mixed evidence, never guessed.
+        return record(SEMANTIC_AUTHORITY_REQUIRED, BASIS_REPORT_WITHOUT_AUTHORITATIVE_FAILURE)
+    for phase, run, failed_class in ((PHASE_MAIN_COMPILE, run_main_compile, MAIN_COMPILE_FAILURE),
+                                     (PHASE_TEST_SOURCE_COMPILE, run_test_source_compile, TEST_SOURCE_COMPILE_FAILURE)):
+        try:
+            step = _phase_step(phase, run())
+        except propagate:
+            raise
+        except Exception:  # a coding error must stay visible; the class is "no proof", never a guess
+            logger.error("JVM test-phase diagnostic step %s raised; no phase is claimed", phase, exc_info=True)
+            steps.append({**_phase_step(phase, None), "raised": True})
+            return record(SEMANTIC_AUTHORITY_REQUIRED, BASIS_LADDER_EXCEPTION)
+        steps.append(step)
+        if step["returncode"] is None:
+            return record(SEMANTIC_AUTHORITY_REQUIRED, BASIS_STEP_RESULT_MALFORMED)
+        preserved = _preserved_phase_class(step)
+        if preserved is not None:
+            return record(preserved, BASIS_STEP_FACT)
+        if step["returncode"] != 0:
+            return record(failed_class, BASIS_STEP_RETURNCODE)
+    return record(SEMANTIC_AUTHORITY_REQUIRED, BASIS_COMPILE_PHASES_PASSED)

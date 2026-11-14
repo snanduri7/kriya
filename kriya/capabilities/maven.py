@@ -234,6 +234,8 @@ class MavenBuildAdapter(BuildAdapter):
         (``-am``, so a sibling is built from the reactor, not looked up in a local repository that may not hold it); the
         class filter then matches nowhere else, which must not fail the upstream modules
         (``-Dsurefire.failIfNoSpecifiedTests=false``; ``-DfailIfNoTests=false`` for older surefire)."""
+        from kriya.tools import test_execution
+
         goals = ["test"]
         if module:
             goals.extend(["-pl", module, "-am", "-Dsurefire.failIfNoSpecifiedTests=false", "-DfailIfNoTests=false"])
@@ -243,6 +245,18 @@ class MavenBuildAdapter(BuildAdapter):
         binding = getattr(v, "test_report_binding", None)
         if binding is not None:
             binding.observe(res)  # FS-1A: Surefire's reports are read after this run
-        return v._validation_result(
+        result = v._validation_result(
             res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res,
         )
+        if res["returncode"] != 0:
+            # JVM-TEST-PHASE-001 (WS3-A): a PASS runs nothing more. A failed run gets the typed phase record; the two diagnostic
+            # invocations (never ``clean``: this invocation's Surefire reports are still to be read) run through the same contained,
+            # acquisition-aware command and only when the structured report proves no executed failure.
+            selection = ["-pl", module, "-am"] if module else []
+            result["test_phase"] = test_execution.classify_failed_jvm_test_run(
+                res, test_execution.collect(binding) if binding is not None else None,
+                run_main_compile=lambda: v._run_maven_cmd(["compile", *selection], cwd=v.workspace_path, timeout=300),
+                run_test_source_compile=lambda: v._run_maven_cmd(["test-compile", *selection], cwd=v.workspace_path, timeout=300),
+                propagate=(ContainmentSetupError,),
+            )
+        return result
