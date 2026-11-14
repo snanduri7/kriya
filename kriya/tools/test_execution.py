@@ -178,7 +178,10 @@ class ReportBinding:
             return
         self.observed = True
         self.exit_code = process_result.get("returncode", process_result.get("exit_code"))
-        self.timed_out = bool(process_result.get("timed_out"))
+        # JVM-TEST-REPORT-TIMEOUT-KEY-001: the command result's one canonical field is ``timeout`` (ProcessResult.to_dict, what every
+        # caller passes). ``timed_out`` is the runtime-verification GATE result's field and never reaches here; reading it made a
+        # timed-out JVM run with partial reports COMPLETE.
+        self.timed_out = bool(process_result.get("timeout"))
         # REG-R1: the raw streams, kept apart (the gate output joins them).
         stdout, stderr = process_result.get("stdout"), process_result.get("stderr")
         self.stdout = stdout if isinstance(stdout, str) else None

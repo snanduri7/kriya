@@ -215,6 +215,39 @@ def test_the_record_names_no_owner_defect_or_repair_and_holds_no_text(tmp_path, 
         assert not any(isinstance(value, str) and ("VTest" in value or "Ledger" in value) for value in step.values())
 
 
+# --- JVM-TEST-REPORT-TIMEOUT-KEY-001: a timed-out run's partial report is never COMPLETE evidence ------------------------------
+
+def _canonical(returncode, timeout):
+    """The command result exactly as the canonical producer shapes it (``_run_cmd_with_timeout`` returns ``ProcessResult.to_dict()``)."""
+    from kriya.tools.process import ProcessResult
+
+    return ProcessResult(returncode=returncode, stdout="", stderr="", timeout=timeout).to_dict()
+
+
+def test_the_canonical_command_result_names_its_timeout_field_timeout():
+    shape = _canonical(-1, True)
+    assert shape["timeout"] is True and "timed_out" not in shape
+
+
+@both
+def test_a_timed_out_run_with_a_partial_failed_report_is_indeterminate(tmp_path, system):
+    """The measured defect: the binding read ``timed_out``, the command result says ``timeout``, so the partial report of a run
+    that never completed was COMPLETE. The partial cases stay as diagnostic evidence; they establish nothing."""
+    result, calls = _run(tmp_path, system, {"test": _canonical(-1, True)}, report=_suite(FAILED_CASE, failures=1))
+    execution = result["test_execution"]
+    assert (execution["completeness"], execution["reason"]) == (te.INDETERMINATE, "GATE_TIMED_OUT")
+    assert [case["status"] for case in execution["test_cases"]] == [te.FAILED]
+    assert result["success"] is False and result["test_phase"]["phase_class"] == te.TEST_PHASE_TIMEOUT and len(calls) == 1
+
+
+@both
+@pytest.mark.parametrize("returncode,case,counts,success", [(1, FAILED_CASE, {"failures": 1}, False), (0, PASSED_CASE, {}, True)])
+def test_a_completed_run_keeps_its_complete_report(tmp_path, system, returncode, case, counts, success):
+    result, _ = _run(tmp_path, system, {"test": _canonical(returncode, False)}, report=_suite(case, **counts))
+    execution = result["test_execution"]
+    assert (execution["completeness"], execution["reason"], result["success"]) == (te.COMPLETE, None, success)
+
+
 # --- module selection and the typed acquisition transport ----------------------------------------------------------------------
 
 def test_the_diagnostic_steps_keep_the_module_selection(tmp_path):

@@ -237,20 +237,22 @@ def test_a_stale_jvm_report_is_cleared_and_only_this_runs_reports_are_read(tmp_p
 
     binding = test_execution.prepare(str(tmp_path), runner)
     assert binding.cleared_reports == 1 and not list(directory.iterdir())
-    binding.observe({"returncode": 0, "timed_out": False})            # the run wrote no report
+    binding.observe({"returncode": 0, "timeout": False})              # the run wrote no report
     missing = test_execution.collect(binding)
     assert missing.completeness == INDETERMINATE and missing.reason == "STRUCTURED_REPORT_MISSING"
 
     binding = test_execution.prepare(str(tmp_path), runner)
     (directory / "TEST-a.b.CalcTest.xml").write_bytes(_surefire([("adds", "")]))   # this run's own report
-    binding.observe({"returncode": 0, "timed_out": False})
+    binding.observe({"returncode": 0, "timeout": False})
     fresh = test_execution.collect(binding)
     assert fresh.complete and [c.identity for c in fresh.cases] == ["a.b.CalcTest.adds"]
 
 
 @pytest.mark.parametrize("adapter", [MAVEN, GRADLE])
 def test_the_jvm_adapters_record_the_test_process_on_the_binding(tmp_path, adapter):
-    process = {"returncode": 1, "stdout": "", "stderr": "", "timed_out": True}
+    # JVM-TEST-REPORT-TIMEOUT-KEY-001: the canonical command-result shape (ProcessResult.to_dict: ``timeout``). This test used a hand-made
+    # ``timed_out`` key that no producer emits, which is how the binding came to read the wrong field.
+    process = {"returncode": 1, "stdout": "", "stderr": "", "timeout": True}
     binding = test_execution.ReportBinding(gate_id="g", runner=adapter.build_system, workspace=str(tmp_path))
     v = SimpleNamespace(workspace_path=str(tmp_path), test_report_binding=binding,
                         _run_maven_cmd=lambda *a, **k: process, _run_gradle_cmd=lambda *a, **k: process,
