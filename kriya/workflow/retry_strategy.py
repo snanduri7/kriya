@@ -62,6 +62,7 @@ from kriya.workflow.failure_grounding import (
     extract_error_search_terms,
     grounded_evidence_excerpt,
     resolve_repository_locator_files,
+    resolve_unique_locator_artifacts,
 )
 from kriya.workflow.file_resolution import (
     IncompleteGenerationError,
@@ -524,7 +525,9 @@ async def _generated_verifier_ruling(state: GenerationState, ctx, failure: Failu
 
     ruling = await unit.on_gate_failure(
         written=sorted(state.all_files_written), failure_type=failure.type, outcome=failure.raw_output or failure.message or "",
-        located_paths=[location.filepath for location in failure.file_locations],
+        # mutation-grade identity: the locators resolved against the candidate tree's members, unique or not at all (never
+        # failure.file_locations, which lists every written file that shares a basename)
+        locate=lambda: resolve_unique_locator_artifacts(failure.raw_output or failure.message or "", ctx.worktree_path),
         is_workspace_artifact=lambda path: os.path.isfile(os.path.join(ctx.worktree_path, path)), owners_of=owners_of)
     if ruling.unchanged:
         return None

@@ -73,12 +73,13 @@ REVIEW_REASON_CODES = (REASON_UNATTENDED, REASON_NO_DECISION, REASON_CANNOT_DECI
 OWNER_SELECTED = "PRODUCTION_OWNER_SELECTED"
 OWNER_NO_EXECUTED_FAILURE = "PRODUCTION_OWNER_NO_EXECUTED_FAILURE"
 OWNER_LOCATOR_ABSENT = "PRODUCTION_OWNER_LOCATOR_ABSENT"
+OWNER_LOCATOR_AMBIGUOUS = "PRODUCTION_OWNER_LOCATOR_AMBIGUOUS"       # a locator matches more than one workspace member: it identifies none
 OWNER_LOCATOR_VERIFIER_ONLY = "PRODUCTION_OWNER_LOCATOR_VERIFIER_ONLY"
 OWNER_LOCATOR_EXTERNAL = "PRODUCTION_OWNER_LOCATOR_NOT_A_WORKSPACE_ARTIFACT"
 OWNER_UNOWNED = "PRODUCTION_OWNER_ARTIFACT_HAS_NO_PLAN_OWNER"
 OWNER_AMBIGUOUS = "PRODUCTION_OWNER_AMBIGUOUS"
 OWNER_CONFLICTING = "PRODUCTION_OWNER_CONFLICTING_EVIDENCE"
-OWNER_REASON_CODES = (OWNER_SELECTED, OWNER_NO_EXECUTED_FAILURE, OWNER_LOCATOR_ABSENT, OWNER_LOCATOR_VERIFIER_ONLY, OWNER_LOCATOR_EXTERNAL, OWNER_UNOWNED,
+OWNER_REASON_CODES = (OWNER_SELECTED, OWNER_NO_EXECUTED_FAILURE, OWNER_LOCATOR_ABSENT, OWNER_LOCATOR_AMBIGUOUS, OWNER_LOCATOR_VERIFIER_ONLY, OWNER_LOCATOR_EXTERNAL, OWNER_UNOWNED,
                       OWNER_AMBIGUOUS, OWNER_CONFLICTING)
 
 
@@ -271,17 +272,21 @@ class OwnerAuthority:
 def production_owner_authority(
     *, executed_failure: bool, located_paths: Sequence[str], verifier_paths: Iterable[str],
     is_workspace_artifact: Callable[[str], bool], owners_of: Callable[[str], Sequence[str]], conflicting_owner_ids: Iterable[str] = (),
+    ambiguous_locators: Iterable[str] = (),
 ) -> OwnerAuthority:
     """The stricter predicate of the generated-verifier path (WS3-C ruling 3). A locator alone is grounding, never owner authority. A production owner is
     selected only when: typed evidence proves an executed verifier failure; the deterministic locator names at least one concrete workspace artifact that
     is not a verifier; every such artifact maps through the validated plan's ownership to the SAME single owner; and no other deterministic attribution
     evidence names a different owner. Anything else selects nobody.
 
-    ``located_paths``: workspace-relative paths the deterministic locator parsed from the gate's actual runtime/compiler evidence (never a model's
-    diagnosis, never a file-name guess). ``owners_of(path)``: the plan unit ids that own it. ``conflicting_owner_ids``: owners named by other
+    ``located_paths``: CANONICAL workspace-relative member paths the gate's own locators UNIQUELY identify (``failure_grounding.
+    resolve_unique_locator_artifacts``: never a model's diagnosis, never every file that shares a basename). ``ambiguous_locators``: locators that
+    match more than one workspace member; one is enough to select nobody, because what the failure points at is then not known. ``owners_of(path)``: the plan unit ids that own it. ``conflicting_owner_ids``: owners named by other
     deterministic attribution evidence."""
     if not executed_failure:
         return OwnerAuthority(OWNER_NO_EXECUTED_FAILURE)
+    if any(True for _locator in ambiguous_locators):
+        return OwnerAuthority(OWNER_LOCATOR_AMBIGUOUS)
     located = [normalize_path(path) for path in located_paths if path]
     if not located:
         return OwnerAuthority(OWNER_LOCATOR_ABSENT)
@@ -441,8 +446,11 @@ class UnitSemantics:
         return GateRuling(regenerate=verifier.path)
 
     # -- the failure seam (before the ordinary retry may choose targets)
-    async def on_gate_failure(self, *, written: Iterable[str], failure_type: str, outcome: str, located_paths: Sequence[str],
+    async def on_gate_failure(self, *, written: Iterable[str], failure_type: str, outcome: str,
+                              locate: Callable[[], Tuple[Sequence[str], Sequence[str]]],
                               is_workspace_artifact: Callable[[str], bool], owners_of: Callable[[str], Sequence[str]]) -> GateRuling:
+        """``locate``: the gate's locators as (uniquely resolved canonical member paths, ambiguous locators); called only when an accepted
+        verifier's failure needs a production owner."""
         written = list(written)
         if failure_type == REGENERATE_FAILURE_TYPE and self.pending is not None:
             return GateRuling(regenerate=self.pending[0])            # decided at the pass seam: the retry loop only has to start it
@@ -464,9 +472,10 @@ class UnitSemantics:
             if decision.action is Action.REGENERATE_VERIFIER:
                 return self._regeneration(decision, verifier)
             self.denied.add(verifier.path)                           # expectation_valid: these exact bytes stay as they are
+        located_paths, ambiguous_locators = locate()
         owner = production_owner_authority(
             executed_failure=True, located_paths=located_paths, verifier_paths=[verifier.path for verifier in verifiers],
-            is_workspace_artifact=is_workspace_artifact, owners_of=owners_of)
+            is_workspace_artifact=is_workspace_artifact, owners_of=owners_of, ambiguous_locators=ambiguous_locators)
         if not owner.selected:
             return self._stop(REASON_NO_PRODUCTION_OWNER, failing[0].path,
                               f"the expectation is valid, and no production owner has authority to be repaired from this failure: {owner.reason_code}")

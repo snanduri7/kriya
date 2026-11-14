@@ -1305,6 +1305,68 @@ def find_locator_files_outside_known_scope(error_text: str, known_files: Iterabl
     return sorted(basenames - known_basenames)
 
 
+LOCATOR_MEMBER_SCAN_BOUND_EXCEEDED = "<workspace member scan bound exceeded>"
+# The one set both locator resolvers below hand to candidate_member_paths: it prunes ONLY the parked root classes' legacy walk (a Git-backed
+# root is listed from its canonical bound tree and ignores it). Unchanged values, moved from resolve_repository_locator_files.
+_PARKED_ROOT_PRUNED_DIRECTORIES = frozenset({
+    ".git", ".kriya", ".pytest_cache", "__pycache__", "node_modules",
+    "target", "build", "dist", ".venv", "venv",
+})
+
+
+def resolve_unique_locator_artifacts(error_text: str, workspace_path: str, *, max_files_scanned: int = 20_000) -> Tuple[List[str], List[str]]:
+    """Locator evidence as MUTATION-GRADE artifact identity (VERIFIER-SEMANTIC-AUTHORITY-001, owner ruling 2026-11-14): ``(the canonical
+    workspace-relative member paths the gate's own locators uniquely identify, the locators that match more than one member)``.
+
+    ``_resolve_file_locations`` reduces every locator to a basename and returns EVERY known file sharing it: right for showing source context,
+    not for deciding whose file may be repaired. Here a locator resolves only against the candidate tree's authoritative members
+    (``candidate_member_paths``: the canonical bound tree of a Git-backed root), never a subset the unit wrote:
+    - a locator that carries a path (the javac shape) resolves to the member it equals, or the ONE member it ends with (a container prefix such
+      as ``/kriya/workspace/`` is not part of the member path);
+    - a bare file name (a JVM stack frame) resolves only when exactly ONE member has that name;
+    - no member matches: nothing (a JDK or library frame is not a workspace artifact);
+    - more than one member matches: ambiguous - reported, never resolved by order, by line number or by which file the unit wrote.
+    A tree too large to scan within the bound resolves nothing and reports the bound as ambiguity."""
+    raw_locators: List[str] = []
+    for match in _ERROR_LOCATION_PATTERN.finditer(error_text or ""):
+        raw = (match.group("jc_file") or match.group("jt_file") or match.group("py_file") or match.group("pc_file") or match.group("ps_file"))
+        raw = raw.replace("\\", "/")
+        if raw not in raw_locators:
+            raw_locators.append(raw)
+    if not raw_locators:
+        return [], []
+    wanted = {os.path.basename(raw) for raw in raw_locators}
+    by_basename: Dict[str, List[str]] = {}
+    scanned = 0
+    for relative in candidate_member_paths(workspace_path, _PARKED_ROOT_PRUNED_DIRECTORIES):
+        scanned += 1
+        if scanned > max_files_scanned:
+            return [], [LOCATOR_MEMBER_SCAN_BOUND_EXCEEDED]
+        member = relative.replace("\\", "/")
+        if os.path.basename(member) not in wanted:
+            continue
+        full_path = os.path.join(workspace_path, relative)
+        if os.path.isfile(full_path) and not os.path.islink(full_path):
+            by_basename.setdefault(os.path.basename(member), []).append(member)
+    resolved: List[str] = []
+    ambiguous: List[str] = []
+    for raw in raw_locators:
+        members = sorted(set(by_basename.get(os.path.basename(raw), ())))
+        if "/" in raw:
+            exact = [member for member in members if member == raw]
+            members = exact or [member for member in members if raw.endswith("/" + member)]
+            if len(members) > 1:
+                # nested suffixes of one reported path (``a/X.java`` and ``X.java`` both end ``/w/a/X.java``): which root the path was reported
+                # under is not known here, so the path identifies none of them
+                ambiguous.append(raw)
+                continue
+        if len(members) == 1:
+            resolved.append(members[0])
+        elif len(members) > 1:
+            ambiguous.append(raw)
+    return sorted(set(resolved)), sorted(set(ambiguous))
+
+
 def resolve_repository_locator_files(
     error_text: str,
     workspace_path: str,
@@ -1327,10 +1389,7 @@ def resolve_repository_locator_files(
     if not unresolved:
         return []
 
-    excluded_dirs = {
-        ".git", ".kriya", ".pytest_cache", "__pycache__", "node_modules",
-        "target", "build", "dist", ".venv", "venv",
-    }
+    excluded_dirs = _PARKED_ROOT_PRUNED_DIRECTORIES
     matches: Dict[str, List[str]] = {basename: [] for basename in unresolved}
     scanned = 0
     # W3-3 unit U1: a Git-backed candidate's files are its canonical bound tree (a tracked ``build/`` source is a member, a git-ignored output is not; a tree Git

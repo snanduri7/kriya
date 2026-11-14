@@ -254,7 +254,7 @@ def test_everything_but_a_bound_valid_or_invalid_decision_changes_nothing_and_is
 
 def test_the_closed_reason_tables():
     assert len(set(vs.REVIEW_REASON_CODES)) == len(vs.REVIEW_REASON_CODES) == 12   # slice 2: -1 (the compile-phase rule), +4 (regeneration, full set)
-    assert len(set(vs.OWNER_REASON_CODES)) == len(vs.OWNER_REASON_CODES) == 8
+    assert len(set(vs.OWNER_REASON_CODES)) == len(vs.OWNER_REASON_CODES) == 9   # +1: a locator that matches more than one workspace member
     assert [a.value for a in Action] == ["proceed", "ask", "regenerate_verifier", "needs_review"]
 
 

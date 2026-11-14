@@ -459,6 +459,9 @@ def test_expectation_valid_with_a_strict_production_owner_repairs_production_onl
     assert (ruling["action"], ruling["owner_id"], ruling["owner_files"]) == ("repair_production_owner", "s1", [JLIB])
     repair = [record for record in scene.scopes if record["during"][0] != record["before"][0]]
     assert repair and all(record["during"][0] == [JLIB] for record in repair), "the accepted verifier was write-denied during the production repair"
+    # removed from the mutation targets only: the verifier stays in the candidate tree, byte for byte, and keeps executing in the gates
+    after_repair = [tree for tree in scene.gate_trees if tree[JLIB] == _jlib(20)]
+    assert len(after_repair) >= 2 and all(tree[JTEST] == _jtest(20) for tree in after_repair), "candidate gate and terminal regression ran it"
 
 
 # ------------------------------------------------------------------ F. side routes
@@ -529,7 +532,7 @@ def _direct_unit(answer: str) -> Any:
 
 def _direct_failure(unit: Any, located: List[str]) -> Any:
     return asyncio.run(unit.on_gate_failure(
-        written=[LIB, TEST], failure_type="targeted_test", outcome="assert 20 == 10", located_paths=located,
+        written=[LIB, TEST], failure_type="targeted_test", outcome="assert 20 == 10", locate=lambda: (located, []),
         is_workspace_artifact=lambda path: True, owners_of=lambda path: []))
 
 
@@ -591,7 +594,7 @@ def _unit(files: Dict[str, bytes], answer: Optional[str] = None, **over: Any) ->
 
 
 def _fail(unit: Any, located: List[str], owners: Any = lambda path: ["s1"]) -> Any:
-    return asyncio.run(unit.on_gate_failure(written=[LIB, TEST], failure_type="targeted_test", outcome="x", located_paths=located,
+    return asyncio.run(unit.on_gate_failure(written=[LIB, TEST], failure_type="targeted_test", outcome="x", locate=lambda: (located, []),
                                             is_workspace_artifact=lambda path: True, owners_of=owners))
 
 
@@ -637,29 +640,6 @@ def test_a_locator_inside_the_verifier_itself_is_never_a_production_locator():
     selected.observe({"success": False, "test_execution": _report("failed")})
     chosen = _fail(selected, [LIB, TEST])
     assert chosen.owner.selected and chosen.owner.files == (LIB,) and selected.denied == {TEST}
-
-
-def test_a_selected_owner_without_an_allow_list_scope_is_needs_review(tmp_path):
-    """The failure seam itself: the accepted verifier can only be write-denied under an allow-list scope."""
-    from kriya.policy.filesystem import WriteScopeMode
-    from kriya.workflow import retry_strategy
-    from kriya.workflow.failure import Failure, FileLocation
-    from kriya.workflow.state import GenerationState
-
-    (tmp_path / LIB).write_text(LIB_20)
-    plan = _plan()
-    for mode, stopped in ((WriteScopeMode.ALLOWLIST, False), (WriteScopeMode.UNRESTRICTED, True)):
-        unit = _unit({TEST: _test(10).encode(), LIB: LIB_20.encode()}, "expectation_valid")
-        unit.observe({"success": False, "test_execution": _report("failed")})
-        state = GenerationState()
-        state.all_files_written = {LIB, TEST} if isinstance(state.all_files_written, set) else [LIB, TEST]
-        ctx = SimpleNamespace(verifier_semantic=unit, structured_plan=plan, worktree_path=str(tmp_path), write_scope_mode=mode)
-        failure = Failure(type="targeted_test", message="x", raw_output="x", file_locations=[FileLocation(filepath=LIB, line=2)])
-        ruling = asyncio.run(retry_strategy._generated_verifier_ruling(state, ctx, failure))
-        if stopped:
-            assert ruling.stop.reason_code == vs.REASON_NO_PRODUCTION_OWNER and state.environment_failure.startswith("VERIFIER_SEMANTIC_AUTHORITY_REQUIRED:")
-        else:
-            assert ruling.owner.selected and ruling.owner.owner_id == "s1" and state.environment_failure is None
 
 
 @pytest.mark.parametrize("budgets, expect_stop", [({}, False), ({"targeted_retry_count": 3}, True)])
@@ -740,3 +720,141 @@ def test_a_ruled_failure_is_never_handed_to_failure_attribution(tmp_path, monkey
 
     Scene(lib=[LIB_20], test=[_test(10)], gate=unreported).run(tmp_path / "unruled", mode="guardrails")
     assert asked and set(asked) <= {"targeted_test", "test"}, asked
+
+
+# ------------------------------------------------------------------ locator identity: a production owner needs a UNIQUELY resolved member
+# (owner ruling 2026-11-14 "ONE NEW AUTHORITY GAP": MEASURED before the fix - a bare `Parser.java` frame with src/a/Parser.java and
+# src/b/Parser.java selected an owner over BOTH files, a full javac path was reduced to its basename, and uniqueness was judged only among the
+# files the unit wrote.)
+
+PA, PB, PT = "src/a/Parser.java", "src/b/Parser.java", "src/test/java/t/ParserTest.java"
+PARSER_TEST = "package t;\n\nclass ParserTest {\n    void parses() { }\n}\n"
+FRAME_A = "java.lang.IllegalStateException: bad token\n\tat a.Parser.parse(Parser.java:4)\n\tat t.ParserTest.parses(ParserTest.java:4)\n"
+JDK_FRAME = "\tat java.base/java.nio.HeapByteBuffer.putLong(HeapByteBuffer.java:498)\n"
+
+
+def _parser_plan(owner_of_b: str = "s1") -> EngineeringPlan:
+    def unit(sid: str, paths: List[str]) -> Dict[str, Any]:
+        return {"id": sid, "description": f"write {paths}", "execution_method": "model", "provides": [sid],
+                "planned_files": [{"path": path, "action": "create"} for path in paths], "relevant_global_invariant_ids": ["gi1"],
+                "verification": [{"type": "tool", "tool_name": "test", "description": "test"}]}
+    units = [unit("s1", [PA, PT] + ([PB] if owner_of_b == "s1" else []))] + ([unit("s2", [PB])] if owner_of_b != "s1" else [])
+    return EngineeringPlan.model_validate({"plan_id": "p", "kind": "task", "global_invariants": [{"id": "gi1", "statement": "x"}],
+                                           "acceptance_criteria": [], "subtasks": units})
+
+
+def _owner_ruling(tmp_path: Path, output: str, *, members: List[str], written: Optional[List[str]] = None, owner_of_b: str = "s1",
+                  scope: Any = None) -> Any:
+    """The REAL failure seam (retry_strategy._generated_verifier_ruling) on a real workspace tree: the run-authored verifier failed, a person
+    accepted its expectation, and the gate's own output is all the locator evidence there is."""
+    from kriya.policy.filesystem import WriteScopeMode
+    from kriya.workflow import retry_strategy
+    from kriya.workflow.failure import Failure
+    from kriya.workflow.state import GenerationState
+
+    for member in members:
+        (tmp_path / member).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / member).write_text(PARSER_TEST if member == PT else f"// {member}\n")
+    unit = _unit({member: (tmp_path / member).read_bytes() for member in members}, "expectation_valid")
+    unit.observe({"success": False, "test_execution": _report("failed", "t.ParserTest.parses")})
+    state = GenerationState()
+    state.all_files_written = type(state.all_files_written)(written or [path for path in members if path != "lib/Other.java"])
+    ctx = SimpleNamespace(verifier_semantic=unit, structured_plan=_parser_plan(owner_of_b), worktree_path=str(tmp_path),
+                          write_scope_mode=scope or WriteScopeMode.ALLOWLIST)
+    failure = Failure(type="targeted_test", message=output, raw_output=output)
+    return asyncio.run(retry_strategy._generated_verifier_ruling(state, ctx, failure)), state
+
+
+def _selects(ruling: Any) -> Any:
+    return (ruling.owner.owner_id, ruling.owner.files) if ruling.owner is not None else ruling.stop.detail.rsplit(": ", 1)[-1]
+
+
+@pytest.mark.parametrize("output", [
+    "[ERROR] /kriya/workspace/src/a/Parser.java:[4,10] cannot find symbol\n",      # a container-rooted path: ends with exactly one member
+    "[ERROR] src/a/Parser.java:[4,10] cannot find symbol\n",                        # the member's own relative path
+    "[ERROR] ./src/a/Parser.java:[4,10] cannot find symbol\n",
+])
+def test_a_locator_that_carries_a_path_is_grounded_to_that_member_even_when_the_basename_is_shared(tmp_path, output):
+    ruling, _state = _owner_ruling(tmp_path, output, members=[PA, PB, PT])
+    assert _selects(ruling) == ("s1", (PA,)), "A, not every Parser.java"
+
+
+@pytest.mark.parametrize("owner_of_b", ["s1", "s2"])
+def test_a_bare_file_name_that_two_members_share_selects_nobody(tmp_path, owner_of_b):
+    """Before the fix the same-owner case SELECTED s1 with both files. The line number never breaks the tie."""
+    ruling, state = _owner_ruling(tmp_path, FRAME_A, members=[PA, PB, PT], owner_of_b=owner_of_b)
+    assert _selects(ruling) == "PRODUCTION_OWNER_LOCATOR_AMBIGUOUS" and ruling.stop.reason_code == vs.REASON_NO_PRODUCTION_OWNER
+    assert state.environment_failure.startswith("VERIFIER_SEMANTIC_AUTHORITY_REQUIRED:")
+
+
+def test_uniqueness_is_over_the_workspace_members_not_over_the_files_the_unit_wrote(tmp_path):
+    """Before the fix a pre-existing src/b/Parser.java the unit did not write was invisible, and the frame 'uniquely' named the written one."""
+    ruling, _state = _owner_ruling(tmp_path, FRAME_A, members=[PA, PB, PT], written=[PA, PT], owner_of_b="s2")
+    assert _selects(ruling) == "PRODUCTION_OWNER_LOCATOR_AMBIGUOUS"
+
+
+def test_a_bare_file_name_with_exactly_one_member_resolves_to_its_canonical_path(tmp_path):
+    ruling, state = _owner_ruling(tmp_path, JDK_FRAME + FRAME_A, members=[PA, PT, "lib/Other.java"])
+    assert _selects(ruling) == ("s1", (PA,)) and state.environment_failure is None, "the JDK frame matches no member and is not evidence"
+
+
+@pytest.mark.parametrize("output, reason", [
+    ("org.opentest4j.AssertionFailedError: expected 1\n\tat t.ParserTest.parses(ParserTest.java:4)\n", "PRODUCTION_OWNER_LOCATOR_VERIFIER_ONLY"),
+    (JDK_FRAME, "PRODUCTION_OWNER_LOCATOR_ABSENT"),                                              # only an external frame
+    ("[ERROR] /usr/lib/jvm/src/a/Other/Parser.java:[4,10] cannot find symbol\n", "PRODUCTION_OWNER_LOCATOR_ABSENT"),   # a path that is no member
+    ("assert 20 == 10\n", "PRODUCTION_OWNER_LOCATOR_ABSENT"),                                    # no locator at all (every Python assertion)
+])
+def test_a_verifier_only_external_or_absent_locator_selects_no_production_owner(tmp_path, output, reason):
+    ruling, _state = _owner_ruling(tmp_path, output, members=[PA, PT])
+    assert _selects(ruling) == reason
+
+
+def test_a_located_file_the_plan_gives_no_owner_or_another_owner_is_handled_by_the_strict_predicate(tmp_path):
+    unowned, _ = _owner_ruling(tmp_path / "unowned", "\tat x.Other.go(Other.java:2)\n" + FRAME_A.split("\n")[2] + "\n", members=[PA, PT, "lib/Other.java"])
+    assert _selects(unowned) == "PRODUCTION_OWNER_ARTIFACT_HAS_NO_PLAN_OWNER"
+    two, _ = _owner_ruling(tmp_path / "two", "\tat a.Parser.parse(Parser.java:4)\n\tat b.Lexer.next(Lexer.java:2)\n",
+                           members=[PA, PT, PB.replace("Parser", "Lexer")], owner_of_b="s2")
+    assert _selects(two) in ("PRODUCTION_OWNER_AMBIGUOUS", "PRODUCTION_OWNER_ARTIFACT_HAS_NO_PLAN_OWNER")
+
+
+def test_conflicting_deterministic_evidence_or_any_ambiguous_locator_selects_nobody_at_the_predicate():
+    def decide(**over: Any) -> str:
+        return vs.production_owner_authority(**{**dict(executed_failure=True, located_paths=[PA], verifier_paths=[PT],
+                                                       is_workspace_artifact=lambda path: True, owners_of=lambda path: ["s1"]), **over}).reason_code
+    assert decide() == vs.OWNER_SELECTED
+    assert decide(conflicting_owner_ids=["s2"]) == "PRODUCTION_OWNER_CONFLICTING_EVIDENCE"
+    assert decide(ambiguous_locators=["Parser.java"]) == "PRODUCTION_OWNER_LOCATOR_AMBIGUOUS", "one resolved locator does not outvote an ambiguous one"
+    assert decide(ambiguous_locators=iter(["Parser.java"])) == "PRODUCTION_OWNER_LOCATOR_AMBIGUOUS"
+    assert decide(executed_failure=False, ambiguous_locators=["Parser.java"]) == "PRODUCTION_OWNER_NO_EXECUTED_FAILURE"
+
+
+def test_the_unique_locator_resolver_never_picks_by_order_and_bounds_its_scan(tmp_path):
+    from kriya.workflow.failure_grounding import LOCATOR_MEMBER_SCAN_BOUND_EXCEEDED, resolve_unique_locator_artifacts
+
+    for member in (PA, PB, "Parser.java", "src/a/Lexer.java"):
+        (tmp_path / member).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / member).write_text("x\n")
+    root = str(tmp_path)
+    assert resolve_unique_locator_artifacts("(Parser.java:4)", root) == ([], ["Parser.java"])
+    assert resolve_unique_locator_artifacts("(Lexer.java:4) (Parser.java:4) (Missing.java:1)", root) == (["src/a/Lexer.java"], ["Parser.java"])
+    assert resolve_unique_locator_artifacts("src/a/Parser.java:[4,1]", root) == ([PA], [])
+    assert resolve_unique_locator_artifacts("Parser.java:[4,1]", root) == ([], ["Parser.java"]), "a bare javac name is a bare name"
+    nested = "/w/src/a/Parser.java:[4,1]"                 # ends with src/a/Parser.java AND with the root-level Parser.java: the root is unknown
+    assert resolve_unique_locator_artifacts(nested, root) == ([], ["/w/src/a/Parser.java"])
+    assert resolve_unique_locator_artifacts("src\\b\\Parser.java:[4,1]", root) == ([PB], [])
+    assert resolve_unique_locator_artifacts("no locator here", root) == ([], [])
+    assert resolve_unique_locator_artifacts("mysrc/a/Lexer.java:[4,1]", root) == ([], []), "a suffix must start at a path boundary"
+    (tmp_path / "gone").mkdir()
+    (tmp_path / "gone" / "Token.java").symlink_to(tmp_path / PA)
+    assert resolve_unique_locator_artifacts("(Token.java:1)", root) == ([], []), "a symbolic link is not a member artifact"
+    assert resolve_unique_locator_artifacts("(Lexer.java:4)", root, max_files_scanned=1) == ([], [LOCATOR_MEMBER_SCAN_BOUND_EXCEEDED])
+
+
+def test_a_selected_owner_without_an_allow_list_scope_is_needs_review(tmp_path):
+    """The failure seam itself: the accepted verifier can only be write-denied under an allow-list scope."""
+    from kriya.policy.filesystem import WriteScopeMode
+
+    scoped, state = _owner_ruling(tmp_path / "scoped", FRAME_A, members=[PA, PT])
+    assert _selects(scoped) == ("s1", (PA,)) and state.environment_failure is None
+    unscoped, state = _owner_ruling(tmp_path / "unscoped", FRAME_A, members=[PA, PT], scope=WriteScopeMode.UNRESTRICTED)
+    assert unscoped.stop.reason_code == vs.REASON_NO_PRODUCTION_OWNER and state.environment_failure.startswith("VERIFIER_SEMANTIC_AUTHORITY_REQUIRED:")
