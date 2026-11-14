@@ -180,11 +180,22 @@ def finding_from_failure(failure: Any, attempt: int) -> OpenFinding:
     )
 
 
+def replaces_open_finding(failure: Any) -> bool:
+    """Whether ``failure`` is an authoritative statement about the CANDIDATE, i.e. the only kind that opens or replaces the open
+    finding. A delivery failure, an operational / internal / unclassified failure and an advisory one are not.
+
+    The ONE owner of that question (NON-CANDIDATE-FAILURE-SCOPED-RESET-001): ``update_open_findings`` and the retry loop's
+    failure-family inheritance (retry_strategy._record_attempt_failure) both read it, so a failure that leaves the open finding
+    in place can never be counted as a new failure family. Scenario-A run 10 (MEASURED): a ``context_budget_unsatisfiable``
+    refusal left the assertion finding open and still replenished the scoped targeted / fallback-targeted budgets."""
+    if failure.type in DELIVERY_FAILURE_TYPES or not is_candidate_finding(failure.type):
+        return False
+    return getattr(failure, "authority", "authoritative") == "authoritative"
+
+
 def update_open_findings(open_findings: Sequence[OpenFinding], failure: Any, attempt: int) -> List[OpenFinding]:
     """The open set after ``failure`` was recorded. Only an authoritative candidate finding changes it."""
-    if failure.type in DELIVERY_FAILURE_TYPES or not is_candidate_finding(failure.type):
-        return list(open_findings)
-    if getattr(failure, "authority", "authoritative") != "authoritative":
+    if not replaces_open_finding(failure):
         return list(open_findings)
     return [finding_from_failure(failure, attempt)]
 

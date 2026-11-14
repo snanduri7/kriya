@@ -76,6 +76,7 @@ from kriya.workflow.open_findings import (
     DELIVERY_FAILURE_TYPES,
     open_finding_files,
     open_finding_locations,
+    replaces_open_finding,
     update_open_findings,
 )
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
@@ -106,6 +107,8 @@ from kriya.workflow.verifier_semantic import REGENERATE_FAILURE_TYPE, VERIFIER_S
 logger = logging.getLogger(__name__)
 
 
+# The delivery types, under the name the failure-category table's test reads (tests/test_failure_reporting.py). The family
+# inheritance below no longer reads this set: it asks open_findings.replaces_open_finding, which covers these types and more.
 _REPAIR_FEEDBACK_FAILURE_TYPES = DELIVERY_FAILURE_TYPES
 
 
@@ -891,12 +894,15 @@ async def _record_attempt_failure(
     )
     previous_failure_signature = state.budgets.last_failure_signature
     current_failure_signature = build_failure_signature(fail_type, raw_error_context)
-    # Edit/protocol feedback is about the validator failure the attempted
-    # repair was already addressing, not a new defect family entitled to fresh
-    # retry budgets. Advisory failures follow the same rule structurally.
-    if previous_failure_signature is not None and (
-        not failure_is_authoritative or fail_type in _REPAIR_FEEDBACK_FAILURE_TYPES
-    ):
+    # A failure that does not open or replace the open finding (edit/protocol
+    # feedback, an operational / resource / internal failure, an advisory one)
+    # says nothing new about the candidate: it inherits the family the repair
+    # was already addressing and earns no fresh scoped budgets. The question is
+    # owned by open_findings.replaces_open_finding, the same predicate that
+    # keeps the finding open (NON-CANDIDATE-FAILURE-SCOPED-RESET-001: run 10's
+    # context-budget refusal replenished the targeted and fallback-targeted
+    # budgets while the assertion finding was still open).
+    if previous_failure_signature is not None and not replaces_open_finding(failure):
         current_failure_signature = previous_failure_signature
 
     failure_family_changed = observe_failure_family(
