@@ -40,7 +40,7 @@ M = {
     "TRIAGE-ON-ORCHESTRATOR-NOTICE-001": ("ROOT_GAP", "R-07", "a non-candidate notice enters failure routing (AUTH-A1-01)"),
     "RETRY-REFERENCE-CONTEXT-DEDUP-001": ("FUTURE_FEATURE", "-", "prompt economy; no decision effect"),
     "METRICS-RETRIES-TRIGGERED-COUNTS-TERMINAL-ATTEMPT-001": ("ROOT_GAP", "R-11", "a recorded count does not mean what its name says"),
-    "DEMO-TIME-BUDGET-001": ("INTENTIONAL_CONTRACT", "-", "a configuration choice; the missing run-level owner is R-08"),
+    "DEMO-TIME-BUDGET-001": ("INTENTIONAL_CONTRACT", "-", "a configuration choice; the authority class of the value is R-08"),
     "HITL-RESUME-DEFERRED-GATES-001": ("ROOT_GAP", "R-07", "resume of a unit whose executing gates were held"),
     "LEAK-SIGKILL-RECOVERY-GAP-001": ("FUTURE_FEATURE", "-", "registry's own W3-8 disposition"),
     "GUI-RECOVERY-ACTION-001": ("FUTURE_FEATURE", "-", "kernel recovery exists; desktop action is future"),

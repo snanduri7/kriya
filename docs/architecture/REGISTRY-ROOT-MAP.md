@@ -36,7 +36,7 @@ issues are in `06-GAP-AUTHORITY-AUDIT.md`. A class written here is a proposal fo
 | 6 | `PLAT-PORTABILITY-P3-001` | P3 / DEFERRED | FUTURE_FEATURE | - | platform program |
 | 7 | `LEAK-SIGKILL-RECOVERY-GAP-001` | P3 / TRACKED_IN_OPEN_ITEMS | FUTURE_FEATURE | - | registry's own W3-8 disposition |
 | 8 | `TEST-RESOURCEWARNING-HYGIENE-001` | P3 / TRACKED_IN_OPEN_ITEMS | ROOT_GAP | R-12 | harness hygiene |
-| 9 | `DEMO-TIME-BUDGET-001` | P2 / DEFERRED | INTENTIONAL_CONTRACT | - | a configuration choice; the missing run-level owner is R-08 |
+| 9 | `DEMO-TIME-BUDGET-001` | P2 / DEFERRED | INTENTIONAL_CONTRACT | - | a configuration choice; the authority class of the value is R-08 |
 | 10 | `PLAN-PRESERVED-REFERENCE-SOURCE-ATTRIBUTION-001` | P3 / DEFERRED | INTENTIONAL_CONTRACT | - | design limit |
 | 11 | `ENFORCE-UPSTREAM-WORK-PRESERVATION-001` | P2 / TRACKED_IN_OPEN_ITEMS | ROOT_GAP | R-07 | GAP-A1-09: accepted unit work not durable before the terminal commit |
 | 12 | `ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001` | P2 / TRACKED_IN_OPEN_ITEMS | ROOT_GAP | R-02 | a guard present on one executor only |

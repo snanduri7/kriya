@@ -1,3 +1,4 @@
+
 === P1 two bindings of one model name
 configuration accepted with two bindings of one model name and different settings: True
 routing_alias_conflicts (the only same-alias check; it covers routing candidates): []
@@ -9,4 +10,10 @@ the reviewer identity qualification would assess has settings digest: sha256:1e0
 fields a role call passes explicitly (agents/agent.py _call_with_escalation): model, base_url, api_key, temperature, max_tokens, reasoning, extra_body
 fields it does not pass, taken from LLMClient._binding by model name: context_window, context_policy, inference_runtime
 
-scratch: /var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-b-probe-udgglwg_
+=== P2 scope of the generation clock
+outside a run: None
+a nested mutating boundary is the same run: True
+two claims in one run return the same start: True | a claim inside a nested unit boundary returns the same start: True
+a second top-level run (a resume is one) has a new run id: True | and a new clock: True
+
+scratch: /var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-b-probe-_vlh86pr

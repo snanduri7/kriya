@@ -31,6 +31,13 @@ CITED = [
     ("kriya/workflow/contract_compilation.py", ["compile_verification_contract", "seal_verification_contract"]),
     ("kriya/workflow/stage_apply.py", ["approval_gate"]),
     ("kriya/control/launch_approval.py", ["build_pending", "candidate_digest"]),
+    # Added with the integration audit (sections 10 to 12).
+    ("kriya/control/run_coordinator.py", ["claim_run_generation_clock", "generation_clock_paused", "follow_run_generation_clock", "begin_mutating_run"]),
+    ("kriya/workflow/run_lifecycle.py", ["claim_run_generation_clock", "budget_started_monotonic"]),
+    ("kriya/workflow/outcome.py", ["terminal_failure_category", "environment_failure", "startswith"]),
+    ("kriya/workflow/enforce_loop.py", ["current_plan_hash", "raw_plan", "content_hash"]),
+    ("kriya/workflow/stage_apply.py", ["sensitive_paths", "this pattern is not being enforced"]),
+    ("kriya/workflow/stage_knowledge_guard.py", ["knowledge_risk_confirmed"]),
 ]
 SEARCH_ROOTS = ("kriya", "plugins")
 

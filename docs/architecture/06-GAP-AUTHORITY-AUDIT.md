@@ -31,7 +31,7 @@ Eleven architecture roots and two supporting ones. "Disposition" is this audit's
 | R-05 PROJECT-STATE-NAMESPACE-AUTHORITY | Which project a piece of derived state belongs to | `config/resolution.py` anchors the default memory and skills locations to the installation; no store records an owner | One owner of project-scoped derived state: identity key, write namespace, read namespace and fallback behaviour all bound to the workspace identity | `GAP-A5-01` (classes A to G, section 2) | P1 | FIX_REQUIRED_BEFORE_PRODUCTION |
 | R-06 KNOWLEDGE-AUTHORITY | Whether required knowledge is satisfied, and which skills apply | `KnowledgeGuard.check_goal` reads a directory listing; skill relevance is decided twice from different text | Coverage and relevance decided from loaded, applicable, verified skill facts by the Skills owner | `GAP-A4-03`, `GAP-A4-02` | P1 | FIX_REQUIRED_BEFORE_PRODUCTION |
 | R-07 RETRY-BLOCKER-DURABILITY-AUTHORITY | Whether a blocker is still the same one, what allowance it has left, and what survives an interruption | `retry_policy.py::observe_failure_family` reads a repeat-detection signature as blocker identity; no module owns durability of retry, recovery or accepted unit work | One blocker identity with a lifecycle, one allowance ledger, persisted with the unit and the plan | `GAP-A1-01`, `GAP-A1-02`, `GAP-A1-03`, `GAP-A1-05`, `GAP-A1-07`, `GAP-A1-08`, `GAP-A1-09`, `GAP-A4-06` | P2 | FIX_REQUIRED_BEFORE_PRODUCTION (never a false success; convergence and cost) |
-| R-08 RUN-RESOURCE-BUDGET-AUTHORITY | How much time and work one run may consume in total | The configuration owns a number that bounds a unit invocation; nothing owns the run (`AUTH-A1-08`, `AUTH-A5-12`, `AUTH-A6-10`) | One cumulative run-resource contract with six named levels | `GAP-A1-04`, `GAP-A1-06`, `GAP-A5-04` | P1 candidate (reliability and resource safety) | FIX_REQUIRED_BEFORE_PRODUCTION |
+| R-08 RUN-RESOURCE-BUDGET-AUTHORITY | How much time and work one run may consume | The clock is sound (one per top-level run); its **value** is a repository-settable tuning field with no default, and nothing bounds the run's work or consumption across resumes (`AUTH-A1-08`, `AUTH-A5-12`, `AUTH-A6-10`) | `config/authority.py` for the value; the run lease for a work ledger | `GAP-A1-04`, `GAP-A1-06`, `GAP-A5-04` (a) | P2 | FIX_REQUIRED_BEFORE_PRODUCTION for the value's authority class; the rest an owner priority call |
 | R-09 RUNTIME-IDENTITY-AND-QUALIFICATION-AUTHORITY | That the binding a role asked for is the binding dispatched and the binding qualified | `LLMClient._binding` resolves a binding by model name, primary first, and defaults to the primary; the run never checks the primary's qualification | One resolved binding object per call, carried from the caller to dispatch; one production admission | `GAP-A6-02`, `GAP-A6-01` | P1 | FIX_REQUIRED_BEFORE_PRODUCTION |
 | R-10 PROMPT-TRUST-PROVENANCE-AUTHORITY | Where each piece of text in a model request came from, and what it may influence | `state.error_context` is one untyped string that validator output, Kriya headers and fetched text are concatenated into; ten modules read it as validator evidence | Typed context values with a trust class from creation to dispatch; one renderer applies the fence | `GAP-A4-04` | P1 security | FIX_REQUIRED_BEFORE_PRODUCTION |
 | R-11 EVIDENCE-AND-DIAGNOSTIC-TRUTH | That a record or message says what happened, and what a reader may conclude from it | No contract states which record is the outcome of record or what "verified" proves; several records and labels are written before, or apart from, the decision they describe | An explicit evidence contract (integrity class, binding to the RunRecord, retention) and one rule for diagnostic labels | `GAP-A6-03` part B, `GAP-A1-03`, `GAP-A3-07` | P2 (P1 only if the product promises tamper evidence: owner policy) | Split: binding and labels FIX_REQUIRED_BEFORE_PRODUCTION; authenticity GENUINE_FUTURE_FEATURE once the contract says "integrity against damage" |
@@ -169,27 +169,30 @@ fallback behaviour, all four.
 
 ### R-08 RUN-RESOURCE-BUDGET-AUTHORITY
 
-The six levels, as the code has them today (`TRACED` unless marked):
+Corrected during this audit (section 11, contradiction X-01): the generation clock is **one per top-level run**, not
+one per unit invocation. The levels as the code has them (`TRACED` unless marked):
 
 | Level | Current owner | Bound today | Who may set it | Gap |
 |---|---|---|---|---|
 | 1. One model call | `LLMClient._deadline`, `llm.transport` timeouts | The run clock's remainder, narrowed by `inference_deadline()`; transport timeouts | Operator (`llm.transport` is `SECURITY_AUTHORITY`) | None |
-| 2. One unit invocation (generation budget) | `autonomy.generation_time_budget_seconds` through `claim_run_generation_clock` | One clock per unit invocation | **Any repository file, at any value including none**, outside the production profile (`MEASURED` A5 P6) | Authority class (`GAP-A5-04` a) |
-| 3. Targeted and fallback retry allowance | `retry_policy.py` budgets | Counts per failure family, plus the global attempt ceiling per invocation | Configuration (`AUTH-A1-07`) | Replenishment on an unlisted failure (R-07) |
-| 4. Recovery and unit re-invocation | The enforce loop's cycle caps (`AUTH-A1-11`) | Counts; each re-invocation gets a fresh level-2 and level-3 budget | Configuration | The product of levels 2 to 4 is the real bound and nobody states it (`GAP-A1-04`) |
-| 5. Total run ceiling (wall clock, model calls, tokens) | **None** | **None**: units times recovery rounds times the unit budget | - | **The root** |
-| 6. Operator / profile maximum | The production seal | A positive integer at most 3,600 for level 2 only (`MEASURED` A5 P6: 7200 and none refused, 2400 accepted) | Operator | Caps one level; says nothing about the total |
+| 2. Generation time of one top-level run | The run lease's clock (`run_coordinator.py::claim_run_generation_clock`), started by the first model call, shared by every unit invocation, retry, role, embedding and validator deadline; human waits excluded (`MEASURED` B-P2) | `autonomy.generation_time_budget_seconds`: packaged default none; Project Setup 900; production at most 3,600 | **Any repository file, at any value including none**, outside the production profile (`MEASURED` A5 P6) | Authority class of the value; no default bound |
+| 3. Attempts of one unit invocation | `retry_policy.py` (`AUTH-A1-07`) | Counts, per `GenerationState` | Code constants and the chain length | Replenishment on an unlisted failure (R-07) |
+| 4. Unit re-invocations (recovery, scope revision) | The enforce loop's cycle caps (`AUTH-A1-11`) | Counts; each re-invocation gets fresh level-3 budgets (measured in A1b: 7 invocations and up to 77 Developer attempts for one unresolved blocker in one stage) | Code constants | The product of levels 3 and 4 is stated nowhere (`GAP-A1-04`); it is bounded in time only by level 2, when level 2 is configured |
+| 5. Work of a run in total (model calls, tokens, unit invocations) and time across resumes | **None** | None. A resumed run is a new top-level run: new clock, new counts (`MEASURED` B-P2) | - | No owner |
+| 6. Operator / profile maximum | The production seal | Level 2 at most 3,600 (`MEASURED` A5 P6: 7200 and none refused, 2400 accepted) | Operator | Sound for level 2 under production; nothing for level 5 |
 
 | Field | Content |
 |---|---|
-| Problem | No authoritative cumulative run-resource contract. A repository can enlarge total consumption through the number of units and recovery rounds even under the per-unit production cap. 2,400 versus 3,600 is not a conflict (disproved, A5) |
-| Affected stages | STAGE-RETRY, STAGE-RECOVERY, STAGE-MODEL-RUNTIME, STAGE-SUBTASK-SELECTION |
+| Problem | The run-level clock exists and is sound. What has no authority is its **value** (a repository may raise or remove it outside production, and the packaged default sets none), the amount of **work** a run may do (attempt budgets multiply with re-invocations and are bounded only by the clock), and consumption **across resumes**. 2,400 versus 3,600 is not a conflict (disproved, A5) |
+| Under the production profile | One top-level run is bounded to an hour of generation time whatever the plan size. The gap that remains there is level 5 (work, resumes) |
+| Affected stages | STAGE-RETRY, STAGE-RECOVERY, STAGE-MODEL-RUNTIME |
 | Violated invariant | A configuration source may only set what it cannot use to gain resource authority |
-| Children | `GAP-A1-04`, `GAP-A1-06` (answered by A5: the effective per-unit value), `GAP-A5-04` |
+| Children | `GAP-A1-04`, `GAP-A1-06` (answered: the configuration value, one clock per run), `GAP-A5-04` part (a) (part (b) withdrawn) |
 | Registry rows | None mapped (`DEMO-TIME-BUDGET-001` is the adjacent intentional row) |
-| Existing seam | The run generation clock (one per mutating run exists as a concept: `run_coordinator.py::claim_run_generation_clock`), the value-bounded field class of `config/authority.py` |
+| Existing seam | The run lease's clock; the value-bounded field class of `config/authority.py` |
 | Dependencies | R-07 (levels 3 and 4) |
-| Disposition | FIX_REQUIRED_BEFORE_PRODUCTION |
+| Severity | P2 (was carried as a P1 candidate on the wrong premise that no run-level clock exists). P1 only for a deployment that runs outside the production profile on repositories it does not trust |
+| Disposition | FIX_REQUIRED_BEFORE_PRODUCTION for the authority class of the value; the work ceiling and the resume ledger are proposed with it (C-08) and are an owner priority call |
 
 ### R-09 RUNTIME-IDENTITY-AND-QUALIFICATION-AUTHORITY
 
@@ -328,7 +331,7 @@ See R-09. Output: `evidence/b/b_probe_output.txt`.
 | One truth, one owner | **Fails** for blocker identity (four definitions, R-07), skill relevance (two selections, R-06), plan validity and unit acceptance (two executors, R-02), model binding (two lookups, R-09), project membership at index sites (R-05), run outcome as displayed (R-02 / R-11) | Holds for root identity, candidate identity at commit, configuration authority, tool governance |
 | An owner never defines contradictory truths | **Fails** once: `open_findings.replaces_open_finding` serves two consumers whose safe defaults are opposite (`GAP-A1-07`); `RunState.final_workflow_quality_passed` mixes commit truth with an advisory call (`GAP-A3-03`) | - |
 | Mutation authority references decision authority | **Fails** for MCP writes, skill learning, and the configuration / skill path class (R-04); holds for the candidate batch (the commit checks the verified batch) |
-| UNKNOWN fails safely | **Fails** in the places each slice's UNKNOWN table marks: requirement truth under `record` (R-02), an unlisted failure type (R-07), an unmapped verifier (R-01), a knowledge folder (R-06), the owner of a store (R-05), a model name (R-09), the origin of prompt text (R-10), whether a run-level bound exists (R-08) | Holds for configuration classes, root class, tool governance, runtime adapter, provider settings |
+| UNKNOWN fails safely | **Fails** in the places each slice's UNKNOWN table marks: requirement truth under `record` (R-02), an unlisted failure type (R-07), an unmapped verifier (R-01), a knowledge folder (R-06), the owner of a store (R-05), a model name (R-09), the origin of prompt text (R-10), whether the run clock has a trusted value, and any bound on work (R-08) | Holds for configuration classes, root class, tool governance, runtime adapter, provider settings |
 | Resume never silently resets authoritative truth | **Fails**: retry and recovery counters, open findings, fallback state and human recovery decisions restart (R-07); enforce unit checkpoints depend on an ignore rule (3.4); a resumed run has a new id and evidence store (3.3) | Holds for the commit state (`kriya recover`) and tool execution markers |
 | Direct and enforce establish compatible truth | **Fails** (R-02, seven truths) | - |
 | Desktop, CLI, tool and MCP cannot bypass kernel authority | **Holds** for the desktop and CLI entries (every mutating entry is a coordinated mutation with the same gates; approvals arrive through the review channel). **Fails** for a planned MCP call with a write grant (R-04) |
@@ -381,7 +384,7 @@ The verification-environment verdict (R-13) is the one item whose AS-IS behaviou
 | Gap | Class | Reason |
 |---|---|---|
 | `GAP-A1-04` | Owner ruling folded into R-08 | "Fresh full budgets per re-invocation" is not accepted as a contract (standing ruling); R-08 defines it |
-| `GAP-A1-06` | Disproved as a gap | The effective budget of a launch is established (A5): the configuration value, per unit invocation |
+| `GAP-A1-06` | Disproved as a gap | The effective budget of a launch is established: the configuration value, on one clock per top-level run (A5 for the value, `MEASURED` B-P2 for the scope) |
 | `GAP-A2-03` | Owner policy under R-01 | What an unattended or direct run may do once a test is written |
 | `GAP-A4-08` | Intentional by owner ruling (SHARED-DECISION-AUTHORITY-001) | Listed so the matrix is complete; checked against the contract once R-01 exists |
 | `GAP-A1-05` | Small defect under R-07 | A field whose accepted range differs from its effective range |
@@ -432,3 +435,109 @@ flowchart LR
 
 An arrow means "the required contract of the target needs the source's truth to be defined". R-09, R-10 and R-12
 have no upstream dependency and can be built at any point; R-05 and R-01 are the two independent starting points.
+
+## 10. Integration surfaces: what happens when one owner's output becomes another's input
+
+Method (owner ruling on the Phase-B method): this section was written from the **content** of the maps, not from
+their headings. The fields `Owner`, `Persisted state`, `Downstream consumers`, `Checkpoint / resume`, `Alternate
+paths` and `Failure / UNKNOWN` of every full-field authority row were read (`evidence/b/crossmap_check.py
+--fields`), the mutation rows were read against the owner each names, every UNKNOWN that does not fail safely was
+collected from the failure matrix, and where two documents disagreed the code was read and, where it changed a
+classification, measured. Each boundary is traced as `producer -> authoritative output -> identity -> transport or
+persistence -> consumer validation -> consumer decision`. "Verdict" answers: is the producer's truth preserved; does
+the consumer trust the right field or recompute; is identity kept; can stale state or UNKNOWN pass; is there a
+bypass; do resume and every execution shape use the same contract.
+
+| # | Boundary | Producer and output (identity) | Transport / persistence | Consumer validation and decision | Verdict | Rows, root |
+|---|---|---|---|---|---|---|
+| 1 | Goal -> requirement normalization | The operator's words; `goal_identity` digest | In memory; goal hash on the RunRecord | `derive_requirements` (deterministic) or the operator's contract, refused when bound to another goal | Preserved. Two digests of one goal exist (with and without a trailing NUL) for direct units. `kriya fix` derives **no** requirement set (`BYP-A4-13`) | `AUTH-A4-01`, `AUTH-A4-02`; INT-05, R-02 |
+| 2 | Requirement set -> semantic contract | `RequirementSet` (digest) | Content-addressed file; digest in the sealed verification contract and `ControlState` | `compile_verification_contract` before the first model call | Identity preserved. The output holds statements and closers, no product semantics: nothing to hand on | `AUTH-A2-01`, `AUTH-A2-02`, `AUTH-A2-05`; R-01 |
+| 3 | Contract -> Planner | The sealed contract; requirement ids | Rendered into the Planner request | `validate_plan(known_requirement_ids)` under enforce; `classify_plan_completeness` (no structure check) direct | Two consumers validate differently; under `record` an unverifiable mandatory claim proceeds | `AUTH-A4-10`, `AUTH-A4-11`, `AUTH-A2-03`; R-02, R-01 |
+| 4 | Planner -> Developer | The plan (hash); criteria, invariants, decisions | The plan document; rendered by `planning_request.py` | The Developer reads them as approach; spec compliance checks them | Enforce only: the direct Developer gets prose. A criterion id that does not resolve is silently not rendered (UNKNOWN becomes absence). The plan hash is the raw answer's at first and the revised plan's after a revision | `AUTH-A4-12`, `AUTH-A4-10`; INT-08, INT-02 |
+| 5 | Planner -> skill selection | The unit's composed goal text (user words plus Planner text) | In memory | `skill_applies_to_goal` per unit and separately for the Planner | The consumer reads a field that mixes model text with the goal: the Planner and a unit can select different skills (`MEASURED` A4 P4) | `AUTH-A4-08`, `BYP-A4-02`, `BYP-A4-12`; R-06 |
+| 6 | Knowledge gate -> skill facts | The gate's "covered" | Nothing persisted about the decision | No consumer validates it: the Developer request never reads it; a direct resume sets `knowledge_risk_confirmed` from the existence of a checkpoint | UNKNOWN (a folder) becomes "covered"; resume infers a decision that was never recorded; a skill folder that fails to load is silently absent; an unreadable provenance file leaves every rule trusted | `AUTH-A4-05`, `AUTH-A4-07`, `FR-A4-13`, `BYP-A4-08`; INT-06, INT-07, R-06 |
+| 7 | External lookup -> model context | Fetched page text; the URL in a banner | Concatenated into `state.error_context` (memory) | Seven consumers read the string as validator evidence | Provenance lost at the first step (section R-10) | `AUTH-A6-09`; R-10 |
+| 8 | Developer -> candidate transaction | The parsed answer | In memory | `CandidateTransaction` phases through the write gate; the first refusal refuses the attempt | Sound for the gate. The gate has no class for Kriya's own project inputs; gate-side writers add bytes after the transaction (`BYP-A3-10`), bounded | `AUTH-A3-01`, `AUTH-A5-04`; R-04 |
+| 9 | Candidate -> generated verifier | Executed test identities from a complete report | Derived per gate | `derive_executed_verifiers` maps identity to file to write journal | Unmapped identity is read as "not run-authored" (fails open) | `AUTH-A2-06`; R-01 |
+| 10 | Verifier -> semantic review | The subject fingerprint (run, plan hash, unit, bytes, criteria text) | The ledger, memory only | A person's decision bound to the fingerprint; stale decisions refused | Identity preserved inside a process. Lost on a new process: the person is asked again. A plan revision changes the plan hash and stales the decision (by construction) | `AUTH-A2-07`, `AUTH-A2-08`, `AUTH-A1-14`; R-07, INT-02 |
+| 11 | Verification failure -> attribution | The validator's `Failure` | In memory | `attribute_failure` (ordered rules); the semantic ruling replaces it for a subject | Sound as a decision. The kind label is rewritten afterwards and an unlisted type is `SOURCE_DEFECT`; an internal Kriya error is charged and labelled like a candidate failure (`FR-A1-06`) | `AUTH-A2-10`, `AUTH-A2-11`; R-11 |
+| 12 | Attribution -> blocker identity | The failure and its files | `OpenFinding`, memory, no identity | `replaces_open_finding`; the family signature | The consumer treats a repeat-detection signature as identity; four definitions disagree | `AUTH-A1-01..03`, `AUTH-A1-12`; R-07 |
+| 13 | Blocker -> retry allowance | The family signature | `RetryBudgets`, memory | `observe_failure_family` -> one reset writer | One grant path, wrong input; an unlisted failure type can replenish | `AUTH-A1-03`, `AUTH-A1-13`; R-07 |
+| 14 | Retry -> recovery | A unit's typed stop | The unit result | The enforce loop: only a scope conflict (and a verification-only unit's no-change stop) has a route | A unit that stops for any other reason has no enforce-level decision (`FR-A1-22`); every re-invocation is a fresh allowance. The stop reason itself travels as a prefixed string (INT-01) | `SM-A1-04`, `AUTH-A1-11`; R-07 |
+| 15 | Recovery -> candidate mutation | The recovery plan (owner per artifact) | Loop locals | A new unit invocation through the same candidate transaction; owner-recovery self-correction before it | Mutation goes through the gate. Recovery state is not persisted | `MUT-A1-15..19`, `BYP-A1-13`; R-07 |
+| 16 | Candidate -> source approval | The sandbox files | Re-read to build a diff | `approval_gate`: four triggers; an invalid `sensitive_paths` pattern is skipped | The consumer rebuilds the subject instead of using the bound batch; one trigger fails open on a malformed pattern | `AUTH-A3-03`; R-03, INT-09 |
+| 17 | Unit approval -> plan or run approval | N unit decisions | Events only (terminal); launch record (desktop) | Nothing aggregates | No consumer exists: the handoff is missing | `GAP-A3-05`, `BYP-A3-01`, `BYP-A3-02`; R-03 |
+| 18 | Approval -> exact candidate bytes | The decision; on the desktop a digest **of the presented diffs** | Launch record (desktop); event (CLI) | The held-execution guard compares a binding (memory); the commit checks the verified batch, not the approved one | Three identities for one subject (diff digest, verified binding, commit batch hash); no record links them | `AUTH-A3-04`, `AUTH-A3-05`, `AUTH-A3-02`; R-03 |
+| 19 | Candidate -> apply / commit | The verified binding | Memory | `commit_terminal_candidate` refuses unless the batch equals the binding | Sound and fail closed. Milestone units are committed to the real workspace before the plan is verified (`BYP-A3-13`) | `AUTH-A3-02`, `AUTH-A3-14`; R-02 |
+| 20 | Apply -> terminal gates | The plan candidate (enforce) | The plan sandbox | `TerminalGateService`: eight gates; `requirements_verified` reported, not in `commit_eligible` | The order differs per executor: enforce gates then commits; milestone commits then replays and integrates | `AUTH-A3-08`, `AUTH-A3-15`; R-02 |
+| 21 | Terminal gates -> requirement closure | Gate results | Memory, evidence | The closers; two of them cannot fire under enforce; closers needing a requirement set run only at the terminal | Divergent per executor | `AUTH-A3-09`, `AUTH-A4-15`; R-02 |
+| 22 | Requirement closure -> final result | `requirement_truth` (closed vocabulary) | A result field and a run event | The status rules do not consume it; under the defaults UNKNOWN fails open | The producer's truth is not consumed | `AUTH-A3-09..11`; R-02 |
+| 23 | Final result -> RunRecord, history, evidence, UI | The result payload | RunRecord (terminated from the payload's claim, limited by its own proofs); history row (written before reconciliation); evidence `run.closed` (mirrors the RunRecord) | CLI: the reconciled payload. Desktop history: the row's status and the **last** `requirement.truth` event, which can describe a candidate that was not applied | Final evidence does not prove the truth the runtime used on two counts (pre-reconciliation status; last-event truth) | `AUTH-A6-11`, `AUTH-A6-12`, `BYP-A3-08`; R-02, R-11, INT-13 |
+| 24 | Checkpoint -> resume | Stage checkpoints; `ControlState` | Under the authority root: for an enforce unit that is the plan sandbox | Fingerprint validation; digest checks | Sound for what is stored. Not stored: retry state, findings, recovery state, semantic decisions. Enforce unit checkpoints survive the sandbox reset only under an ignore rule; a resumed run has a new id and a new evidence store | `AUTH-A1-09`, `AUTH-A1-10`; INT-11, INT-12, R-07 |
+| 25 | Direct -> enforce equivalence | - | - | - | Seven result-bearing truths differ, plus the replay phase (milestone only) and the requirement set of `kriya fix` | `GAP-A4-01`; R-02 |
+| 26 | CLI -> desktop equivalence | The same kernel entry | The launch record and review channel | The desktop can be asked three review kinds only; other decisions are unavailable (fail closed); a knowledge gap cannot be confirmed | Same gates and commit. The desktop is stricter where it cannot ask; `--yes` on the CLI answers without asking (operator's flag) | `BYP-A3-03`, `BYP-A3-11`, `BYP-A5-10`, `BYP-A5-11` |
+| 27 | Tool / MCP -> workspace mutation | A planned call | The server's mount of the process directory | TOOL-002 approval of the identity; no validation of the change | Bypasses the candidate transaction | `AUTH-A5-07`, `BYP-A6-18`; R-04 |
+| 28 | Skill learning -> workspace / repository | A model extraction | Plain file writes; Git commits on two shapes | None | A second repository writer | `MUT-A5-08`; R-04 |
+| 29 | Project identity -> index, knowledge, skills, memory | `workspace_identity` | Used for control state only | Index, skills and history readers check no identity | One namespace for control state, none for derived state | `AUTH-A5-09`; R-05 |
+| 30 | Configuration -> effective runtime authority | The layered configuration | In memory; fingerprint on the RunRecord | SEC-009 classification and approval | Sound. A run may write the repository layer it is later loaded from (`BYP-A5-01`); the budget's class | `AUTH-A5-10`; R-03, R-04, R-08 |
+| 31 | Requested model -> binding -> qualification -> dispatch | The caller's model name and a few override values | Arguments | `LLMClient._binding` looks the rest up by name | Identity changes at the boundary (`MEASURED` B-P1); qualification assesses another binding; the run does not check the primary | `AUTH-A6-01`, `AUTH-A6-06`; R-09 |
+| 32 | Provider / runtime -> context window | Requested, served, ceiling | The request; observation | `context_window_state`, `plan_dispatch`, the after-call check | Sound (`MEASURED` A6 P3). The default adapter truncates silently at the provider and cannot qualify | `AUTH-A6-04`, `AUTH-A6-05` |
+| 33 | Retry / recovery -> run resource budget | Attempts and re-invocations | The run lease's clock; counts in memory | Every deadline reads the one run clock | Time: one bound per top-level run when configured (`MEASURED` B-P2). Work: no bound; value: repository-settable | `AUTH-A1-08`, `AUTH-A5-12`; R-08 |
+
+## 11. Cross-map contradictions found, and how each is resolved
+
+`evidence/b/crossmap_check.py` checks every row reference in the set: 0 references to an undefined row. The
+contradictions below were found by reading rows of different maps that describe the same truth.
+
+| ID | Contradiction | Resolution (label) |
+|---|---|---|
+| X-01 | `AUTH-A1-08` (slice A1): the generation clock is one per process run, shared by every unit, retry and role. `AUTH-A5-12` and `GAP-A5-04` (slice A5): the number "bounds each unit invocation ... no layer owns a bound for the run", citing slice A1b. The A6 rows, the first version of this audit (R-08) and the first version of C-08 repeated the A5 statement | **A1 is right; the A5 statement was wrong** (`TRACED`: `claim_run_generation_clock` holds the clock on the run lease and a nested mutating boundary is the same run; `MEASURED` B-P2: two claims and a claim inside a nested unit boundary return the same start, a second top-level run a new one). Slice A1b is about attempt budgets being fresh per invocation, which A5 read as time. Every row that carried the error is corrected in place and listed in the gap ledger ("Corrections to earlier checkpoints"). Consequence: R-08 is narrower and P2; the premise "no run-level clock" given to the owner in the A5 and A6 summaries was false |
+| X-02 | `BYP-A4-04` (A4): fetched text heads "the Planner's Fix the following compile/test error block". `AUTH-A6-09` / `BYP-A6-10` (A6): the Planner reads the error context before the first attempt, so the value is the caller's argument | A6's reading stands for the stage order read (`TRACED`); re-planning routes were not read, so the A4 statement is narrowed, not disproved |
+| X-03 | `GAP-A6-02` (A6): the unknown-name fallback is P3, reachability not established. This audit: reachable through the same lookup with a valid configuration | Phase B wins (`MEASURED` B-P1); recorded in the ledger |
+| X-04 | Subsystem note `model-runtime-and-inference.md`: native adapter `/2`, qualification policy `/8`. Code: `/3`, `/9` | Code wins (`DOC-A6-02`) |
+| X-05 | `05-INTEGRATION-BYPASS-MAP.md`, route table: four routes "pending" although slices A2 and A3 mapped them | Stale index; corrected in Phase B |
+| X-06 | The six maps define rows that no other document cites: 53 rows (mostly the A1 failure and mutation rows, written before rows carried cross-references) | Not a contradiction of fact: a linkage gap. The Phase-C stage and integration documents cite every one of them; the check is rerun then and must report none |
+| X-07 | `AUTH-A1-01..14` and `AUTH-A2-01..13` appear twice in the authority matrix (the row and its Phase-B completion) | Intended: the completion adds fields and repeats none; the check reports them as double definitions by construction |
+| X-08 | Project instructions: "Learned/retrieved text stays inside the untrusted-context fencing". `AUTH-A6-09`: fetched text is outside it | Code wins (`DOC-A6-07`); R-10 |
+| X-09 | `AUTH-A4-10`: `current_plan_hash` is the hash of the raw Planner plan. The enforce loop also assigns `current_plan_hash = plan.content_hash()` after a plan revision | Both true at different times (`TRACED`): the first identity is of the raw answer, later ones of the revised plan. Recorded as INT-02 |
+
+After these, no two rows of the set are known to describe one truth differently.
+
+## 12. Integration findings that no slice gap or registry row named
+
+Found by the method of section 10. Each is attached to a root; none needs a new root.
+
+| ID | Finding | Evidence | Root | Severity |
+|---|---|---|---|---|
+| INT-01 | **The stop reason is a string protocol.** `state.environment_failure` is written at 13 sites in four modules and carries scope-defect, deterministic-failure, time-budget, containment, regression, fallback, edit-protocol, provider-contract, retry-identity, requirement, contract-registry, commit and file-integrity stops as well as environment ones. `outcome.py::terminal_failure_category` recovers the meaning with `startswith` over more than fifteen prefixes; a text it does not recognize falls to the generic environment category. The producer's typed reason does not survive the handoff as a type | `TRACED` (`outcome.py`, the writer search) | R-11 (diagnostic truth), R-13 (what counts as an environment verdict) | P2 |
+| INT-02 | **Plan identity changes meaning within a run.** The identity bound into the verifier semantic subject, the replay handles, recovery ids and the RunRecord's approved plan hash is the raw Planner answer's hash until a plan revision, then the revised plan's. A resume compares against a fresh raw answer (`GAP-A4-06`). No record says which plan executed | `TRACED` (`enforce_loop.py`) | R-07 (resume), R-03 (a plan-level approval subject needs the executed plan's identity) | P3 |
+| INT-03 | **Two bindings of one model name**: the audit and qualification view binds a different subject from dispatch | `MEASURED` B-P1 | R-09 | P1 |
+| INT-04 | **The desktop's requirement truth is the last event, and the history status is pre-reconciliation.** `BYP-A3-08` named the first half for the run list; slice A6 found the consumer; this audit adds that the RunRecord and the reconciled result carry no requirement truth at all, so no authoritative value exists for the desktop to read instead | `TRACED` | R-02, R-11 | P2 |
+| INT-05 | **`kriya fix` has no requirement set** (`BYP-A4-13`): a third entry shape with no requirement truth. Under the required result contract its success would be vacuous unless the contract says what a fix run must prove | `TRACED` (A4) | R-02, R-01 | P2 |
+| INT-06 | **A direct resume opens the knowledge gate from the existence of a checkpoint** (`BYP-A4-08`): the gate's decision is not persisted, so the consumer infers it | `TRACED` (A4) | R-06, R-07 | P3 |
+| INT-07 | **Skill facts fail open on read errors**: a folder that cannot be loaded is silently absent with no signal in the result; an unreadable provenance file leaves every rule trusted | `TRACED` (A4, `FR-A4-13`) | R-06 | P2 |
+| INT-08 | **An unresolved criterion id is silently not rendered** to the Developer | `TRACED` (A4) | R-01 | P3 |
+| INT-09 | **An invalid `sensitive_paths` pattern is skipped**, so one approval trigger fails open on a malformed value instead of the configuration being refused | `TRACED` (A3) | R-03 | P2 |
+| INT-10 | **A resumed run is a new run to every record**: new id, new evidence store, no parent link | `TRACED` (3.3) | R-11, R-07 | P3 |
+| INT-11 | **Enforce unit checkpoints depend on a repository ignore rule** | `TRACED` (3.4) | R-07 | P2 |
+| INT-12 | **An internal Kriya error is charged to the candidate's allowance** before the stop (`FR-A1-06`) and labelled as a source defect (registry `INFRA-STOP-ATTRIBUTION-SOURCE-DEFECT-LABEL-001` names the label half) | `TRACED` (A1) | R-07, R-11 | P3 |
+| INT-13 | **Lesson extraction reads the mixed error context and runs unattributed** | `TRACED` (A6) | R-10, R-11 | P3 |
+
+INT-01, INT-02, INT-03, INT-10 and INT-11 were named nowhere before this audit; the others were recorded as a
+bypass or failure row in one map and had no gap, root or contract. All thirteen are covered by the contracts of
+`07-REQUIRED-CONTRACTS.md` (section 1, per root; INT-01 is added to C-11, INT-02 to C-07 and C-03, INT-05 to C-02,
+INT-06 and INT-07 to C-06, INT-08 to C-01, INT-09 to C-03).
+
+## 13. Phase-B exit check
+
+| Condition | State |
+|---|---|
+| A1 to A6 content reconciled across the six maps | Done for the authority rows (fields read), the mutation rows, the UNKNOWN tables and the bypass rows cited above. 53 rows are cited by no other document (X-06): linked in Phase C |
+| Important cross-stage handoffs traced | 33 of 33 (section 10) |
+| Contradictions resolved or classified | X-01 to X-09 |
+| Unnamed integration gaps searched for | INT-01 to INT-13 |
+| Each root supported by content or code evidence | Yes; R-08 was corrected by this check |
+| Unexplained cross-map contradictions | 0 known |
+
+Limit, stated plainly: the state-machine tables and the A1 to A4 failure rows were read where a boundary of section
+10 cites them, not line by line; a contradiction inside a table that no boundary touches could remain.

@@ -49,11 +49,41 @@ def p1() -> None:
     print("fields it does not pass, taken from LLMClient._binding by model name: context_window, context_policy, inference_runtime")
 
 
+def p2() -> None:
+    """The scope of the generation clock: one per top-level mutating run, or one per unit invocation?"""
+    import subprocess
+    import time
+
+    from kriya.control.run_coordinator import begin_mutating_run, claim_run_generation_clock
+    from kriya.workflow.run_lifecycle import open_run_state  # noqa: F401 - imported to show the consumer exists
+
+    workspace = os.path.realpath(os.path.join(SCRATCH, "p2-workspace"))
+    os.makedirs(workspace)
+    env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+    subprocess.run(["git", "init", "-q", workspace], check=True, capture_output=True, env=env)
+    subprocess.run(["git", "-C", workspace, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid", "commit", "-q",
+                    "--allow-empty", "-m", "base"], check=True, capture_output=True, env=env)
+    print("outside a run:", claim_run_generation_clock())
+    with begin_mutating_run(workspace) as outer:
+        first = claim_run_generation_clock()
+        time.sleep(0.05)
+        second = claim_run_generation_clock()
+        with begin_mutating_run(workspace) as nested:   # what a unit invocation of an enforce run enters
+            inside = claim_run_generation_clock()
+            print("a nested mutating boundary is the same run:", nested.run_id == outer.run_id)
+        print("two claims in one run return the same start:", first == second,
+              "| a claim inside a nested unit boundary returns the same start:", inside == first)
+    with begin_mutating_run(workspace) as later:
+        third = claim_run_generation_clock()
+        print("a second top-level run (a resume is one) has a new run id:", later.run_id != outer.run_id, "| and a new clock:", third != first)
+
+
 if __name__ == "__main__":
-    print("=== P1 two bindings of one model name")
-    try:
-        p1()
-    except Exception as error:
-        print(f"PROBE_SETUP_FAILED {type(error).__name__}: {error}")
-        traceback.print_exc(limit=5)
+    for title, body in (("P1 two bindings of one model name", p1), ("P2 scope of the generation clock", p2)):
+        print(f"\n=== {title}")
+        try:
+            body()
+        except Exception as error:
+            print(f"PROBE_SETUP_FAILED {type(error).__name__}: {error}")
+            traceback.print_exc(limit=5)
     print("\nscratch:", SCRATCH)

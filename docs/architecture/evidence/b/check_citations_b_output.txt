@@ -9,4 +9,4 @@ absent 'workspace_id' in kriya/tools/knowledge.py: True (the release cache has n
 absent '_reconcile' in kriya/control/trace.py: True (the history writer does not reconcile a row with the RunRecord)
 absent '_reconcile' in kriya/workflow/run_lifecycle.py: True (nor does the trace persistence)
 absent 'requirement' in kriya/control/run_record.py: True (the RunRecord's own proofs do not include requirement truth)
-files=20 symbols=58 controls=11 problems=0
+files=26 symbols=73 controls=11 problems=0
