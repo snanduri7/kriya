@@ -178,3 +178,35 @@ Each row reads `CALLER -> DECISION AUTHORITY -> MUTATION OWNER -> TRANSACTION ->
 Not searched in A5: writers under `<workspace>/.kriya/control` other than `control_store.write_control_file`
 (an inventory test owns that, `tests/test_file_integrity_contract_001b.py`, cited by the project instructions and not
 re-run); subprocess creation sites (owned by `tests/architecture/execution_site_inventory.py`).
+
+## Slice A6 - runtime identity, qualification, certification, metrics, history and evidence records (`TRACED` unless a row says otherwise)
+
+Each row reads `CALLER -> DECISION AUTHORITY -> MUTATION OWNER -> TRANSACTION -> ROLLBACK / FAILURE -> AUDIT`.
+None of these mutations touches the owner workspace or a candidate; all are Kriya state or operator stores.
+
+| ID | Mutation | Caller | Decision authority | Mutation owner | Transaction | Rollback / failure | Audit | Label |
+|---|---|---|---|---|---|---|---|---|
+| MUT-A6-01 | A runtime fingerprint file `<state>/model_runtimes/<digest>.json` | Every model call with a resolvable fingerprint | None (a record) | `model_runtime.py::record_fingerprint` | One file per digest | A failure never fails the call | The digest on the result | `TRACED` |
+| MUT-A6-02 | `RunRecord.model_runtime_fingerprint_ids` | `LLMClient._runtime_fingerprint` for an exact fingerprint | None | `control/run_coordinator.py::record_model_runtime_use` | The RunRecord's revisioned save | As the RunRecord | The RunRecord | `TRACED` |
+| MUT-A6-03 | A qualification record in `~/.kriya/qualifications` | `kriya model qualify` (operator) | `require_verified_identity` then the case results | `model_qualification.py::save_record` (keeps other environments' capacity evidence) | One file per qualification identity, outside every workspace (`_refuse_inside_workspace`) | - | The record itself (policy and its digest, environment evidence) | `TRACED`, not run |
+| MUT-A6-04 | A pinned model on the model server (a derived model carrying the binding's server-only values) | `kriya model pin` (operator) | The adapter's `pin_served_configuration`; the native adapter refuses ("nothing to pin") | The default adapter, by a create call to the local server | One server call | - | The content-named model tag | `TRACED` at the declaration; the only A6 mutation outside Kriya's own directories |
+| MUT-A6-05 | Certification record and the sealed release-streak log | The live matrix and release tooling (operator) | `model_certification.py::trial_failures`: anything but a full matrix on the exact candidate resets the streak | `save_certification`, `record_trial` | Append to a sealed log | - | The log | `TRACED` at the module level |
+| MUT-A6-06 | Role metrics rows and the `model.role_metrics` / `model.role_independence` run events | Every call (`LLMClient._finish`), every Developer gate outcome (`record_developer_attempt_outcome`), every Planner outcome | None (observations) | `core/role_metrics.py` in memory; persisted only inside the history row's run events | With the history row | Lost with the row | The events | `TRACED` |
+| MUT-A6-07 | The routing table file | `kriya model metrics --write-table` (operator) | The operator | The CLI command | One file | - | - | `TRACED` (cited); runs never write it |
+| MUT-A6-08 | A history row in `<state>/traces.db` | `run_lifecycle.py::persist_run_trace` and `persist_early_exit_trace`, `run_trace.py::write_outcome_trace`, the enforce terminal, `application/run.py::mark_in_progress`, the direct-run exception recorder | None: the caller passes the status it holds | `control/trace.py::TraceLogger.log_run` (the one writer of the `runs` table) | `INSERT OR REPLACE` on the run id; every column redacted first | A failed write is logged; nothing retries it; the run's result is unchanged. A later write of the same run id replaces the row (`MEASURED` P5) | The row is the audit; it has no binding | `TRACED`; `MEASURED` P5 |
+| MUT-A6-09 | The attempt-evidence store of a run (records, content blobs, manifest, seal) | Producers through `attempt_evidence/scope.py` only | None (observational) | `attempt_evidence/writer.py::AttemptEvidenceWriter` (one per run) | Append-only records, blob written before the record that names it, seal by rename, private file modes | A failed record is a gap and degrades the seal; never raises into the run | The seal (`complete`, `gaps`, `degraded`) | `TRACED`; `MEASURED` P4 |
+| MUT-A6-10 | Removal of older evidence stores | Run close | `evidence.attempt_recorder.retention` (keep count, byte bound), protecting runs the workspace still references | `attempt_evidence/retention.py::prune_evidence` | Staged removal under the workspace lock | - | The prune report | `TRACED` at the entry |
+| MUT-A6-11 | The run log `<log dir>/runs/<run id>/kriya.log` and the application log | `begin_mutating_run` (`run_log`) | None | `core/logging_setup.py` | A file handler for the run's duration | Cannot open: reported, skipped | The file. No retention owner was found in the module (732 run directories on the development machine, `MEASURED` by listing) | `TRACED`; `MEASURED` on one real file |
+| MUT-A6-12 | Staged learned facts extracted from a retried failure | `stage_apply.py` after a success that needed retries | The lesson-extraction model call over `state.error_context`, the transcript and the final files | `knowledge/staging.py::stage_facts` (slice A5, `MUT-A5-08` family) | As A5 recorded | As A5 recorded | The staged file | `TRACED`. A6 adds the input: the error context may hold fetched page text (`AUTH-A6-09`, step 7) |
+| MUT-A6-13 | `state.error_context` (in memory) | `retry_strategy.py` after every failed attempt; `_augment_error_with_live_lookup` appends fetched text; the coordinated-repair path prepends a contract header | The retry strategy | The same | None | Reset to empty for a fresh best-of-N candidate | None of its own; the next `model.request` blob contains it | `TRACED` |
+
+### Alternate-writer searches run in A6
+
+| Search | Result |
+|---|---|
+| Who registers a runtime adapter | The port module (definition) and `core/model_runtime.py` only |
+| Who writes a history row | Listing `.log_run(`: `run_lifecycle.py`, `run_trace.py`, `application/run.py`, plus mentions in comments of four other modules; all go through `TraceLogger.log_run` |
+| Who writes the evidence store | `writer.py` only; producers use `scope.py` (a committed tripwire rejects code that names the store's files, cited) |
+| Who scopes a call to a role | Seven modules (listing `model_role(`); none under `kriya/knowledge` |
+| Who appends fetched text to the error context | One call site (`retry_strategy.py`) |
+| Any writer of the workspace or of a candidate in the A6 modules | None: `kriya/core`, `kriya/control/trace.py`, `kriya/core/attempt_evidence`, `kriya/metrics` write Kriya state only (read of each module's outline; no write-gate construction among them, A5 control) |

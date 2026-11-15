@@ -222,9 +222,9 @@
     "notes": "A recorded owner policy question (may a model-inferred optional check be terminal). The advisory-only predicate the row names exists at the baseline; behaviour not re-traced in A3. Not a false success. Owner policy (Phase D item list)."
   },
   "RUNTIME-LINE-EXPECTED-NONZERO-001": {
-    "reconciliation": "RECONCILED",
-    "disposition": "-",
-    "notes": "A projection defect (the result's runtime line follows the process record, not the grounded disposition); EXPECTED_NONZERO_EXIT_GROUNDED exists at the baseline. Fail closed, wrong wording. Not re-traced in A3; the projection belongs with the evidence and desktop visibility pass of slice A6."
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Fixed at the kernel projection (MEASURED P6): application/history.py _exit_is_acceptable reads the gate's recorded runtime disposition; a non-zero exit with EXPECTED_NONZERO_EXIT_GROUNDED and final PASS yields succeeded = True, without it False. Whether the desktop's 'Runtime verification' line follows `succeeded` was not read in the UI."
   },
   "GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001": {
     "reconciliation": "STALE_BOOKKEEPING",
@@ -234,7 +234,7 @@
   "RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001": {
     "reconciliation": "NEEDS_CHARACTERIZATION",
     "disposition": "-",
-    "notes": "A5: owner TRACED (tools/validate.py _ensure_project_venv_impl, VENV_CREATION_ATTEMPTS, PYTHON_ENVIRONMENT_UNAVAILABLE; FR-A5-18). The open mechanism (why one gate's venv lacked a dependency the other gate's had) needs a real contained run and is NOT characterizable under the freeze. It blocks no slice: a required runtime check fails closed, typed. Declared as a Phase-D item: characterize with a deterministic reproducer through the one venv owner when the freeze lifts."
+    "notes": "Declared Phase-D item, NON-BLOCKING (owner ruling 10 applied). Not characterizable under the freeze: needs a real loaded container run. Missing evidence: the container's install log and the venv listing of the gate that lacked the dependency. The unknown cannot change a security class or an authority owner (tools/validate.py _ensure_project_venv_impl owns the environment either way); its effect on verification truth is covered by WAVE8-DOCKER-REFUSAL-BECOMES-FALSE-VERDICT-001."
   },
   "WAVE8-PY-RUNTIME-ONLY-VENV-BOOTSTRAP-001": {
     "reconciliation": "RECONCILED",
@@ -244,7 +244,7 @@
   "WAVE8-DOCKER-REFUSAL-BECOMES-FALSE-VERDICT-001": {
     "reconciliation": "NEEDS_CHARACTERIZATION",
     "disposition": "-",
-    "notes": "A5: the architectural statement is recorded (an environment refusal must be a typed environment verdict, never a gate verdict; FR-A5-18, UNKNOWN table). Whether the plain False verdict is still reachable after the bind-source relaunch fix (334da9a) needs a real daemon refusal and is NOT characterizable under the freeze. Fail-closed in the recorded case; blocks no slice. Declared as a Phase-D item with RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001."
+    "notes": "Declared Phase-D BLOCKER for the verification-truth statement only (owner ruling 10 applied). Not characterizable under the freeze: needs one real refused launch on a loaded daemon. The unknown can change verification truth: a daemon refusal read as a gate verdict of False charges an environment event to the candidate. Missing evidence and acceptance test: a scripted daemon refusal at each launch site yields a typed environment verdict, never a gate verdict."
   },
   "ENFORCE-CLOSURE-STABILITY-CACHE-REUSE-001": {
     "reconciliation": "RECONCILED",
@@ -257,14 +257,14 @@
     "notes": "Confirmed current: control/retention.py contains no launch handling (negative control in check_citations_a3.py); the sidecar holding the exact approved diff text is stored before a review becomes pending (control/launch.py request_change_approval). MUT-A3-07. Disposition taken from the row's own target (before production readiness): a retention policy for launch records and sidecars. A proposal for Phase D."
   },
   "GATE-RESULT-PURPOSE-ABSENT-ON-TESTS-GATE-001": {
-    "reconciliation": "NEEDS_CHARACTERIZATION",
-    "disposition": "-",
-    "notes": "Handed to slice A6 (evidence). A3 found that a gate purpose is declared by a decorator on three orchestrating functions in gate_orchestrator.py (core/attempt_evidence/scope.py declares_gate_purpose). Missing evidence: which entry runs the tests gate outside them, or why the purpose is lost inside one. Diagnostic only."
-  },
-  "REVIEWER-OUTPUT-CAP-RUNAWAY-LATENCY-001": {
     "reconciliation": "RECONCILED",
     "disposition": "-",
-    "notes": "Attachment half confirmed, TRACED: stage_review.py attaches the Reviewer's text and never reads a truncation signal (negative control: no finish_reason in the file), so a review cut at the output cap reaches the approver as a complete report. GAP-A3-06. The latency half (a non-streamed completion running to the cap) is model-runtime scope, slice A6."
+    "notes": "Producer traced (BYP-A6-15, controls): a gate purpose is declared by the candidate-gate orchestrator (three decorated functions in gate_orchestrator.py) and the named-test oracle only; the terminal verification coordinator, the development loop's baseline and regression runs, the requirement closers, regression attribution and the self-correction loop run the tests gate with none, and the closed vocabulary (scope.py GATE_PURPOSES) has no member for them. Which of them produced the registry's record is INFERRED. Diagnostic evidence only. Implementation: extend the vocabulary and declare at those entries, with the evidence-truth work."
+  },
+  "REVIEWER-OUTPUT-CAP-RUNAWAY-LATENCY-001": {
+    "reconciliation": "DUPLICATE/SUPERSEDED",
+    "disposition": "-",
+    "notes": "Superseded (TRACED): the Reviewer has its own 4096-token output ceiling and refuses a cut-off answer (agents/agent.py ReviewerAgent DEFAULT_MAX_OUTPUT_TOKENS, REQUIRE_COMPLETE_OUTPUT), which is this row's own closing condition; the sprint log records the closed row REVIEWER-RUNAWAY-UNBOUNDED-OUTPUT-001. A bounded, visible wait in the desktop was not traced."
   },
   "KERNEL-STAGING-WORKSPACE-BASE-ESCAPES-001": {
     "reconciliation": "RECONCILED",
@@ -284,7 +284,7 @@
   "TECHNICAL-VERIFICATION-BARE-ROWS-001": {
     "reconciliation": "NEEDS_CHARACTERIZATION",
     "disposition": "-",
-    "notes": "Handed to slice A6 (desktop evidence visibility). The cause of the bare rows is UNKNOWN by the row's own account and a defensive fix shipped; there is no kernel fact for A3 to trace. Missing evidence: the DOM of a bare row, which only the owner's next look at the rebuilt app can supply; A6 must say whether it stays an explicit Phase-D item."
+    "notes": "Declared Phase-D item, non-blocking. Cannot be characterized from code: the cause of the bare rows the owner saw is UNKNOWN and the registry's own closing condition is the owner's next look at the rebuilt app or a captured DOM. Missing evidence: the DOM of one bare row. Cannot change an architecture decision (a rendering of recorded gate types; the kernel projection is AUTH-A6-12)."
   },
   "APPLICATION-OUTPUT-PROGRAM-STREAM-001": {
     "reconciliation": "RECONCILED",
@@ -357,9 +357,9 @@
     "notes": "Model behaviour (path hallucination); Kriya failed closed and applied nothing. TRACED: no check of a Java package declaration against its directory exists (no such reason code in kriya/). The candidate improvement (refuse such a CREATE before the compile gate) is a new capability, not a defect of an existing rule."
   },
   "LOCALIZATION-DEVELOPER-PATH-OVERLOAD-001": {
-    "reconciliation": "NEEDS_CHARACTERIZATION",
-    "disposition": "-",
-    "notes": "Not characterized in A4: graph_retrieval._code_intelligence_candidates shows no fold by lookup key in its first 30 lines, and the registry itself records no measured Developer-path loss. Missing evidence: a Developer-context trace in which a distinct relevant file is lost to overload flooding, or a read of the whole candidate function. Handed to slice A6 with the retrieval and context-budget rows."
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed current (TRACED): graph_retrieval.py _code_intelligence_candidates builds one candidate per hit; fold_overloads is the Planner-boundary fold. No measured Developer-path loss (deferred 2026-10-11)."
   },
   "GUI-SKILLS-BUILD-001": {
     "reconciliation": "RECONCILED",
@@ -515,5 +515,180 @@
     "reconciliation": "RECONCILED",
     "disposition": "-",
     "notes": "Demo script behaviour (demo-v2/scripts/reset_demo.sh), one occurrence, cause INFERRED by the registry; same Docker Desktop family as WAVE8-DOCKER-VIEW-CLEANUP-RACE-001. Not a kernel fact; not characterizable under the freeze."
+  },
+  "TELEMETRY-FALLBACK-ROLE-ATTRIBUTION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Producer traced (AUTH-A6-08, BYP-A6-16): calls of the knowledge channels run outside any role scope (control: no model_role under kriya/knowledge); the lesson extraction after a retried success (stage_apply.py, knowledge/channels/live_failure.py) uses the last Developer model, a fallback when the fallback fixed it, and is counted as unattributed. That this is the bucket measured in PRD-035 C6 is INFERRED (artifact not opened). Observation only; one role scope at the caller. Implementation required: small, with the next metrics change (owner ruling 2026-11-05: non-blocking)."
+  },
+  "GUI-PHASE-OBSERVABILITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed current (TRACED): the evidence vocabulary has phase.opened / phase.closed (attempt_evidence/model.py KINDS); the reader derives a phase from role or attempt scope where none is explicit (reader.py ROLE_PHASES). Knowledge-gate and commit boundaries are not recorded and never fabricated. Deferred by owner decision 2026-10-10."
+  },
+  "GUI-EVIDENCE-POLL-COST-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "Confirmed as design (TRACED, AUTH-A6-12): every evidence page is served from a chain verified in that read (application/evidence.py _verified_chain). A verified-head cache is a future optimisation that must not weaken the check. Related: GAP-A6-03 (what the check proves)."
+  },
+  "GUI-EVIDENCE-LARGE-RUN-LOAD-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "Same owner and fact as GUI-EVIDENCE-POLL-COST-001 (per-read verification). The registry's measurements stand (5.2k records 0.7 s, 20.5k records 5.8 s); no defect at typical sizes."
+  },
+  "GUI-M1-STORED-PROMPT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed (TRACED): history.prompt is still a KUP operation (kup/serve.py); the cockpit's context view reads evidence.call_content, which needs an evidence store. Legacy rows only."
+  },
+  "GUI-RUN-REPORT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Future feature (v1.2). A6 constraint for its design: a report states the outcome from the RunRecord, not from the history row (GAP-A6-03)."
+  },
+  "GUI-KRIYA-LOG-NOT-PERSISTED-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Disproved (MEASURED 2026-11-15, read-only): the Kriya Log is the run's own log file <log dir>/runs/<run id>/kriya.log (application/run_log.py, core/logging_setup.py run_log). For run 20261113T060030-40a14267 the file exists at ~/.kriya/logs/runs/<id>/kriya.log and holds the 06:04:43 kriya.tools.gate_view WARNING at line 81 (67 WARNING lines). The registry search looked in the app's stderr file and under the state root; the log directory is a separate location. Residual, true: the log is outside the evidence store (no chain, no seal, no retention owner found, default file mode 0644) - recorded in AUTH-A6-11 / MUT-A6-11."
+  },
+  "LEAK-CHECK-SHARED-LINE-FALSE-POSITIVE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Not re-traced (attempt_evidence/leak_check.py is an operator diagnostic; authoritative in OPEN-ITEMS OI-107, present at the baseline). False positives only; no run decision reads the tool. Tooling fix, no architecture fact."
+  },
+  "GUI-APPEARANCE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Desktop presentation (dark-only). No kernel fact."
+  },
+  "GUI-NOTIFICATION-VISUAL-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "A recorded limit of test automation (the OS draws the banner). No kernel fact."
+  },
+  "GUI-NATIVE-MEMORY-DRIFT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Examined; not characterizable under the freeze (needs the two-hour soak, OPEN-ITEMS OI-108; owner decision 2026-10-19: do not run it now). Desktop resource observation, unproven either way; no architecture decision depends on it. Monitored item."
+  },
+  "GUI-REASON-CODES-IN-ERROR-STATES-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Desktop wording, not re-read. Cosmetic; belongs with the result-wording work of GAP-A3-01."
+  },
+  "TEST-RESOURCEWARNING-HYGIENE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Test-harness hygiene (OPEN-ITEMS OI-110). No product path. Not re-run."
+  },
+  "TEST-DEADLINE-TIMING-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Test-harness timing race under load (registry classification, measured there). The product behaviour it exercises is AUTH-A6-10 / FR-A6-10 (typed deadline stop). Not re-run: a loaded parallel run is not a focused test. Matters to the certification gate only (one full-suite run, no retry for luck)."
+  },
+  "TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Same class as TEST-DEADLINE-TIMING-001 (wall-clock TTL under load; OPEN-ITEMS OI-109). No product path."
+  },
+  "KERNEL-GOLDEN-HARNESS-VOLATILITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Test-harness (OPEN-ITEMS OI-41). Part (a) is the test-side face of GAP-A5-01: scenarios built on AppConfig defaults read the checkout's skills and ./memory because the packaged default locations are inside the installation. Part (b): an unnormalized elapsed-milliseconds field. Not re-run."
+  },
+  "KERNEL-GOLDEN-DATE-DEPENDENT-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Fixed at the baseline (TRACED): tests/golden/kernel/legacy_lessons_staged.json holds no added_at value; tests/state_machine/_kernel_golden.py carries the OI-53 handling and test_sm_kernel_golden.py simulates the calendar day. The state-machine tier was green on 2026-11-13/14 (sprint log sections 41, 42), which a date-dependent golden rendered on 2026-10-17 could not be."
+  },
+  "KERNEL-GOLDEN-RUNID-PATH-NORMALIZATION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Test-harness hazard in mutation sandboxes only (OPEN-ITEMS OI-64). No product path. Not re-run."
+  },
+  "KERNEL-RUNTIME-TRACE-PATH-LENGTH-DEPENDENT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Test-harness (OPEN-ITEMS OI-70): rendered prompt-section sizes depend on the checkout path length. Shows that absolute paths enter a rendered prompt; no decision reads the size. Not re-run."
+  },
+  "KERNEL-TESTS-CHECKOUT-MEMORY-MORE-FILES-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Test-harness (OPEN-ITEMS OI-71). Test-side face of GAP-A5-01: AppConfig-default configs resolve ./memory in the checkout. Closes with the project-state location of GAP-A5-01 or with strict test configs."
+  },
+  "DEMO-V2-FIXED-STUB-PORT-PARALLEL-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current by reading: tests/test_demo_v2_owner_state.py has no xdist_group pin. Test-harness; the demo guard behaves correctly."
+  },
+  "TOOLS-COMMAND-TEST-NONHERMETIC-CWD-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Fixed at the baseline (TRACED): tests/test_tools_command.py::_hermetic_workspace (which names this row) runs the test in a fresh Git work tree. The design question the row raised (a repository carrying committed Kriya state archives makes mutating tools refuse there) is fail-closed by design (slice A5, AUTH-A5-08)."
+  },
+  "TEST-SLICE-A-OCI-STALE-NESTED-COMMAND-STRING-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current: the string `kriya runs tool retry` occurs once in tests/test_slice_a_real_oci_boundary.py. Text only; no assertion depends on it."
+  },
+  "UI-SCALE-TEST-TIMEOUT-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Fixed at the baseline (TRACED): ui/shared/src/cockpit/scale.test.tsx carries the 30 s margin with the measurement in its comment. The registry's own closure_evidence says fixed and merged; its status was not updated."
+  },
+  "WAVE8-S7-PYTHONPATH-INHERITANCE-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Fixed at the baseline (TRACED): tests/test_s7_containment_census.py removes PYTHONPATH (monkeypatch.delenv) with the 2026-11-13 measurement in its comment."
+  },
+  "WAVE8-TRACKED-BYTECODE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (MEASURED, git ls-files): three .pyc files are tracked under handover/BACKEND-READINESS-V2/gate-certification/__pycache__/. Hygiene outside every product tree; a change is outside the freeze."
+  },
+  "CERT-DEMO-V2-IDLE-STUB-XDIST-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Test-harness; mechanism not traced in the registry and not traced here (needs an xdist run). Same file and class as DEMO-V2-FIXED-STUB-PORT-PARALLEL-001. No product path."
+  },
+  "CERT-CI-PLAIN-JOBS-LOCKFILE-GROUP-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Hosted CI. The open residual (one timing bound on a hosted runner) cannot be characterized locally. Monitored item; no architecture fact."
+  },
+  "TEST-BASELINE-THREE-STALE-FAILURES-AT-132884B-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Stale by preserved measurement: the full suite on 82436eb (an ancestor of the baseline, checked with git merge-base) ended exit 0 with 21539 passed, 7 skipped (sprint log section 41), after this row registered three deterministic failures. Not re-run at the baseline; the commits after 82436eb have had no full suite."
+  },
+  "TEST-S7-H-LEDGER-STALE-CONTROL-REFERENCE-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Fixed at the baseline (TRACED): tests/containment_h_ledger.py names the renamed control tests/test_s3_execution_views.py::test_the_scopes_venv_source_is_mounted_into_the_view_read_only_and_writable_only_when_asked, which exists. Same failure as TEST-S7-H-LEDGER-OI142-CONTROL-MISSING-001."
+  },
+  "TEST-REPAIR-003-F1-RESIDUAL-VENV-CREATION-COUNT-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Stale by preserved measurement: green in the full suite on 82436eb (ancestor of the baseline; 21539 passed, 7 skipped, exit 0). Cause of the earlier failure was never traced in the registry; not re-run at the baseline."
+  },
+  "TEST-CERT-TMP-GROWTH-TWO-STALE-ALLOWLISTS-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Stale by preserved measurement: green in the full suite on 82436eb (ancestor of the baseline). Overlaps the first item of TEST-BASELINE-THREE-STALE-FAILURES-AT-132884B-001. Not re-run at the baseline."
+  },
+  "TEST-KERNEL-GOLDEN-ORDER-DEPENDENCE-IN-AD-HOC-MIX-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Test-harness order dependence in one ad hoc file mix; cause not traced in the registry and not traced here (needs the bisecting runs). The goldens pass alone, as a file and in the tier. No product path."
+  },
+  "TEST-S7-H-LEDGER-OI142-CONTROL-MISSING-001": {
+    "reconciliation": "DUPLICATE/SUPERSEDED",
+    "disposition": "-",
+    "notes": "Duplicate of TEST-S7-H-LEDGER-STALE-CONTROL-REFERENCE-001 (the same ledger entry and the same missing control), and fixed at the baseline in the same way."
+  },
+  "TEST-CERTIFICATION-WALL-CLOCK-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed as registered (3h27m13s on 82436eb, sprint log section 41). Owner-ruled optimisation after the confidence milestone; never by weakening coverage. The project instructions' ~8 min statement is stale (DOC-A6-05)."
   }
 }

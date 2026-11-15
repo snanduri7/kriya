@@ -1538,3 +1538,461 @@ approval (`process_profiles.enforce_approval`, off by default) forces the same p
 `launch_approval.py`. 11. **Class-D setup errors.** Not owned here: the three contained-environment rows are
 characterized in `GAP-LEDGER.md` (slice A5 registry table) as environment-coupled and go to A6 with the remaining
 class-D evidence.
+
+## Slice A6 - runtime, model, qualification, fallback, Developer request, evidence, extensibility (2026-11-15)
+
+AS-IS at the baseline. Rows carry the full field set of the documentation addendum. Probe references (`P1` to `P7`)
+are `evidence/a6/a6_probe.py` with its output in `evidence/a6/a6_probe_output.txt`; "control" means a search in
+`evidence/a6/check_citations_a6.py` (output beside it: 76 files, 337 symbols, 47 controls, 0 problems). "Section 42"
+is `handover/PRODUCT-72H/SPRINT_LOG.md` section 42 (preserved historical measurement of 2026-11-14, not re-run:
+live models are frozen).
+
+The layering every row below relies on (`TRACED`, module docstring of `core/inference_runtime.py`):
+
+```
+workflow / agents  ->  LLMClient (kriya/core/llm.py: the inference service)  ->  InferenceRuntimePort  ->  runtime adapter  ->  provider
+```
+
+Everything that is a decision (which model, which settings, the budget, the deadline, egress, retries, fallback,
+evidence) sits in `LLMClient` or above it. An adapter owns the wire format, the per-request context-window option, the
+identity probe, model discovery and the classification of transport errors.
+
+Trust classes of the text in one model request, used by `AUTH-A6-09` and by Phase B:
+
+| Class | Meaning | Carried how |
+|---|---|---|
+| T-KRIYA | Text Kriya authored (system prompt, section headers, protocol, reminders, scaffolds) | Literal strings in `agents/agent.py`, `retry_prompts.py` |
+| T-USER | The user's own goal words | `Goal:` / the Authoritative Goal section of the task description |
+| T-MODEL | Text another model produced in this run (plan, design, Planner criteria) | Task description (`Plan:`), `=== Architecture Design ===` |
+| T-REPO | Bytes of the project (code context, retry projections, sibling files) | `=== Existing Code Base Context ===` |
+| T-VALIDATOR | Output of a deterministic gate (compiler, test runner, runtime) | `=== Previous Error to Fix ===` |
+| T-SKILL | Skill text (rules, instructions, examples), split trusted / unverified | The conventions block inside the code-base context |
+| T-REFERENCE | Learned or retrieved documentation | Inside the one fence, `untrusted_context.py::fence_untrusted_reference` |
+| T-EXTERNAL | Text fetched from the web during this run | **No class of its own in the code** (`GAP-A4-04`, completed in this slice) |
+
+No request carries these classes as structure: a request is two messages, `system` and `user`
+(`LLMClient.complete_result`), and the classes exist only as headings inside the user message.
+
+### AUTH-A6-01 - Which model serves this call, and with which settings? (model binding)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The model name, endpoint, sampling settings, output budget, declared window and runtime adapter of one call |
+| Owner | `core/llm.py::LLMClient._binding` (settings of a model), with the caller choosing the model: `agents/agent.py::call_with_escalation` for Planner, Architect, Reviewer, run verifier, spec compliance and skill gap (the role's `agent_llms.<role>.llm`, then its chain); `workflow/generation_service.py::_run_developer_generation` for the Developer (`AUTH-A6-07`) |
+| Why this owner | MODEL-EVIDENCE-HARDENING-001: a call to a model executes with that model's own binding, never the primary's, so the qualified inference identity equals the executed one |
+| Authoritative inputs | The effective configuration: `llm`, `llm_chain`, `agent_llms.*` (all `SECURITY_AUTHORITY` fields for endpoint, model, `extra_body`, `inference_runtime`, `context_policy`: `AUTH-A5-10`); the routing plan when `model_policy.routing` is on (`core/model_routing.py::plan_routes`, applied to a copy of the configuration before the client exists, `cli.py::_workflow_config`) |
+| Evidence allowed | The configuration and, for routing, a current QUALIFIED record plus the operator's metrics table |
+| Evidence forbidden | Any model text; the model's own name as proof of capability; `extra_body.model` (refused, `PROVIDER_REQUEST_FIELD_CONFLICT`: `provider_contract.py::refuse_extra_body_request_fields`, checked in the configuration validators, in `LLMClient._refuse_owned_request_fields` and in `ChatRequest.__post_init__`) |
+| Model role | None (a model never selects a model) |
+| Human role | Operator: writes and approves the configuration |
+| Persisted state | None of its own; each call's result carries `model`, `runtime_fingerprint`, `inference_settings_digest` (`core/completion.py::CompletionResult`) |
+| State transitions | None |
+| Downstream consumers | `AUTH-A6-02` to `AUTH-A6-05`; role metrics (`AUTH-A6-08`); the evidence records `model.request` / `model.result` |
+| Mutations authorized | None |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | **A model name no binding names resolves to the primary's binding** (its settings, window and adapter), the request still naming the unknown model (`MEASURED` P7; the last `return` of `_binding`). The reasoning flag is looked up by exact match while the binding is matched case-folded (`TRACED`, `complete_result`). `GAP-A6-02` |
+| Retry / recovery | Non-Developer roles: the role chain in order, on a failed call or a schema failure (`call_with_escalation`). Developer: `AUTH-A6-07` |
+| Checkpoint / resume | The resume fingerprint `model_runtime` binds every role model's exact runtime and settings digest; routes are replayed from the checkpoint or refused (`ROUTE_RESUME_MISMATCH`) (cited from the subsystem note, not re-read) |
+| Audit emitted | `model.request.requested_model`, `model.result.reported_model` (absent when the response named none), `model.route` events when routing is on |
+| Alternate paths | Override arguments of `complete_result` (`model_override`, `base_url_override`, `extra_body_override`, `temperature_override`): callers are the role and Developer choke points and the knowledge channels (lesson extraction uses the last Developer model, `stage_apply.py`) |
+| Invariant | Executed inference identity equals the identity the binding declares; a request field Kriya owns is never replaced through `extra_body` |
+| Negative control | Control `runtime_profile` and the three refusal sites of `PROVIDER_REQUEST_FIELD_CONFLICT` (cited symbols) |
+| AS-IS evidence | `TRACED`; `MEASURED` P7 |
+| Required contract | An unknown model name is a typed refusal (`GAP-A6-02`) |
+| Limitation | `core/model_routing.py` was read at its entry points only; routing is off by default |
+
+### AUTH-A6-02 - Which runtime adapter carries the call? (adapter identity)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The adapter (wire protocol) of a binding |
+| Owner | `core/inference_runtime.py::runtime_for_binding` over the registry (`register_runtime_adapter`) |
+| Why this owner | INF-001: one port, so no workflow or agent module names a provider, a transport or an SDK |
+| Authoritative inputs | The binding's `inference_runtime` (`None` = the default adapter) |
+| Evidence allowed | The registry content: `ollama` (default; OpenAI-compatible `/v1`, no per-request window, no schema-constrained output) and `ollama_native` (`/api/chat`, per-request window, `truncate: false`, schema-constrained output) (`MEASURED` P2) |
+| Evidence forbidden | Name similarity: `vllm`, `openai` and `Ollama` (other case) are refused with `UnknownRuntimeAdapterError`, never served by the default (`MEASURED` P2) |
+| Model role | None |
+| Human role | Operator (`inference_runtime` is `SECURITY_AUTHORITY`) |
+| Persisted state | The adapter's protocol version is part of the runtime fingerprint (`kriya-openai-compat/3`, `kriya-ollama-native/3`) |
+| State transitions | None |
+| Downstream consumers | `LLMClient._runtime`, the request plan (`request_plan`), qualification, doctor |
+| Mutations authorized | None |
+| Mutations forbidden | Registering an adapter outside the provider module (control `register_runtime_adapter(`: the port and `core/model_runtime.py` only) |
+| Failure / UNKNOWN | Unregistered name: refused before any provider contact |
+| Retry / recovery | None |
+| Checkpoint / resume | Through the runtime fingerprint (`AUTH-A6-03`) |
+| Audit emitted | `model.request.adapter`; `provider_contract` entry of each `CompletionResult` |
+| Alternate paths | None found: `LLMClient` is the only caller of an adapter's `complete` / `complete_with_tools` outside qualification and doctor, which build a `ChatRequest` themselves (the same refusal applies at `ChatRequest.__post_init__`) |
+| Invariant | A binding is served by the adapter it names or not at all |
+| Negative control | Control `register_runtime_adapter(`; `tests/test_inf001_runtime_port.py` (layering, cited, not run) |
+| AS-IS evidence | `TRACED`; `MEASURED` P2 |
+| Required contract | None differing. The production runtime is the native adapter by owner ruling (section 42); nothing in the code makes the production profile require it (the profile requires what only the native adapter can pass: `AUTH-A6-06`) |
+| Limitation | The native adapter's request and response code (`OllamaNativeRuntimeAdapter`) was read at its declaration only |
+
+### AUTH-A6-03 - What exact runtime is this? (runtime identity)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The identity of the served model and runtime: `ModelRuntimeFingerprint` and whether it is `exact` |
+| Owner | `core/model_runtime.py::probe_model_runtime` through `resolve_model_runtime` (cached per process and runtime input) |
+| Why this owner | PRD-013: identity is what the endpoint reports, never what the configuration hopes |
+| Authoritative inputs | The endpoint's own reports (version, model digest, weights blob, quantization, template and parser, tokenizer digest, normalized parameters, capabilities) plus Kriya-side inputs (capability profile, the window sent, the adapter protocol version) |
+| Evidence allowed | Probe responses of a local endpoint |
+| Evidence forbidden | The model name; timestamps; anything for a non-local endpoint (never probed under any egress policy) |
+| Model role | None |
+| Human role | None |
+| Persisted state | `<state>/model_runtimes/<digest>.json` (`record_fingerprint`); `RunRecord.model_runtime_fingerprint_ids` (`control/run_coordinator.py::record_model_runtime_use`, exact fingerprints only) |
+| State transitions | Missing components are `unavailable`; `exact` only with artifact digest and provider version |
+| Downstream consumers | Qualification (`AUTH-A6-06`), role metrics, routing, the resume fingerprint, the release-candidate identity (`AUTH-A6-13`) |
+| Mutations authorized | The fingerprint file |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | A probe failure never fails the call: a non-exact fingerprint with `probe_errors` (`LLMClient._runtime_fingerprint`). Non-exact is never QUALIFIED |
+| Retry / recovery | None (cached, including failures, for the process) |
+| Checkpoint / resume | The resume fingerprint binds each role model's exact runtime (cited) |
+| Audit emitted | `model.runtime` run event at run start (`workflow.py::_primary_model_runtime_details`: "Evidence only; never blocks a run"); the digest on every `CompletionResult` |
+| Alternate paths | `KRIYA_MODEL_RUNTIME_PROBE=0` disables probing (the test suite's setting): every runtime is then non-exact. It is an environment variable, not an authority field |
+| Invariant | Evidence binds to the exact runtime digest; the same weights under another provider or version are a different runtime |
+| Negative control | - (identity producers are in one module by a committed tripwire, cited) |
+| AS-IS evidence | `TRACED` |
+| Required contract | None differing |
+| Limitation | The probe itself was not run (live runtime frozen) |
+
+### AUTH-A6-04 - Which context window is requested, served and budgeted? (capacity versus admission)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Three separate numbers: the REQUESTED window (runtime identity), the SERVED window (observation) and the BUDGET window (what Kriya admits) |
+| Owner | `core/provider_contract.py::context_window_state` (dispatch check) and `budget_window` (the one sizing rule), fed by `model_runtime.py::requested_context_window` and `admission_ceiling` |
+| Why this owner | MODEL-RUNTIME-CAPACITY-VS-ADMISSION-AUTHORITY-001 (2026-11-14): "served 65,536, budgeted 32,768" must be expressible without changing the runtime's identity |
+| Authoritative inputs | Requested: an explicit provider option in `extra_body`, else the binding's `context_window`. Served: `observe_served_context_state` (`/api/ps`), else the served model's own configuration. Ceiling: the binding's `context_policy.max_context_tokens` |
+| Evidence allowed | An observation with its provenance (`Provenance`) |
+| Evidence forbidden | Seeding the served window from the request; a larger served window enlarging the budget (`MEASURED` P3: requested 65536, served 131072 gives budget 65536) |
+| Model role | None |
+| Human role | Operator sets window and ceiling; `kriya model pin` writes a derived model carrying the window |
+| Persisted state | `provider_contract` entry of each result (`budget.context_state`) |
+| State transitions | Served below requested: refused always (`SERVED_CONTEXT_BELOW_REQUESTED`). Served different from requested under the production profile: refused (`RUNTIME_CONTEXT_IDENTITY_MISMATCH`). Otherwise budget = min(requested, ceiling) (`MEASURED` P3: all four cases) |
+| Downstream consumers | Dispatch (`LLMClient._dispatch_budget`), allocation (`context_budget.py::request_capacity`), routing (`model_routing._served_window`), the transition profile (`ModelRequestProfile.context_window`) |
+| Mutations authorized | None |
+| Mutations forbidden | The ceiling entering any identity: it is absent from the inference-settings identity (control), cleared in `qualification_config`, and not in the runtime fingerprint |
+| Failure / UNKNOWN | Served window unobserved: outside production recorded as unverified; under production on an exact runtime that declares observation, a result whose window was not observed after the call is refused (`SERVED_CONTEXT_UNOBSERVABLE`) |
+| Retry / recovery | One bounded observation retry (`SERVED_CONTEXT_OBSERVATION_ATTEMPTS`); nothing cached |
+| Checkpoint / resume | The ceiling is in the `config` resume fingerprint (cited) |
+| Audit emitted | `provider_contract` entry; `provider_contract.admission_miss` when admission passed and the provider refused |
+| Alternate paths | The after-call identity check compares the observed window with the REQUESTED window (`llm.py::identity_window`), not with the budget (the defect fixed in `2abb5d6`, section 42) |
+| Invariant | Requested is identity, the ceiling is controller policy; no sizing site uses a window above the budget window |
+| Negative control | Absent `max_context_tokens` in `core/inference_settings.py`; `tests/test_model_runtime_capacity_vs_admission_001.py` (cited) |
+| AS-IS evidence | `TRACED`; `MEASURED` P3; section 42 for the live values |
+| Required contract | None differing. Reconciliation item "native Ollama 65K qualification": consistent with the code (`AUTH-A6-06`) |
+| Limitation | The window of a real launch was not observed in this slice |
+
+### AUTH-A6-05 - Does the request fit, and what may be left out? (dispatch budget and request fitting)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether one request may be sent, with which output budget and (adaptive policy only) which larger qualified window; before that, which optional sections a prompt keeps |
+| Owner | Admission: `core/token_budget.py::plan_dispatch`, called inside `complete_result` / `complete_with_tools_result` before every request. Fitting: `workflow/context_budget.py::fit_developer_request` (Developer), `fit_planner_request` (Planner, Architect), `review_requests` (Reviewer) |
+| Why this owner | PRD-016 / PROMPT-BUDGET-FIT: one counter for dispatch; a request whose fixed text is known sizes its variable sections against its own capacity |
+| Authoritative inputs | The budget window (`AUTH-A6-04`), the binding's output budget, the qualified reasoning reserve, the counter (exact registered > qualified ratios > default bytes per token) |
+| Evidence allowed | A grounded `OutputExpectation` (the size of a file being rewritten) may enlarge the output budget up to `max_output_tokens` |
+| Evidence forbidden | A model's own estimate of its output; trimming mandatory text (goal, protocol, requirements, the error, skill conventions: never trimmed, so an oversized request is refused, not silently cut) |
+| Model role | None |
+| Human role | Operator: `llm.context_policy` (`SECURITY_AUTHORITY`) |
+| Persisted state | `model.budget_expansion` and `context.request_fit` / `model.optional_context_reduced` run events |
+| State transitions | Fits -> dispatch. Does not fit -> `ContextBudgetUnsatisfiableError` (`CONTEXT_BUDGET_UNSATISFIABLE`) or `OutputBudgetUnsatisfiableError` before inference; the Developer falls back once to an anchored patch on the output refusal |
+| Downstream consumers | The attempt (a refusal is a non-candidate failure, `FR-A1` rows), the retry sub-machine |
+| Mutations authorized | None |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | Optional sections are dropped in a fixed order (planned source, siblings, graph, investigation, learned reference), each rebuilt smaller at most three times, else left out and recorded |
+| Retry / recovery | The refusal does not open a new failure family (NON-CANDIDATE-FAILURE-SCOPED-RESET-001, `AUTH-A1-03`) |
+| Checkpoint / resume | None |
+| Audit emitted | The events above; `prompt.sections` evidence records with a digest per segment |
+| Alternate paths | `context_budget.estimate_tokens` (`len // 4`) still drives context assembly, a second, coarser counter than the dispatch counter (stated in the subsystem note; by design) |
+| Invariant | A request never reaches the provider above the budget window; mandatory text is never trimmed |
+| Negative control | - |
+| AS-IS evidence | `TRACED` at the entry points; the fitting internals are cited from the subsystem note |
+| Required contract | None differing |
+| Limitation | `context_budget.py` (about 1,200 lines) was read at its public functions only |
+
+### AUTH-A6-06 - Is this runtime qualified for the role, and where does that decide anything? (qualification)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | QUALIFIED / NOT_QUALIFIED / STALE / MISSING / RUNTIME_NOT_EXACT for (exact runtime, inference settings, policy digest), per required capability of a role |
+| Owner | `core/model_qualification.py::assess` over records written by `kriya model qualify`; `required_capabilities(cfg, role, model)` |
+| Why this owner | PRD-014: capability is measured on the exact identity, never inferred from a model name |
+| Authoritative inputs | The record of the qualification identity (`inference_settings.py::qualification_identity`: runtime digest + settings digest), the policy version (`kriya-qualification/9` at the baseline) and policy digest, the execution environment for capacity evidence |
+| Evidence allowed | Deterministic case results run by Kriya against the runtime |
+| Evidence forbidden | Model prose; a record of another runtime digest, other settings or another policy (STALE); a record inside the workspace (`_refuse_inside_workspace`) |
+| Model role | Subject of the test |
+| Human role | Operator runs `kriya model qualify` |
+| Persisted state | `~/.kriya/qualifications` (`KRIYA_QUALIFICATION_HOME`), outside every workspace |
+| State transitions | A record is current only while runtime, settings, adapter version and policy digest all match |
+| Downstream consumers | **Decides** in exactly these places (control `assess(`, `fallback_incompatibilities(`, `run_production_doctor(`): (1) Developer fallback under the production profile: a fallback that is not QUALIFIED is skipped (`model_transition.py::fallback_incompatibilities`); (2) the Developer retry identity under production (`generation_service.py::_require_qualified_retry_identity`); (3) routing eligibility when routing is on; (4) `doctor --production` (`model.qualification` FAIL unless every model of every role is QUALIFIED); (5) the release-candidate identity (`AUTH-A6-13`). **Records only** at run start (`workflow.py::_primary_model_runtime_details`) and in `kriya model status` |
+| Mutations authorized | The record store, by `kriya model qualify` |
+| Mutations forbidden | Qualification never executes model output on the host (cited) |
+| Failure / UNKNOWN | MISSING, STALE and non-exact are recorded, never refused, outside production. **Under production the primary Developer model and every non-Developer role are not checked by the run at all**: `_enter_developer_model` evaluates the rule only when `is_fallback` (`TRACED`), and no other call site assesses a role's model during a run. `GAP-A6-01` |
+| Retry / recovery | A skipped fallback is replaced by the next configured one that can serve; none left: `FALLBACK_MODEL_INCOMPATIBLE` |
+| Checkpoint / resume | The offered context tiers and settings digests are bound into the resume fingerprint (cited) |
+| Audit emitted | `model.runtime` (with `developer_qualification`), `model.fallback_selection`, `model.retry_identity_not_qualified` |
+| Alternate paths | The production doctor is a separate command; no run invokes it (control `run_production_doctor(`; absent in `workflow.py`). The desktop reads no qualification (absent `model_qualification` under `kriya/application` and `kriya/kup`) |
+| Invariant | A capability claim holds only for the exact identity that was measured |
+| Negative control | The three controls named above |
+| AS-IS evidence | `TRACED`. Reconciliation: section 42 records both 65K pins NOT_QUALIFIED on the OpenAI-compatible path at `over_context_refusal` (an 81,920-token prompt answered from 32,770 tokens: the runtime truncates silently) and QUALIFIED on the native adapter. The code agrees: every role requires `over_context_refusal`, and only the native adapter sends `truncate: false` (`MEASURED` P2 capabilities; cited note). "Compat truncation disqualification" is therefore a property of the default adapter, not a defect: with the default adapter no role can be QUALIFIED |
+| Required contract | `GAP-A6-01` |
+| Limitation | No qualification was run (frozen). The case implementations were not read |
+
+### AUTH-A6-07 - May the Developer move to another model? (fallback and transition)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Which model the next Developer call goes to, and whether a configured fallback can serve the attempt |
+| Owner | Escalation order: `attribution.resolve_fallback_model` (cited; the one formula). Compatibility: `workflow/model_transition.py::fallback_incompatibilities`, applied by `fallback_decision.py::_select_developer_fallback` (before the prompt is sized) and `_substitute_for_required_patch` (at the call), entered from `generation_service.py::_enter_developer_model` |
+| Why this owner | PRD-017: everything a request depends on is resolved again for the model actually called (`ModelRequestProfile`) |
+| Authoritative inputs | The configured chain order; the profile of the candidate (exact runtime, Developer qualification, capability profile, edit protocol, windows, own output budget); the files the attempt may only patch |
+| Evidence allowed | A FAILED Developer qualification case; production without QUALIFIED; a whole-file-only profile against a patch-only attempt; no prompt room |
+| Evidence forbidden | Model size or name as a capability claim; metrics; reordering by preference |
+| Model role | None |
+| Human role | Operator configures the chain |
+| Persisted state | `GenerationState.incompatible_fallbacks` (run-wide skips), `last_developer_request_profile`; neither is in a checkpoint (`AUTH-A1-09`) |
+| State transitions | `SM-A6-04` |
+| Downstream consumers | The retry sub-machine (`SM-A1-01`); the no-progress fingerprint keys on the profile digest |
+| Mutations authorized | None |
+| Mutations forbidden | A fallback inheriting the primary's sampling settings or output override (`binding_output_tokens`) |
+| Failure / UNKNOWN | No remaining fallback can serve: terminal `fallback_incompatible` before any request |
+| Retry / recovery | Bounded by the scoped budgets of `AUTH-A1-06` |
+| Checkpoint / resume | Not persisted: a resumed unit starts again on the primary (consequence of `GAP-A1-02`) |
+| Audit emitted | `model.transition` (field-by-field changes), `model.fallback_selection`; evidence `fallback.decision` |
+| Alternate paths | Non-Developer roles escalate through `call_with_escalation` with no compatibility or qualification check (their chain is tried in order) |
+| Invariant | A request is sized, shaped and attributed for the model that receives it |
+| Negative control | Control `fallback_incompatibilities(` |
+| AS-IS evidence | `TRACED` |
+| Required contract | None differing, apart from `GAP-A6-01` (the primary) |
+| Limitation | `attribution.resolve_fallback_model` and triage were not re-read (slice A1 covered the retry modes) |
+
+### AUTH-A6-08 - Which role made the call, and must roles be independent? (role attribution and independence)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | (a) the role a call is counted under; (b) whether verifier roles must run on a runtime other than the Developer's |
+| Owner | (a) `core/role_metrics.py::model_role` (a context variable set by `call_with_escalation`, the Developer choke point, the gate orchestrator's self-correction entry and localization); (b) `model_policy.independent_roles`, enforced by `cli.py::_workflow_config` (`ROLE_INDEPENDENCE_REQUIRED`) and reported by the doctor |
+| Why this owner | PRD-018: one shared client, so attribution is by scope, never guessed |
+| Authoritative inputs | (a) the active scope; (b) the exact runtime digests of the roles (`role_runtimes`) |
+| Evidence allowed | Exact runtime identity |
+| Evidence forbidden | A second model's opinion as verification evidence (`second_opinion_is_verification: False` in both records) |
+| Model role | None |
+| Human role | Operator sets `independent_roles` (`SECURITY_AUTHORITY`); default is the empty list |
+| Persisted state | `model.role_independence` (run start) and `model.role_metrics` run events; `kriya model metrics` aggregates the history database |
+| State transitions | None |
+| Downstream consumers | Routing (reads the candidate's own identity rows), the operator |
+| Mutations authorized | The routing table, only by `kriya model metrics --write-table` (runs never write it) |
+| Mutations forbidden | Metrics deciding anything during a run |
+| Failure / UNKNOWN | A call outside any scope is `unattributed`. Producers found: every call of the knowledge channels (absent `model_role` under `kriya/knowledge`), among them the lesson extraction after a retried success, which calls the last Developer model, a fallback when the fallback fixed it (`stage_apply.py`, `knowledge/channels/live_failure.py`) |
+| Retry / recovery | None |
+| Checkpoint / resume | None |
+| Audit emitted | The two events |
+| Alternate paths | With the default policy (no required roles) the doctor reports shared runtimes as WARN and the run proceeds: the accepted warning `models.role_independence` of section 42 |
+| Invariant | Metrics are observations; independence is enforced only when the operator requires it |
+| Negative control | Control `model_role(` (seven modules); absent under `kriya/knowledge` |
+| AS-IS evidence | `TRACED`. That the `unattributed` bucket measured in PRD-035 attempt 2 / C6 is the lesson-extraction call is `INFERRED` (the artifact was not opened) |
+| Required contract | None differing. Reconciliation "role independence warning": intentional current contract |
+| Limitation | - |
+
+### AUTH-A6-09 - What is in a Developer request, and which parts are trusted? (STAGE-GENERATION, trust boundary)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The exact text of the two messages a Developer call sends |
+| Owner | `agents/agent.py::DeveloperAgent._fill_missing_content` (one request per file) and `run_generation` (file-list request, single-stage fallback), fed by `workflow/attempt.py` (first attempt and retries) and `workflow/retry_prompts.py` |
+| Why this owner | Stable blocks first for prefix reuse; the per-file instruction last |
+| Authoritative inputs | See the layout below |
+| Evidence allowed | T-KRIYA, T-USER, T-REPO, T-VALIDATOR; T-MODEL as approach (the system prompt states that the Planned Implementation Strategy is "not itself part of the requirement") |
+| Evidence forbidden | By the cross-cutting rule: learned or retrieved text outside the fence. **Not enforced for text fetched during the run** |
+| Model role | Candidate generator |
+| Human role | None at this point |
+| Persisted state | Evidence `model.request` (the exact messages as a content blob under capture `full`), `prompt.sections` |
+| State transitions | None |
+| Downstream consumers | The provider; the candidate (`AUTH-A3-01`) |
+| Mutations authorized | None (the answer becomes a candidate through the write gate, `AUTH-A5-04`) |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | An unfit request: `AUTH-A6-05`. A truncated answer is refused (`OUTPUT_TRUNCATED`) |
+| Retry / recovery | The retry builders re-compose the task description with the previous error |
+| Checkpoint / resume | The request is rebuilt; `state.error_context` is not persisted |
+| Audit emitted | The two evidence kinds; `retry.delta` |
+| Alternate paths | The Reviewer, the lesson extraction and the targeted-test selection read the same error context (rows of the table below) |
+| Invariant | Model and retrieved text is evidence, never authority; untrusted text is fenced |
+| Negative control | Absent `fence_untrusted_reference` in `live_lookup.py`, `retry_strategy.py`, `retry_package.py`, `retry_prompts.py`, `repair_orchestrator.py`, `stage_review.py`; absent `unresolved_skill_gap` and `check_goal` in `agents/agent.py` and `generation_service.py` |
+| AS-IS evidence | `TRACED`; `MEASURED` P1 |
+| Required contract | `GAP-A4-04` (completed below), `GAP-A4-03` |
+| Limitation | The per-file request has more than one instruction variant (protocol modes); the layout is the same in each. `attempt.py` was read at the retry call sites only |
+
+Layout of one per-file Developer request (`TRACED`, `_fill_missing_content`):
+
+| Message | Part, in order | Class | Source |
+|---|---|---|---|
+| system | Mode and response protocol for one file | T-KRIYA | `file_sys_prompt` |
+| user | `=== Existing Code Base Context ===` | mixed | `existing_code_context` = skill conventions (T-SKILL: "Rules" trusted, "Unverified Rules" labelled) + graph context of the project's files (T-REPO, unfenced by design: repository evidence) + the fenced learned reference (T-REFERENCE) (`stage_analysis.py`), then retry projections of the current files |
+| user | `=== Architecture Design ===` | T-MODEL | Architect |
+| user | `=== Task ===` | mixed | Goal (T-USER), plan (T-MODEL), contract blocks (T-KRIYA), then on a retry `=== Previous Error to Fix ===` (T-VALIDATOR **plus T-EXTERNAL when the live lookup ran**) |
+| user | Sibling files (optional section) | T-REPO | - |
+| user | Directive, verification reminder, skill reminder, authority reminder, source-location block, fix-analysis instruction and scaffolds | T-KRIYA, the scaffolds derived from the error text | `prompt_tail` |
+
+Where text fetched by the live lookup goes after `retry_strategy.py` appended it to `state.error_context`
+(`MEASURED` P1 unless marked; this completes the trace the owner required for `GAP-A4-04`):
+
+| Step | What happens to the page text | Trust label at that point |
+|---|---|---|
+| 1. Fetch | Up to 2,000 characters per term, appended under `=== Reference material found for '<term>' (from <url>) - ... verify before relying on it ===` | A plain banner naming the URL. No fence, and markers inside the text are kept verbatim: a page can carry the fence END marker or its own `=== Task ===` heading |
+| 2. Developer task, no retry package | The whole error context is the `=== Previous Error to Fix ===` body | Same banner, inside the section that carries validator output |
+| 3. Developer task, retry package | `repair_orchestrator.py` slices the text from the banner on into `advisory_context`; `RetryPackage.render_error` prints it under "Advisory reference evidence (verify against local validators):" | Labelled advisory; still unfenced; not in `prior_error_text()` |
+| 4. Kriya-authored instructions | Without a retry package the error context is `prior_error_context`; the incompatible-types and buffer-capacity scaffolds are built from it by pattern match. A page line shaped like a compiler message produces scaffold text | The scaffold is T-KRIYA text: the page's content now speaks as Kriya |
+| 5. Gate selection | `gate_orchestrator.py` passes `state.error_context` to `extract_target_test`; a test file name in the page text selects that test as the targeted run (raw error: suite; augmented: `tests/test_b.py`) | None: read as validator evidence. A targeted run that executes no test falls back to the suite (`TRACED`), so the effect is bounded to which test runs first |
+| 6. Reviewer, rejected candidate | `stage_review.py` passes `state.error_context` as `terminal_reason`; `rejected_candidate_system_prompt` places it in the **system** message inside the block headed "AUTHORITATIVE RUN DISPOSITION (deterministic control-plane fact, not your own assessment)", and again in the user message as "Last quality gate error" | Presented as a control-plane fact. The Reviewer's answer is advisory text shown to the person (`AUTH-A3-12`) |
+| 7. Lesson extraction | After a retried success `stage_apply.py` gives `state.error_context` to `LiveFailureChannel.extract`; the extracted facts are staged as learned knowledge (`TRACED`) | None. Staged facts are unverified until promoted (slice A4); how a staged fact is later rendered was not re-read |
+| 8. Provider payload | `[{"role": "system"}, {"role": "user"}]`; no field carries provenance | Headings only |
+
+Answers to the owner's four questions: (1) at dispatch the external text is not tagged as untrusted: it has a banner
+but not the fence, and the fence is the only mechanism the code defines for "reference, never instruction"; (2) it can
+become instruction-like trusted content in two ways: Kriya-authored scaffold text derived from it (step 4) and the
+Reviewer's system prompt (step 6); (3) the transformations do strip what provenance there was: the slice in step 3
+keeps the banner, the uses in steps 4 to 7 read the string as if it were validator output; (4) it influences one
+deterministic decision, the targeted-test selection (step 5), and no write decision: the write gate, the candidate
+and the gates never read it. Reach is unchanged from A4: web lookup is off by default and in the Project Setup
+profile, the production profile seals offline mode, and each query needs an approval.
+
+### AUTH-A6-10 - How long may a call and a run take? (deadline)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The deadline of one model call |
+| Owner | `core/llm.py::LLMClient._deadline` over the run's generation clock (`control/run_coordinator.py::claim_run_generation_clock`) |
+| Why this owner | PROVIDER-CONTRACT-001A: one clock, so a stream cannot outlive the budget |
+| Authoritative inputs | `autonomy.generation_time_budget_seconds` (`AUTH-A5-12`), narrowed by `inference_deadline()` |
+| Evidence allowed | The monotonic clock |
+| Evidence forbidden | - |
+| Model role | None |
+| Human role | None |
+| Persisted state | `provider_contract.deadline` on each result |
+| State transitions | Exhausted before contact: `INFERENCE_DEADLINE_EXHAUSTED`; mid-request: `INFERENCE_DEADLINE_EXCEEDED`; neither is resent or escalated |
+| Downstream consumers | The attempt (`time_budget_exhausted` stop, `AUTH-A1-08`); the final review (typed refusal) |
+| Mutations authorized | None |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | No budget configured: `deadline_bound=false` |
+| Retry / recovery | None |
+| Checkpoint / resume | The clock is per unit invocation under enforce (`AUTH-A1-08`, `GAP-A5-04`) |
+| Audit emitted | The deadline record |
+| Alternate paths | The budget is not part of any model identity: absent from the inference-settings identity, the qualification identity guard, the qualification record module and the release-candidate module (four controls). So the 2,400 s of the scenario template and the 3,600 s production ceiling are configuration values only; no qualification or certification is tied to either |
+| Invariant | A call never outlives the run's clock |
+| Negative control | Absent `generation_time_budget` in the four identity modules |
+| AS-IS evidence | `TRACED` |
+| Required contract | The run-level owner of `GAP-A5-04` (Phase C, with the A1 allowance contract) |
+| Limitation | - |
+
+### AUTH-A6-11 - What is recorded about a run, and which record is the truth? (evidence persistence, audit truth)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Nothing: these are records. The row states which record holds which fact, who writes it and what a reader may conclude |
+| Owner | Four writers, one per record: see the table below |
+| Why this owner | Each record has its own purpose (control, history, attempt evidence, log); only the RunRecord takes part in decisions |
+| Authoritative inputs | The run's own state at the moment of writing |
+| Evidence allowed | A reader may conclude: from the RunRecord, the lifecycle and commit result; from a VERIFIED evidence store, that the file is internally consistent and complete to its seal |
+| Evidence forbidden | Reading a history row or an evidence store as authenticated: neither carries a key or a binding outside itself (`MEASURED` P4, P5) |
+| Model role | None (model text is recorded as content, with provenance `MODEL_CLAIMED` where a record carries a model's claim) |
+| Human role | None |
+| Persisted state | The four records |
+| State transitions | Evidence store: `SM-A6-03` |
+| Downstream consumers | Recovery and resume (RunRecord); the desktop history and inspector (history row, evidence store, run log); metrics (history rows, RunRecords, adjudications); the release tooling |
+| Mutations authorized | Each writer appends or replaces its own record |
+| Mutations forbidden | The recorder changing request bytes, the workspace, a result or a retry decision (invariant I-2, `tests/test_lr_r1_m1_equivalence.py`, cited) |
+| Failure / UNKNOWN | History row: a write failure is logged and the run's result is unchanged (`run_lifecycle.py::persist_run_trace`: "Never raises"). Evidence store: cannot open = `RECORDER_UNAVAILABLE`, the run continues; a failed record is a counted gap and the seal says `complete: false`. Run log: cannot open = reported and skipped. RunRecord: the terminal transition at run exit is attempted in a `finally`; a failure to persist it is logged (`"terminal record not persisted"`) and the next run's commit-state assessment treats the record as needing recovery |
+| Retry / recovery | Only the RunRecord has recovery (`kriya recover`, slice A3) |
+| Checkpoint / resume | The evidence store of a resumed run is the same run id's store when the id is kept (open question for Phase B, handed on by A3) |
+| Audit emitted | - |
+| Alternate paths | `evidence.capture: off` or an absent `evidence` configuration disables the store; the `evidence` section is excluded from the configuration fingerprint |
+| Invariant | A record never decides; the control record is the only durable truth of a run's outcome |
+| Negative control | Absent `hmac` and `private_key` under `kriya/core/attempt_evidence`; absent `workspace` in `control/trace.py`; listing `.log_run(` |
+| AS-IS evidence | `TRACED`; `MEASURED` P4, P5 |
+| Required contract | `GAP-A6-03` |
+| Limitation | `control/persistence.py` (RunRecord storage) was not re-read; slice A3 owns it |
+
+| Record | Location | Writer | Written when | Integrity | Failure of the write |
+|---|---|---|---|---|---|
+| RunRecord | `<workspace>/.kriya/` control state, keyed by workspace identity | `control/run_coordinator.py` (`begin_mutating_run`, `_fail_active_run`), `control/run_record.py` transitions | Run start, each stage marker, commit begin and settle, terminal | Revisioned compare-and-set with ownership metadata (`AUTH-A5-01`) | Raises inside the run; at exit logged, then recovery |
+| History row | `<state>/traces.db`, table `runs`, one database for all projects | `control/trace.py::TraceLogger.log_run` (callers: listing `.log_run(`) | At each terminal and early exit; `INSERT OR REPLACE` on the run id | None: no workspace, digest or writer column (`MEASURED` P5); every column redacted before storage | Logged; the result is unchanged |
+| Attempt evidence | `<state>/attempt-evidence/<run id>/` | `core/attempt_evidence/writer.py` through `scope.py` | Every model call, parse, candidate change, gate, decision; sealed at run close after the RunRecord's terminal transition | Hash chain and seal: an edit of one record is `CHAIN_BROKEN`; a consistent rewrite of all records and the seal is `VERIFIED` (`MEASURED` P4) | Gap, degraded seal, or unavailable; the run continues |
+| Run log | `<log dir>/runs/<run id>/kriya.log` (default `~/.kriya/logs`, a location separate from the state directory) | `core/logging_setup.py::run_log` | For the whole run | None; redacting formatter; created with the process's default file mode (`MEASURED` on one real file: `0644`, in a directory under a `0700` parent) | Reported and skipped |
+
+### AUTH-A6-12 - What does the desktop show as the outcome? (final evidence assembly, desktop visibility)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Nothing: a display projection. The row states what each line of the desktop result is derived from |
+| Owner | `application/history.py::HistoryService` (list, detail, `application_outcome`, `_truth_of_events`), `application/evidence.py::EvidenceService` (verified pages of the evidence store), `application/run_log.py::read_run_log`, `application/run.py` (`launch.status`: launch record, RunRecord, evidence store and history row) |
+| Why this owner | The application layer reads durable records only; "this projection reads it and never decides it" (`_exit_is_acceptable`) |
+| Authoritative inputs | The history row (status, gate outcomes, run events), the last `requirement.truth` event, the evidence store, the RunRecord for a launch's status |
+| Evidence allowed | A recorded gate outcome with its own `runtime_disposition`; the closed truth vocabulary |
+| Evidence forbidden | Inferring a phase from message text; turning a missing or malformed truth into a verified one (`_truth_of_events` returns `None`) |
+| Model role | None |
+| Human role | Reader |
+| Persisted state | None of its own (history snapshots are copies) |
+| State transitions | None |
+| Downstream consumers | The cockpit through KUP (`kup/evidence_ops.py`, `kup/run_log_ops.py`) |
+| Mutations authorized | None, except `mark_in_progress`, which overwrites a transient knowledge-gap row with `in_progress` |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | No gate outcomes: `UNKNOWN`. No runtime execution: `NOT_APPLICABLE`. An evidence page is served only from a chain that verified in that read |
+| Retry / recovery | None |
+| Checkpoint / resume | None |
+| Audit emitted | None |
+| Alternate paths | "Application ran and succeeded" is recomputed by the projection from the newest runtime gate (success, acceptable exit, not timed out). It reads the owner's recorded disposition: a non-zero exit is acceptable only with `EXPECTED_NONZERO_EXIT_GROUNDED` and `final == PASS` (`MEASURED` P6). The unit and run status themselves are the stored `status` column (`AUTH-A3-10`, `AUTH-A3-11`) |
+| Invariant | The desktop shows recorded facts with their provenance; a missing fact is shown as missing |
+| Negative control | Absent `model_qualification` under `kriya/application` and `kriya/kup` (the desktop shows no qualification state) |
+| AS-IS evidence | `TRACED`; `MEASURED` P6 |
+| Required contract | None differing for the projection. The statement of what "verified" means on screen follows `GAP-A6-03` |
+| Limitation | The UI code (`ui/`) was not read beyond locating the run-log consumer; what the cockpit words each state as is slice A3's `GAP-A3-01` concern |
+
+### AUTH-A6-13 - Which Kriya build ran, and what identity does a release certify? (source identity, certification)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | (a) the Kriya build of a run; (b) the identity a live certification and a release streak are keyed by |
+| Owner | (a) `foundation/build_info.py::version_report` plus `control/source_identity.py::run_source_identity`, recorded by `attempt_evidence/scope.py::_run_manifest`; (b) `core/model_certification.py` (`CertificationKey`, `record_trial`) and `core/release_candidate.py::release_candidate_identity` |
+| Why this owner | KRIYA-VERSION-001, RUN-SOURCE-IDENTITY-001, PRD-035 / PRD-036: evidence says precisely which revision ran |
+| Authoritative inputs | (a) the embedded build info of a package, or for a source checkout its exact HEAD and measured dirty flag; (b) runtime digest, settings digest, environment digest and case-set version; for a release candidate the release identity, the operator production configuration, every role's model identity and the case set |
+| Evidence allowed | Deterministic case evidence; every bound model identity exact and QUALIFIED |
+| Evidence forbidden | A model name; prose; a tree hash that was not read (`tree` is recorded as unknown for a checkout, never inferred) |
+| Model role | Subject |
+| Human role | Operator runs the matrix and the release tooling (`scripts/`, not read) |
+| Persisted state | The evidence manifest (`kriya_build`, workspace identity, base revision and tree); the certification store (`KRIYA_CERTIFICATION_HOME`), outside every workspace; the sealed streak log |
+| State transitions | Certification: CURRENT / FAILED / STALE / INVALID / MISSING. Streak: reset by anything but a full matrix on the exact candidate |
+| Downstream consumers | `kriya model certification`, the release gate |
+| Mutations authorized | The certification and streak stores |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | Source identity unavailable: the build report plus `source_identity_unavailable: <reason code>` |
+| Retry / recovery | None |
+| Checkpoint / resume | None |
+| Audit emitted | The manifest; the trial log |
+| Alternate paths | No run consults a certification or a streak: they gate a release, not a launch (no reader under `kriya/workflow`; `TRACED` by the module's callers) |
+| Invariant | A certification holds for the exact identity only; any drift is STALE |
+| Negative control | Absent `generation_time_budget` in `core/release_candidate.py` (the module names no budget; the operator configuration file as a whole is part of the candidate identity) |
+| AS-IS evidence | `TRACED` at the module level |
+| Required contract | None differing |
+| Limitation | The certification matrix, the release scripts and the hosted certification were not read or run |
+
+### How the A6 trace list maps to rows
+
+| Owner's trace item | Row |
+|---|---|
+| Provider selection, model binding | `AUTH-A6-01` |
+| Inference adapter identity, native Ollama | `AUTH-A6-02` |
+| Runtime identity | `AUTH-A6-03` |
+| Requested versus served context, admission ceiling | `AUTH-A6-04`, `AUTH-A6-05` |
+| Qualification identity, role qualification | `AUTH-A6-06` |
+| Fallback | `AUTH-A6-07`, `SM-A6-04` |
+| Role independence | `AUTH-A6-08` |
+| Developer request, trust boundary (`GAP-A4-04`, `GAP-A4-03`, `BYP-A4-04`) | `AUTH-A6-09` |
+| Runtime verification | Owned by slice A3 (`AUTH-A3-07`, `AUTH-A3-08`); A6 adds the evidence side: `AUTH-A6-11`, `AUTH-A6-12` |
+| Evidence persistence, audit truth | `AUTH-A6-11`, `SM-A6-03`, `GAP-A6-03` |
+| Package and source identity | `AUTH-A6-13` |
+| Final evidence assembly, desktop visibility | `AUTH-A6-12` |
+| vLLM and Skills/Tools seams | `05-INTEGRATION-BYPASS-MAP.md`, "Extensibility seams" |
+| Reconciliation: 65K native qualification, compat truncation, role-independence warning, precision boundary, class-D errors | `AUTH-A6-04`, `AUTH-A6-06`, `AUTH-A6-08`, gap ledger "Reconciliation items" |

@@ -14,9 +14,9 @@ Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`, t
 | STAGE-PLAN-VALIDATION | Plan validation | A4 | **filled** (`AUTH-A4-10`, `AUTH-A4-11`, `AUTH-A4-13`, `AUTH-A4-16`, `SM-A4-01`, `SM-A4-02`, `GAP-A4-05`) |
 | STAGE-WORKSPACE | Workspace / root authority | A5 | **filled** (`AUTH-A5-01..05`, `AUTH-A5-08`, `AUTH-A5-09`, `SM-A5-01`, `SM-A5-04`, `GAP-A5-01`, `GAP-A5-02`; tools and MCP `AUTH-A5-06`, `AUTH-A5-07`, `SM-A5-02`, `GAP-A5-03`; configuration `AUTH-A5-10..12`, `SM-A5-03`, `GAP-A5-04`) |
 | STAGE-SUBTASK-SELECTION | Subtask selection (direct, milestone, enforce) | A4 | **filled** (`AUTH-A4-04`, `AUTH-A4-14`, `AUTH-A4-15`, `GAP-A4-01`; A1 part below) |
-| STAGE-CONTEXT | Context construction | A4 (skill, plan and goal context), A6 (the Developer request and its budget) | A4 part **filled** (`AUTH-A4-09`, `AUTH-A4-12`); the request itself is owed by A6 |
-| STAGE-MODEL-RUNTIME | Runtime / model selection and qualification | A6 | pending |
-| STAGE-GENERATION | Generation | A3 (candidate formation), A6 (the Developer request) | A3 part filled (`AUTH-A3-01`); the request itself is owed by A6 (A4 traced what feeds it, not its assembly) |
+| STAGE-CONTEXT | Context construction | A4 (skill, plan and goal context), A6 (the Developer request and its budget) | **filled** (`AUTH-A4-09`, `AUTH-A4-12`; request and budget `AUTH-A6-05`, `AUTH-A6-09`) |
+| STAGE-MODEL-RUNTIME | Runtime / model selection and qualification | A6 | **filled** (`AUTH-A6-01..08`, `AUTH-A6-10`, `SM-A6-01`, `SM-A6-02`, `SM-A6-04`, `GAP-A6-01`, `GAP-A6-02`) |
+| STAGE-GENERATION | Generation | A3 (candidate formation), A6 (the Developer request) | **filled** (`AUTH-A3-01`; the request and its trust classes `AUTH-A6-09`, `GAP-A4-04`, `GAP-A4-03`) |
 | STAGE-CANDIDATE | Candidate formation | A3 | **filled** (`AUTH-A3-01`, `AUTH-A3-02`, `SM-A3-01`, `GAP-A3-04`) |
 | STAGE-REVIEW | Review / source approval | A3 | **filled** (`AUTH-A3-03..05`, `AUTH-A3-12`, `AUTH-A3-13`, `SM-A3-02`, `GAP-A3-05`, `GAP-A3-06`) |
 | STAGE-GATES | Deterministic gates | A3 | **filled** (`AUTH-A3-06..08`, `GAP-A3-02`) |
@@ -28,7 +28,7 @@ Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`, t
 | STAGE-APPLY | Candidate apply | A3 | **filled** (`AUTH-A3-14`, `SM-A3-03`, `MUT-A3-03`, `MUT-A3-04`) |
 | STAGE-REPLAY | Replay | A3 | **filled** (`AUTH-A3-15`, `AUTH-A2-13`, `MUT-A3-13`) |
 | STAGE-FINAL-VERIFICATION | Integration / final verification | A3 | **filled** (`AUTH-A3-08`, `AUTH-A3-09`, `GAP-A3-01`) |
-| STAGE-EVIDENCE | Evidence / audit | A6 | pending |
+| STAGE-EVIDENCE | Evidence / audit | A6 | **filled** (`AUTH-A6-11..13`, `SM-A6-03`, `MUT-A6-08..11`, `GAP-A6-03`) |
 | STAGE-CHECKPOINT | Checkpoint / resume | A1 | **filled** |
 | STAGE-TERMINAL | Terminal result | A3 | **filled** (`AUTH-A3-10`, `AUTH-A3-11`, `SM-A3-04`, `SM-A3-05`, `GAP-A3-01`, `GAP-A3-03`) |
 
@@ -290,3 +290,64 @@ Not traced in A5 and still owed: the OCI backend and the mask code (`tools/conta
 and `snapshot.py`, the scoped-snapshot builder's body, `kriya/platform/private_store.py`, `kriya/kup` beyond its
 outline, and the UI session code behind the two history rows. None of them changes a row above; each is named in the
 limitation field of the row it belongs to.
+
+## STAGE-MODEL-RUNTIME, STAGE-GENERATION (the Developer request), STAGE-EVIDENCE (A6) - AS-IS flow
+
+Every step cites the row that holds the fact; nothing is defined here. The first diagram is one model call; the second
+is what a run leaves behind.
+
+```mermaid
+flowchart TD
+    A[Role or Developer choke point picks the model<br/>AUTH-A6-01, AUTH-A6-07, SM-A6-04] --> B[Binding of that model: settings, window, adapter<br/>AUTH-A6-01]
+    B -. unknown model name: the primary's binding .-> G2[GAP-A6-02]
+    B --> C{Adapter registered?<br/>AUTH-A6-02}
+    C -- no --> X1[UnknownRuntimeAdapterError<br/>FR-A6-02]
+    C -- yes --> D[Runtime fingerprint, exact or not<br/>AUTH-A6-03]
+    D --> E{Provider plan and window state<br/>AUTH-A6-04, SM-A6-01}
+    E -- served below requested, or identity mismatch under production --> X2[Provider-contract refusal<br/>FR-A6-06, FR-A6-07]
+    E -- ok --> F{Dispatch fits the budget window?<br/>AUTH-A6-05}
+    F -- no --> X3[CONTEXT_BUDGET_UNSATISFIABLE<br/>FR-A6-08]
+    F -- yes --> H[Request: system + user message<br/>AUTH-A6-09]
+    H -. fetched page text unfenced; in the Reviewer system prompt .-> G4[GAP-A4-04]
+    H --> I[Adapter sends; deadline bounds the call<br/>AUTH-A6-10]
+    I --> J{After the call: truncation, served window<br/>SM-A6-01}
+    J -- violation --> X4[PROVIDER_CONTRACT_VIOLATION<br/>FR-A6-09]
+    J -- ok --> K[CompletionResult counted per role, model, runtime, settings<br/>AUTH-A6-08]
+    Q[Qualification record of the exact identity<br/>AUTH-A6-06, SM-A6-02] -. decides for a fallback and a retry identity under production .-> A
+    Q -. never checked for the primary or other roles during a run .-> G1[GAP-A6-01]
+```
+
+```mermaid
+flowchart LR
+    R[Run] --> RR[RunRecord: lifecycle, commit result<br/>control state, decides recovery<br/>AUTH-A6-11]
+    R --> HR[History row in traces.db<br/>best effort, replaceable, unbound<br/>MUT-A6-08]
+    R --> EV[Attempt-evidence store<br/>hash chain and seal, observational<br/>SM-A6-03, MUT-A6-09]
+    R --> LG[Run log in the log directory<br/>MUT-A6-11]
+    RR -- mirrored at close --> EV
+    HR --> D1[Desktop history, application outcome, requirement truth<br/>AUTH-A6-12]
+    EV --> D2[Desktop inspector: verified pages<br/>AUTH-A6-12]
+    LG --> D3[Desktop Kriya Log]
+    RR --> D4[launch.status]
+    HR -. shown as the outcome without a binding .-> G3[GAP-A6-03]
+    EV -. VERIFIED proves consistency, not origin .-> G3
+```
+
+| Stage | Owner (one home per fact) | Rows |
+|---|---|---|
+| Model binding | `core/llm.py::LLMClient._binding`; the role and Developer choke points | `AUTH-A6-01`, `FR-A6-03`, `FR-A6-04`, `GAP-A6-02` |
+| Runtime adapter | `core/inference_runtime.py` registry | `AUTH-A6-02`, `FR-A6-02` |
+| Runtime identity | `core/model_runtime.py` | `AUTH-A6-03`, `MUT-A6-01`, `MUT-A6-02`, `FR-A6-05` |
+| Context window and admission | `core/provider_contract.py`, `core/token_budget.py`, `workflow/context_budget.py` | `AUTH-A6-04`, `AUTH-A6-05`, `SM-A6-01`, `FR-A6-06..09` |
+| Qualification | `core/model_qualification.py` | `AUTH-A6-06`, `SM-A6-02`, `MUT-A6-03`, `FR-A6-13`, `FR-A6-14`, `GAP-A6-01` |
+| Fallback | `workflow/model_transition.py`, `fallback_decision.py`, `generation_service.py` | `AUTH-A6-07`, `SM-A6-04`, `BYP-A6-03` |
+| Role attribution and independence | `core/role_metrics.py`, `cli.py::_workflow_config` | `AUTH-A6-08`, `MUT-A6-06`, `FR-A6-15`, `BYP-A6-16` |
+| Developer request (STAGE-GENERATION) | `agents/agent.py::DeveloperAgent`, `workflow/retry_prompts.py`, `workflow/attempt.py` | `AUTH-A6-09`, `MUT-A6-13`, `FR-A6-20`, `FR-A6-21`, `BYP-A6-05..11`, `GAP-A4-04`, `GAP-A4-03` |
+| Deadline | `core/llm.py`, `control/run_coordinator.py` | `AUTH-A6-10`, `FR-A6-10` |
+| Evidence and audit (STAGE-EVIDENCE) | `control/run_record.py`, `control/trace.py`, `core/attempt_evidence/`, `core/logging_setup.py` | `AUTH-A6-11`, `SM-A6-03`, `MUT-A6-08..11`, `FR-A6-16..19`, `GAP-A6-03` |
+| Desktop outcome | `kriya/application/history.py`, `evidence.py`, `run_log.py`, `run.py` | `AUTH-A6-12`, `BYP-A6-12` |
+| Build, certification, release | `foundation/build_info.py`, `control/source_identity.py`, `core/model_certification.py`, `core/release_candidate.py` | `AUTH-A6-13`, `MUT-A6-05` |
+
+Not traced in A6 and named in the limitation field of the row each belongs to: the native adapter's request and
+response code, the qualification cases, `core/model_routing.py` beyond its entry points, `workflow/context_budget.py`
+beyond its public functions, `attempt.py` beyond the retry call sites, `control/persistence.py`, the release scripts
+and the certification matrix, `plan_revision.py`, and the UI code. No live model, qualification or certification ran.

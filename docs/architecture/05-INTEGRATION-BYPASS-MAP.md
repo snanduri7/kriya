@@ -18,7 +18,7 @@ Routes required by the closure instruction and the slice that maps each:
 | Replay | A1 (accounting), A3 | A1 part below |
 | MCP / tool writes | A5 | below (`BYP-A5-03`, `BYP-A5-04`) |
 | Checkpoint / resume | A1 | below |
-| Fallback model | A1 (accounting), A6 | A1 part below |
+| Fallback model | A1 (accounting), A6 | below (`BYP-A1-08`; `BYP-A6-03`, `SM-A6-04`) |
 | CLI / Desktop approval | A3 | pending |
 | Direct / non-enforce execution | A1 (retry), A4 | A1 part below |
 | Recovery coordinator | A1 | below |
@@ -188,3 +188,87 @@ The table at the top of this document lists "MCP / tool writes" as owed by A5: `
 
 Carried into later slices: the Developer request positions of retrieval and skill text (A6, with STAGE-GENERATION and
 `GAP-A4-04`); whether the run budget enters qualification identity (A6).
+
+## Slice A6 - routes around model, qualification, trust-boundary and evidence authority
+
+The question per authority of slice A6: what other path reaches the same model call, the same prompt content or the
+same recorded outcome without passing this owner? The table at the top of this document lists "Fallback model" as
+owed by A6: `BYP-A6-03` and `SM-A6-04`.
+
+| ID | Route | What it reaches without which owner | Bounded by | Label |
+|---|---|---|---|---|
+| BYP-A6-01 | A production-profile run on an unqualified primary model | Every Developer call on the primary, and every Planner, Architect, Reviewer, run-verifier, spec-compliance and skill-gap call, without the qualification authority (`AUTH-A6-06`) | The operator running `doctor --production` beforehand; the release-candidate tooling; the provider-contract identity checks, which still apply | `TRACED` (`GAP-A6-01`) |
+| BYP-A6-02 | A model name with no binding | A call with the primary's settings and adapter under another model name (`AUTH-A6-01`) | Model names come from the configuration's own chain and routes, so the route needs a caller that passes a name outside them; none was found | `MEASURED` P7 (the resolution); reachability `INFERRED` absent (`GAP-A6-02`) |
+| BYP-A6-03 | Fallback model | A Developer call on another model. It passes the compatibility authority (`AUTH-A6-07`); the retry accounting side is `BYP-A1` rows | Closed for the Developer. Non-Developer role chains escalate with no compatibility or qualification check | `TRACED` |
+| BYP-A6-04 | `KRIYA_MODEL_RUNTIME_PROBE=0` in the environment | Every runtime becomes non-exact: no qualification can be current, and outside production nothing is refused for it | Under production a non-exact runtime fails the identity checks that need an observation; the variable is not a configuration field, so SEC-009 does not see it | `TRACED` |
+| BYP-A6-05 | Text fetched during the run, into the Developer task (completes `BYP-A4-04`) | The `=== Previous Error to Fix ===` body of the next Developer request, outside the fence; with a retry package under "Advisory reference evidence" | As `BYP-A4-04` (lookup off by default, approval per query, offline sealed in production) | `MEASURED` P1 (b) |
+| BYP-A6-06 | The same text, into the Reviewer's system prompt | The block headed "AUTHORITATIVE RUN DISPOSITION" of the rejected-candidate system prompt, as `terminal_reason`; and the user message ("Last quality gate error") | As above; only on a run that ended with a rejected candidate. The Reviewer decides nothing (`AUTH-A3-12`); its text is shown to the person | `MEASURED` P1 (c) |
+| BYP-A6-07 | The same text, into Kriya-authored instructions | The incompatible-types and buffer-capacity scaffolds built by pattern match from `prior_error_context` | Only on the path without a retry package (with one, `prior_error_text()` excludes the advisory part, `MEASURED`) | `MEASURED` P1 (d) |
+| BYP-A6-08 | The same text, into a deterministic selection | `extract_target_test(state.error_context, ...)`: a test file name in the page text selects the targeted run | A targeted run that executes no test falls back to the suite; the suite gates still decide the candidate | `MEASURED` P1 (e) |
+| BYP-A6-09 | The same text, into durable knowledge | The lesson-extraction prompt after a retried success (`LiveFailureChannel.extract`), whose facts are staged | Staged facts are unverified until promoted (slice A4); how a staged fact is later rendered was not re-read; staging follows `GAP-A5-05` | `TRACED` |
+| BYP-A6-10 | The Planner's "Fix the following compile/test error" block (`BYP-A4-04` named it) | The Planner reads `state.error_context` at planning time. In the stage order of one unit invocation planning precedes the first attempt, so that value is the caller's own error argument (`kriya fix`), not the augmented text | Refinement of `BYP-A4-04`: not reached by fetched text in the sequence read. Re-planning routes (`plan_revision.py`) were not read | `TRACED` for the read; the ordering argument is `INFERRED` from the stage order |
+| BYP-A6-11 | A knowledge gate closed by an empty folder, then generation | The Developer request, with no text about the library and no check that the "covering" skill has any | Nothing at request time (controls: no reader of the knowledge gate or of the unresolved gaps in `agents/agent.py` or `generation_service.py`). The unit analysis prompts about missing skills but does not stop | `TRACED` (`GAP-A4-03`) |
+| BYP-A6-12 | The outcome shown by the desktop history | The stored `status` of a history row that any later write of the same run id replaces and that carries no binding to a workspace or to the RunRecord | The state directory is private to the user (private file modes); `launch.status` reads the RunRecord | `MEASURED` P5 (`GAP-A6-03`) |
+| BYP-A6-13 | A rewritten evidence store | A reader's `VERIFIED` | As above: needs write access to the state directory | `MEASURED` P4 (`GAP-A6-03`) |
+| BYP-A6-14 | A run with evidence capture off, or with an unwritable state directory | A committed change with no attempt evidence, or no history row | By design (observational recorder). Capture defaults to `full` (design D4, cited) | `TRACED` |
+| BYP-A6-15 | Gates run outside a declared purpose | A `gate.result` record with no `purpose`: the terminal verification coordinator, the development loop's baseline and regression runs, the requirement closers, regression attribution and the self-correction loop declare none | Diagnostic only: no verdict, order or count depends on it | `TRACED` (controls) |
+| BYP-A6-16 | Unattributed model calls | Calls of the knowledge channels counted under `unattributed`, on whichever model the caller passes (the last Developer model for lesson extraction) | Observations only; routing reads identity rows of a role, so an unattributed row matches no candidate | `TRACED` |
+| BYP-A6-17 | An aggregate size or approval authority in the runtime, control, metrics or evidence layers (the last place `GAP-A3-05` could have been closed) | None exists: no reader of `risk_threshold_lines` under `kriya/core`, `kriya/control` or `kriya/metrics`; the evidence store records `candidate.change` per unit and decides nothing | - | `TRACED` (three controls). `GAP-A3-05` stands |
+| BYP-A6-18 | An MCP call's effect, as the records see it (the transaction question of `GAP-A5-03`) | See the table below | - | `TRACED` |
+
+What exists for a planned MCP call with a write grant, against what a candidate transaction has (`TRACED`; no MCP
+server was run):
+
+| Property of a transaction | Candidate (slices A3, A5) | Planned MCP call |
+|---|---|---|
+| Exact mutation scope | The staged batch, path by path, inside the unit's scope | The whole workspace mount (and each additional write path) for the lifetime of the server; the call's arguments are forbidden evidence for authority (`AUTH-A5-07`) |
+| Approval binding | The unit's candidate digest (source approval), or the launch review's digest | The tool identity (server, tool, schema digest), the capability-profile digest and the workspace identity. Not the arguments, not the resulting bytes |
+| Isolation before commit | The sandbox | None: the mount is the owner workspace |
+| Rollback / failure | The guarded commit and its recovery | None. The RunRecord holds `tool_execution` started / failed / completed; a started call that did not finish blocks the next run as `UNRESOLVED_TOOL_EXECUTION` (`SM-A5-02`) |
+| Audit | Candidate digests, `candidate.change`, gate results, the commit record | `PolicyDecisionRecord` (identity, profile, containment state) and the evidence record `tool.execution`: tool name, status, error, reason codes and the bounded tool output. No list of files, no digest of the workspace before or after (absent `record_candidate_write` and `candidate_digest` under `kriya/mcp`; absent `record_candidate_write` in `subtask_executor.py`) |
+| Final-result integration | Files modified, the diff, requirement evidence | The TOOL subtask's status only; the changed files are in no `files_modified`, no diff and no review |
+
+So no independently authoritative transaction exists for MCP workspace mutation: what is governed is the tool, not
+the change. Under the owner's ruling on `GAP-A5-03` this meets the condition for FIX_REQUIRED_BEFORE_PRODUCTION
+(gap ledger, "Updates to gaps of earlier slices").
+
+### Extensibility seams (`TRACED` seam analysis; no empirical claim)
+
+**A second inference runtime (vLLM).** The documented extension point (`core/inference_runtime.py` module docstring,
+`handover/INF_001_RUNTIME_PORT.md`) is: subclass `OpenAICompatibleTransport`, declare
+`per_request_context_window=False`, implement `probe`, register under its own name.
+
+| Contract a new runtime must meet | Where it is enforced | Fit of the documented vLLM design |
+|---|---|---|
+| Selected by name, never by default | `runtime_for_binding`; `vllm` is refused today (`MEASURED` P2) | Fits: one registration in the provider module |
+| No provider name above the port | A committed tripwire; in the modules read, provider names above the port occur in comments and doctor remediation text only (search of `kriya/core`, `production_doctor.py`) | Fits. The doctor's remediation sentences name the default runtime's endpoints and would mislead for another runtime |
+| Exact identity (artifact digest and server version) | `ModelRuntimeFingerprint.exact` | Open: the design says "from the server's version and model endpoints"; whether such a server reports an artifact digest is not established here. Without one the runtime is never QUALIFIED and, under production, cannot pass |
+| Over-window prompts refused, not truncated (`over_context_refusal`, required of every role) | Qualification policy `/9` | Open: it is the case the default OpenAI-compatible adapter fails (section 42). A subclass of the same transport inherits the question; it depends on the server, and was not measured |
+| Requested window equals served window under production | `context_window_state` | Needs the probe or an observation to report the served window; with a server-fixed window and no per-request option the declared window must equal it, else `RUNTIME_CONTEXT_IDENTITY_MISMATCH` |
+| Served-window observation after the call under production | `_check_after_call`, only for a runtime that declares observation | Open: the refusal applies to a runtime that declares observation. What production does with an exact runtime that declares none was not traced |
+| Settings proven effective | `ProviderRequestPlan` from the adapter's `provider_capabilities` | The adapter must declare, per semantic setting, supported / server-only / unsupported; an undeclared setting is never sent |
+| Adaptive context tiers | Only on a runtime that takes a per-request window | Not available: the adaptive policy behaves like strict and says so |
+| Capacity evidence per execution environment | `execution_environment.py`, observable only for a local endpoint | A remote server has no observable environment: capacity evidence would not count |
+| Egress | `local_only` refuses a non-local endpoint; a non-local endpoint is never probed under any policy | A server on another host needs `egress_policy: unrestricted` and can then never be exact |
+
+Conclusion at `TRACED` confidence: the port contract can take a second runtime without a change above the port. The
+production profile can take it only if that server gives an exact identity, refuses over-window prompts and runs on
+this machine. None of the three is established for vLLM. The existing contracts therefore fit a local second runtime
+for non-production use; production use is an identity and qualification question, not a seam question.
+
+**Richer Skills and Tools user experience.**
+
+| Capability a richer UX would add | Existing contract it must use | Fit |
+|---|---|---|
+| Browse skills and tools, see approval state | `application/catalog.py` (`SkillCatalogService`, `ToolCatalogService`), KUP `skills.list`, `skills.describe`, `tools.list`, `tools.describe`, `tools.approval_state` | Exists, read-only |
+| Create or edit a skill from the desktop | One skill-write entry with a location rule and a transaction | **Does not exist**: eleven writers outside the write gate (`GAP-A5-05`); the default skills directory is installation-wide (`GAP-A5-01`); no KUP operation mutates a skill (registry `GUI-SKILLS-MUTATION-001`, `GUI-SKILLS-BUILD-001`) |
+| Mark a skill verified, promote a rule | Skill fact authority (`AUTH-A4-07`: verification is Kriya's, by a committed run) | A person's "verify" button would be a second fact authority. Not a UX question: an authority decision |
+| Choose which skills apply | Skill relevance authority | **Does not exist below the goal** (`GAP-A4-02`) |
+| Close a knowledge gap from the desktop | The knowledge gate | The gate accepts a folder name (`GAP-A4-03`); a UX on top would make the false closure one click |
+| Approve an MCP tool from the desktop | TOOL-002 approval store, outside the workspace, operator-only (`kriya mcp approve`) | No KUP operation writes it; the desktop's `configuration.approve` shows the pattern (a review fingerprint, refused when stale). A tool approval would bind the same five fields as today |
+| Run a tool from the desktop | Planned-tool governance, or operator execution | A write-capable MCP tool has no transaction (`GAP-A5-03`) |
+| Tool health | A bounded health read | Not present (registry `GUI-TOOLS-HEALTH-001`) |
+
+Conclusion at `TRACED` confidence: the read side fits today. Every mutating Skills or Tools feature lands on a gap
+that is already recorded (`GAP-A4-02`, `GAP-A4-03`, `GAP-A5-01`, `GAP-A5-03`, `GAP-A5-05`). Building the UX first
+would give those gaps a button; the contracts have to exist first.

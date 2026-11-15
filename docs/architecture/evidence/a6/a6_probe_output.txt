@@ -1,0 +1,54 @@
+
+=== P1 live-lookup text in the next requests
+(a) page text is in state.error_context: True
+(a) a fence begin marker is in state.error_context: False
+(a) the fence END marker the page carried is kept verbatim (not neutralized): True
+(a) the page's own '=== Task ===' heading is kept verbatim: True
+(a) control - the same page through fence_untrusted_reference keeps the END marker verbatim inside the body: False
+(b) no retry package: page text in the Developer task description: True | outside any fence: True
+(b) retry package: page text in the Developer task description: True | outside any fence: True | label before it: True
+(b) retry package: page text in prior_error_text() (the agent's prior_error_context): False
+(c) page text is inside the Reviewer SYSTEM prompt: True | inside the block headed AUTHORITATIVE RUN DISPOSITION: True
+(d) incompatible-types scaffold from the raw error: empty = True | from the augmented context: non-empty = True
+(e) targeted test from the raw error: None | from the augmented context: tests/test_b.py
+
+=== P2 inference-runtime registry
+registered adapters: ['ollama', 'ollama_native']
+default adapter: ollama | capabilities: RuntimeCapabilities(per_request_context_window=False, native_identity_probe=True, stream_usage=True, json_schema_output=False)
+ollama_native capabilities: RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True, stream_usage=True, json_schema_output=True)
+protocol versions: compat = kriya-openai-compat/3 | native = kriya-ollama-native/3
+adapter 'vllm': refused (UnknownRuntimeAdapterError)
+adapter 'openai': refused (UnknownRuntimeAdapterError)
+adapter 'Ollama': refused (UnknownRuntimeAdapterError)
+
+=== P3 requested, served and admission windows
+budget_window(requested 65536, served 65536, ceiling 32768) = 32768
+budget_window(requested 65536, served 131072, no ceiling) = 65536
+budget_window(requested 65536, served None, ceiling 99999) = 65536
+state under a ceiling: requested 65536 served 65536 budget 32768 ceiling 32768
+served below requested, not exact: refused SERVED_CONTEXT_BELOW_REQUESTED
+served above requested, exact identity: refused RUNTIME_CONTEXT_IDENTITY_MISMATCH
+served above requested, not exact: accepted, budget 65536
+
+=== P4 attempt-evidence store: what VERIFIED proves
+sealed: True
+as written: VERIFIED records 3
+(a) one record edited in place: CHAIN_BROKEN
+(b) whole chain and seal rewritten: VERIFIED | run.closed now reads: SUCCESS
+(c) seal removed: UNSEALED
+
+=== P5 history row
+rows after two writes of one run id: [('r1', 'SUCCESS')]
+columns that could bind the row to a workspace, a digest or a writer: []
+all columns: ['run_id', 'timestamp', 'goal', 'duration_sec', 'attempts', 'status', 'files_modified', 'retrieved_chunks', 'active_skills', 'prompt_rendered', 'gate_outcomes', 'model_hops', 'failure_category', 'milestone_group_id', 'milestone_index', 'milestone_total', 'run_events', 'evidence_records', 'generation_metrics', 'failure_report', 'enforce_run_id']
+
+=== P6 application outcome for a grounded non-zero exit
+non-zero exit, no grounded disposition: succeeded = False
+non-zero exit, grounded expected exit: succeeded = True
+
+=== P7 binding of an unknown model name
+primary model: llama3
+binding of an unknown model name equals the primary's binding: True
+its inference_runtime: None | its context_window: 32768
+
+scratch: /var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-a6-probe-69ohe_fz

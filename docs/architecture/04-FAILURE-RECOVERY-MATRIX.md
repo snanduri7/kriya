@@ -182,3 +182,44 @@ workspace.
 | **Which project a code index, a skill folder, a learned reference or a cached release date belongs to** | Not represented; whatever is at the location is used | **No** |
 | **What a workspace path means to Kriya's next run** (configuration, skill) | Not represented at the write gate | **No** |
 | Whether a run-level time bound exists | Not represented: the configured number bounds each unit invocation | No, outside the production profile, where the number itself may also be absent |
+
+## Slice A6 - failures of the model runtime, of qualification and of the records
+
+| ID | Failure | Detected by | Outcome | Retry / recovery | Fails safely? | Label |
+|---|---|---|---|---|---|---|
+| FR-A6-01 | The endpoint is not local under `local_only` | `LLMClient.complete_result` (first statement after the audit) | `EgressViolationError` | None | Yes | `TRACED` |
+| FR-A6-02 | The binding names an unregistered runtime adapter | `inference_runtime.py::runtime_adapter` | `UnknownRuntimeAdapterError`, never the default adapter | None | Yes | `MEASURED` P2 |
+| FR-A6-03 | A model name no binding names | `LLMClient._binding` | **Served with the primary's settings, window and adapter** | None | **No** (`GAP-A6-02`) | `MEASURED` P7 |
+| FR-A6-04 | `extra_body` sets a request field Kriya owns | Configuration validators, `LLMClient._refuse_owned_request_fields`, `ChatRequest.__post_init__` | `PROVIDER_REQUEST_FIELD_CONFLICT`; never stripped | None | Yes | `TRACED` |
+| FR-A6-05 | The identity probe fails | `LLMClient._runtime_fingerprint` | Non-exact fingerprint; the call proceeds; never QUALIFIED | Cached for the process | Yes for qualification; the call itself is not blocked outside production | `TRACED` |
+| FR-A6-06 | The served window is below the requested one | `provider_contract.py::context_window_state` | `SERVED_CONTEXT_BELOW_REQUESTED` in every profile | The operator pins the window | Yes | `MEASURED` P3 |
+| FR-A6-07 | Production: the served window differs from the requested one, or cannot be observed after the call | The same; `LLMClient._check_after_call` | `RUNTIME_CONTEXT_IDENTITY_MISMATCH` / `SERVED_CONTEXT_UNOBSERVABLE` | None | Yes | `MEASURED` P3 (the first); `TRACED` |
+| FR-A6-08 | The request does not fit | `token_budget.py::plan_dispatch` | `CONTEXT_BUDGET_UNSATISFIABLE` or `OUTPUT_BUDGET_UNSATISFIABLE`, before inference | Developer: one fallback to an anchored patch on the output refusal. Not a new failure family | Yes | `TRACED` |
+| FR-A6-09 | The provider truncates or refuses an over-window prompt | Native adapter: the provider's refusal. Default adapter: the byte-floor check after the call | `PROVIDER_PROMPT_TRUNCATED` as `PROVIDER_CONTRACT_VIOLATION`, a deterministic stop | None | Yes on the native adapter. On the default adapter the truncation is silent at the provider (section 42: an 81,920-token prompt answered from 32,770) and only the byte floor stands behind admission; that adapter cannot be QUALIFIED | `TRACED`; historical measurement cited |
+| FR-A6-10 | The run's clock is spent | `LLMClient._require_time_left`, `_within_deadline` | `INFERENCE_DEADLINE_EXHAUSTED` / `_EXCEEDED`; never resent | None within the invocation | Yes; the bound is per unit invocation (`GAP-A5-04`) | `TRACED` |
+| FR-A6-11 | A backend error, a timeout, a malformed reply | The adapter's `classify_error`; the typed reply checks | A result status; a malformed reply is the retryable REQUEST class | Role chain (`call_with_escalation`) or the Developer retry machine | Yes | `TRACED` (cited note for the reply shapes) |
+| FR-A6-12 | An answer cut at the output budget | `agents/agent.py::_truncated_completion_error`; `REQUIRE_COMPLETE_OUTPUT` (set by the Reviewer only, with its own 4,096-token ceiling) | Developer: `OUTPUT_TRUNCATED` protocol error. Reviewer: the fragment is refused, not passed on as a finished review. Other roles: the fragment is parsed as an answer | Developer retry; role chain | Yes for the Developer and the Reviewer | `TRACED` |
+| FR-A6-13 | Production: a fallback is not QUALIFIED; a retry identity is not QUALIFIED | `fallback_incompatibilities`; `_require_qualified_retry_identity` | Skipped for the next fallback, else `FALLBACK_MODEL_INCOMPATIBLE`; `RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED` | None | Yes | `TRACED` |
+| FR-A6-14 | Production: the **primary** model, or the model of any non-Developer role, is not QUALIFIED (missing, stale, failed) | Nothing during a run. `doctor --production` reports it when the operator runs it | The run proceeds | - | **No** (`GAP-A6-01`) | `TRACED` (control: the rule is evaluated only for a fallback) |
+| FR-A6-15 | Role independence is required and not shown | `cli.py::_workflow_config` | `ROLE_INDEPENDENCE_REQUIRED`, the command exits before the engine is built | None | Yes for the CLI entry. Not required by default: roles sharing one runtime is the default setup | `TRACED` |
+| FR-A6-16 | The history row cannot be written | `persist_run_trace` (broad catch) | A warning; the run's result and commit are unchanged; the desktop history has no row for the run | None | The run fails safe; the record is lost (`GAP-A6-03`) | `TRACED` |
+| FR-A6-17 | The evidence store cannot open, or a record cannot be written | `scope.py::ensure_store`; `writer.record` | `RECORDER_UNAVAILABLE`, or a gap and a degraded seal | None | Yes for the run. The desktop's "what the model was shown" has nothing to show | `TRACED` |
+| FR-A6-18 | The RunRecord's terminal transition cannot be persisted at run exit | `begin_mutating_run` (`finally`) | Logged; the record stays non-terminal; the next mutating run's commit-state assessment requires recovery | `kriya recover` | Yes | `TRACED` |
+| FR-A6-19 | An evidence store was altered | `reader.py::EvidenceRun.verify` | A partial edit: `CHAIN_BROKEN` / `SEAL_MISMATCH` / `BLOB_CORRUPT`. A consistent rewrite: `VERIFIED` | None | Against damage: yes. Against a writer with access to the state directory: no, by construction (`GAP-A6-03`) | `MEASURED` P4 |
+| FR-A6-20 | Text fetched from the web is hostile | Nothing | It is sent unfenced in the Developer task, placed in the Reviewer's system prompt on a rejected candidate, read by the targeted-test selection and by the lesson extraction | - | **No** (`GAP-A4-04`). Bounded by: lookup off by default and in the Setup profile, offline sealed in production, an approval per query; the write gate, the candidate and every gate never read it | `MEASURED` P1 |
+| FR-A6-21 | A knowledge gap was closed by a folder that holds nothing | Nothing at request time | The Developer request simply has no text about the library; the result lists `unresolved_skill_gaps` only for gaps the unit analysis itself found | - | **No** (`GAP-A4-03`) | `TRACED` (controls) |
+
+### UNKNOWN handling in this slice
+
+| UNKNOWN | What the code does | Fails safely? |
+|---|---|---|
+| Which runtime serves a model | Non-exact fingerprint; never QUALIFIED; recorded | Yes |
+| Whether a requested setting is effective at the provider | Unsupported until proven; refused under production | Yes |
+| The served window | Unverified outside production; refused under production when it had to be observable | Yes |
+| The adapter of a binding | Unregistered name refused | Yes |
+| **The binding of a model name** | The primary's binding | **No** |
+| **Whether the primary model is qualified** | Recorded at run start, never decided on | **No**, under the profile that claims a qualified runtime |
+| The role of a call | `unattributed` | Yes (an observation) |
+| **Where a piece of prompt text came from** | Not represented in a request; headings only | **No** for text fetched during the run |
+| Whether a history row or evidence store is the one the run wrote | Not represented | No; stated as a limit of the record, not of a decision |
+| A missing requirement truth or gate outcome on the desktop | Shown as missing or `UNKNOWN`, never as verified | Yes |

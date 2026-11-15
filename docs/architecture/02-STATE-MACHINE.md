@@ -431,3 +431,74 @@ With the packaged defaults that location is the same for every project (`AUTH-A5
 | holds X | the embedding identity or the parser identity changes | rebuilt under the new identity for whichever project indexes next | - |
 
 There is no state "holds A, and the reader knows it is A's": the store records no root, so the reader cannot tell.
+
+## Slice A6
+
+Evidence labels as in the other slices; `M` = `MEASURED` by `evidence/a6/a6_probe.py`.
+
+### SM-A6-01 - One model call inside `LLMClient` (`TRACED`, `core/llm.py::complete_result`; `M` P2, P3)
+
+| From | Event | To | Reason code or record |
+|---|---|---|---|
+| requested | the endpoint is not local under `egress_policy: local_only` | refused before anything else | `EgressViolationError` |
+| requested | the binding's `extra_body` sets a field Kriya owns (model, messages, temperature, max_tokens, tools, stream, response_format, a runtime-owned field) | refused before the identity probe | `PROVIDER_REQUEST_FIELD_CONFLICT` |
+| requested | a JSON schema is asked of a runtime that does not constrain output to one | refused before provider contact | `StructuredOutputUnsupportedError` |
+| requested | the binding names an unregistered runtime adapter | refused (`M` P2) | `UnknownRuntimeAdapterError` |
+| requested | the run's clock is already spent | stop | `INFERENCE_DEADLINE_EXHAUSTED` |
+| admitted | identity probe fails | continues with a non-exact fingerprint | `probe_errors` on the fingerprint |
+| admitted | a requested setting conflicts with the served model; under production also an unknown field or a setting that is not effective | refused | `PROVIDER_SETTING_CONFLICT` / `_UNKNOWN` / `_NOT_EFFECTIVE` / `_UNSUPPORTED` |
+| admitted | served window below requested (`M` P3) | refused | `SERVED_CONTEXT_BELOW_REQUESTED` |
+| admitted | production, served window differs from requested (`M` P3) | refused | `RUNTIME_CONTEXT_IDENTITY_MISMATCH` |
+| admitted | the dispatch does not fit the budget window and no offered tier fits | refused before inference | `CONTEXT_BUDGET_UNSATISFIABLE` / `OUTPUT_BUDGET_UNSATISFIABLE` |
+| admitted | adaptive policy and a larger qualified tier fits | dispatched at that tier, attributed to the tier's own fingerprint | `model.budget_expansion` |
+| dispatched | the provider refuses an over-window prompt (native adapter) | `PROVIDER_CONTRACT_VIOLATION` | `PROVIDER_PROMPT_TRUNCATED`, `provider_contract.admission_miss` |
+| dispatched | reported prompt tokens are below the byte floor on an exact runtime | `PROVIDER_CONTRACT_VIOLATION` | `PROVIDER_PROMPT_TRUNCATED` |
+| dispatched | production, exact runtime that declares observation, window not observed after the call | refused | `SERVED_CONTEXT_UNOBSERVABLE` |
+| dispatched | the deadline passes mid-request | stop, never resent | `INFERENCE_DEADLINE_EXCEEDED` |
+| dispatched | backend error or timeout | returned as a result status | `BACKEND_ERROR` / `TIMEOUT` |
+| dispatched | malformed provider reply | one changed-request retry class (`RuntimeErrorKind.REQUEST`) | `malformed_provider_reply` |
+| dispatched | an answer | `OK`, `EMPTY_CONTENT`, `MALFORMED_STRUCTURED_OUTPUT` or `OUTPUT_TRUNCATED` | `CompletionResult`, counted per (role, model, runtime, settings) in `_finish` |
+
+Two retries live inside the call and nowhere else: the reasoning `response_format` retry and the empty-content floor
+retry (cited from the subsystem note; both recorded in the result's `protocol`). The SDK's own retries are off.
+
+### SM-A6-02 - A qualification record as a consumer sees it (`TRACED`, `core/model_qualification.py::assess`)
+
+| From | Event | To |
+|---|---|---|
+| no record | `kriya model qualify` on an identity that cannot be verified (a conflicting, unknown, unapplied or unverifiable setting, an unpinned served window) | no record: `QUALIFICATION_IDENTITY_UNVERIFIED` before any case |
+| no record | every required capability of the role passes | QUALIFIED for that (runtime digest, settings digest, policy digest) |
+| no record | a required capability fails | NOT_QUALIFIED |
+| QUALIFIED | the runtime digest, the settings digest, the adapter protocol version or the policy digest changes | STALE (found by runtime digest, never read as MISSING) |
+| any | the fingerprint is not exact | RUNTIME_NOT_EXACT |
+| QUALIFIED | capacity evidence read in another execution environment | the capacity case does not count there; functional cases still hold |
+
+Consumers and what each does with the status are in `AUTH-A6-06`. No state other than QUALIFIED ever permits what
+QUALIFIED permits; outside the production profile nothing is refused on any of them.
+
+### SM-A6-03 - The attempt-evidence store of one run (`TRACED`, `core/attempt_evidence/`; `M` P4)
+
+| From | Event | To |
+|---|---|---|
+| pending | no `evidence` configuration, or `capture: off` | disabled; nothing is written |
+| pending | the store cannot be opened (bad state directory, a store of that run id already exists) | unavailable: `RECORDER_UNAVAILABLE`, the run continues unchanged |
+| pending | the first scope that knows the configuration | open; `run.opened` with the manifest (build, workspace identity and path, base revision and tree) |
+| open | a record cannot be written | open and degraded: a counted gap; the seal will say `complete: false` |
+| open | the run exits, after the RunRecord's terminal transition | closed: `run.closed` mirrors the RunRecord's terminal status, lifecycle, revision and commit result; sealed; retention runs |
+| closed | a reader verifies | `VERIFIED`, or `UNSEALED` (`M`: seal removed), `TRUNCATED_TAIL`, `CHAIN_BROKEN` (`M`: one record edited), `BLOB_CORRUPT`, `SEAL_MISMATCH` |
+| closed | every record and the seal are rewritten consistently | `VERIFIED` (`M` P4): the chain proves internal consistency, not origin |
+
+The store is opened by the top-level run only (`begin_mutating_run`); a nested unit of an enforce run records into
+the same store under its own unit scope.
+
+### SM-A6-04 - The Developer's model across the attempts of one unit (`TRACED`, `generation_service.py`, `fallback_decision.py`, `model_transition.py`)
+
+| From | Event | To |
+|---|---|---|
+| primary | first call | primary; `model.transition` (initial) records the request profile. No qualification is required of the primary in any profile |
+| primary | the retry policy escalates (slice A1: after the targeted budget of a family is spent) | the first configured fallback that can serve, chosen before the prompt is sized |
+| candidate fallback | a FAILED Developer case, production without QUALIFIED, a patch-only attempt against a whole-file profile, no prompt room | skipped and recorded (`model.fallback_selection`); run-wide skips are remembered for the invocation |
+| candidate fallback | none left that can serve | terminal `fallback_incompatible` (`FALLBACK_MODEL_INCOMPATIBLE`), nothing sent |
+| any | a retry carries a `retry_temperature` different from the model's own, production, and that identity is not QUALIFIED | terminal `RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED`, nothing sent |
+| fallback | a new failure family resets the scoped budgets (`AUTH-A1-03`) | may return to the primary; `model.transition` records the change |
+| any | the unit invocation ends | the state is discarded (`AUTH-A1-09`): the next invocation starts on the primary |
