@@ -6,8 +6,9 @@
 #
 #   scripts/certify_s0_core.sh <evidence-dir>
 #
-# Run from the root of a CLEAN worktree pinned to the commit under certification, with its own .venv
-# (python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"). Runs every phase even after a failure, writes one log per
+# Run from the root of a CLEAN worktree pinned to the commit under certification, with its own .venv built from the LOCK, as CI
+# does (python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/pip install -e . --no-deps); never
+# from the declared ranges - an off-lock pytest silently turned the docker single-worker pin off (2026-11-15). Runs every phase even after a failure, writes one log per
 # phase and <evidence-dir>/summary.txt, and exits non-zero when any phase failed. Nothing is retried.
 set -u
 EVIDENCE="${1:?usage: scripts/certify_s0_core.sh <evidence-dir>}"
@@ -17,6 +18,24 @@ FAILED=0
 
 if [ -n "$(git status --porcelain)" ]; then
     echo "refused: the tracked tree is not clean" >&2
+    exit 2
+fi
+OFF_LOCK="$(.venv/bin/python -I -c '
+import re, importlib.metadata as m
+for line in open("requirements.txt"):
+    pin = re.match(r"^([A-Za-z0-9_.\-]+)==([^\s;\\]+)", line)
+    if not pin:
+        continue
+    try:
+        have = m.version(pin.group(1))
+    except m.PackageNotFoundError:
+        have = "absent"
+    if have != pin.group(2):
+        print(f"{pin.group(1)}: locked {pin.group(2)}, installed {have}")
+')"
+if [ $? -ne 0 ] || [ -n "$OFF_LOCK" ]; then
+    echo "refused: .venv is not the locked dependency set (requirements.txt):" >&2
+    echo "$OFF_LOCK" >&2
     exit 2
 fi
 { echo "commit: $(git rev-parse HEAD)"; echo "started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"; } > "$SUMMARY"

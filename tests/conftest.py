@@ -818,6 +818,26 @@ def pytest_select_census_ids(config, items):
     items[:] = kept
 
 
+def ungrouped_docker_ids(items):
+    """Docker-grouped items whose node id did NOT receive xdist's ``@docker`` suffix. ``--dist loadgroup`` schedules on that suffix alone, so
+    a missing one means the single-worker pin is silently off (MEASURED 2026-11-15: pytest 9.2.0 reads ``Item._id`` while pytest-xdist 3.8.0
+    writes ``Item._nodeid``; real-container tests then ran on every worker and 22 global leak checks failed on each other's containers)."""
+    return [item.nodeid for item in items if "docker" in _xdist_group_names(item) and not item.nodeid.endswith("@docker")]
+
+
+@pytest.hookimpl(trylast=True, specname="pytest_collection_modifyitems")
+def pytest_docker_pin_is_effective(config, items):
+    """TEST-DOCKER-PIN-INERT-OFF-LOCK-001: in an xdist worker under ``--dist loadgroup`` the pin must be real, or the run refuses to start."""
+    if not hasattr(config, "workerinput") or not config.getoption("loadgroup", False):
+        return
+    missing = ungrouped_docker_ids(items)
+    if missing:
+        raise pytest.UsageError(
+            f"the docker single-worker pin is inert: {len(missing)} docker-grouped test(s) carry no @docker scheduling suffix (first: {missing[0]}). "
+            "The installed pytest/pytest-xdist pair does not apply xdist_group; install the locked set: "
+            "pip install -r requirements.txt && pip install -e . --no-deps")
+
+
 _SKIPS = pytest.StashKey[list]()
 _CERTIFICATION_CASES = pytest.StashKey[list]()
 _KRIYA_IDENTITY_START = pytest.StashKey[dict]()
