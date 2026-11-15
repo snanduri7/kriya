@@ -1,0 +1,23 @@
+kriya imported from: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-architecture-closure/kriya
+P10 unsafe_exception_masking: category = FailureCategory.UNCLASSIFIED | is_candidate_finding = True | authority = authoritative | replaces_open_finding = True
+    open set after the rejection: [('unsafe_exception_masking', 3)] | still open after an intervening budget refusal: True
+    evidence text carries the prohibition: True
+    a following no_progress_retry failure replaces it? True (is_candidate_finding('no_progress_retry') = True )
+    scoped budgets after that no_progress_retry (were targeted=3, fallback one-shot used): targeted = 0 | fallback_targeted_attempted = False
+    a following compile failure replaces it? ['compile'] | prohibition still in the open set: False
+P11 last element of the preserved assertion's signature detail: ('org.opentest4j.AssertionFailedError', 'expected: <9999999999> but was: <1410065407>')
+    same test, same line, the reported actual value changed by one -> same signature? False | read as a new family? True
+P12 unit ceiling with a fallback chain of 0: max_retries=4 ceiling=10
+P12 unit ceiling with a fallback chain of 1: max_retries=4 ceiling=11
+P12 unit ceiling with a fallback chain of 3: max_retries=4 ceiling=11
+    constants: API_CONTRACT_RECOVERY_MAX_ATTEMPTS = 3 | FALLBACK_ALLOWANCE = 1 | STRATEGY_TRANSITION_AFTER_NO_PROGRESS = 2
+    one stage with a persistent upstream requirement (pinned by tests/test_workflow_controller_enforce.py::test_enforce_bounds_recovery_attempts_per_downstream_owner_pair): 1 planned + 3 x (owner_recovery + consumer_retry) = 7 unit invocations; x ceiling 11 = 77 attempts possible for one blocker before the stage stops
+P13 requirement ids for generations 0..2 distinct: True | history of a not-yet-recorded id: 0
+P14 a new RetryBudgets: {'retry_count': 0, 'targeted_retry_count': 0, 'api_contract_recovery_count': 0, 'fallback_targeted_attempted': False, 'fallback_attempts_used': 0, 'fallback_targeted_requested': False, 'scoped_full_set_failure_signature': None, 'last_failure_signature': None, 'seen_failure_signatures': set(), 'best_of_n_candidates_tried': 0, 'diagnosis_mismatch_veto_counts': {}, 'anchor_failure_counts': {}, 'last_retry_evidence_fingerprint': None}
+    ControlState fields: ['acceptance_approval_digest', 'base_commit', 'created_at', 'current_artifact_registry_hash', 'current_contract_hash', 'current_milestone_id', 'current_plan_hash', 'engineering_route', 'last_verified_checkpoint', 'milestone_group_id', 'milestone_states', 'patch_hash', 'process_profile', 'requirement_contract_digest', 'run_id', 'schema_version', 'subtask_completion_scope', 'subtask_states', 'subtask_written_files', 'tool_attempts', 'tree_hash', 'updated_at', 'verification_contract_digest', 'workspace_content_hash']
+    ControlState fields naming retry/recovery state: []
+P15 autonomy.max_consecutive_no_progress_attempts default: 2
+    configured 1 -> accepted 1 -> effective limit (retry_strategy: max(3, value)) 3
+    configured 2 -> accepted 2 -> effective limit (retry_strategy: max(3, value)) 3
+    configured 3 -> accepted 3 -> effective limit (retry_strategy: max(3, value)) 3
+    configured 5 -> accepted 5 -> effective limit (retry_strategy: max(3, value)) 5

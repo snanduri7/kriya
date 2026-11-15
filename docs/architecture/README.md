@@ -23,6 +23,11 @@ evidence only: runtime code, tests, goldens, the registry and sealed run evidenc
   A `TRACED` claim is never promoted to `MEASURED`.
 - **Citations.** `path::symbol` at the baseline commit. Line numbers are supplementary.
 - **Single-owner claims** record the negative-control search that looked for another writer or decision maker.
+  A search for "nobody passes X" must also look for keyword forwarding (`**kwargs`) at each call site: the A1
+  checkpoint missed a forwarded `resume` flag that way.
+- **Operating authority (owner, 2026-11-15).** Slices A1b to A6, Phase B and Phase C run as one authorized program
+  without a stop between slices; the only routine owner stop is the Phase-D report. Registry rows that concern one
+  root issue are traced once and the evidence is applied to each row individually.
 - **Registry.** `handover/BACKLOG_REGISTRY.csv` is evidence being reconciled. It is not edited in Phase A.
   `REGISTRY-COVERAGE.md` carries one row per non-closed registry row.
 
@@ -50,15 +55,15 @@ evidence only: runtime code, tests, goldens, the registry and sealed run evidenc
 | `04-FAILURE-RECOVERY-MATRIX.md` | Failure source to terminal outcome | A1 rows |
 | `05-INTEGRATION-BYPASS-MAP.md` | Side routes and bypasses | A1 rows |
 | `GAP-LEDGER.md` | Contradictions and gaps found by each slice | A1 section |
-| `REGISTRY-COVERAGE.md` | One row per non-closed registry row | 5 of 141 reconciled, 3 need characterization; 13 of the 21 A1 rows are still pending |
-| `evidence/a1/` | Probe scripts and their output for slice A1 | complete |
+| `REGISTRY-COVERAGE.md` | One row per non-closed registry row | 19 of 141 reconciled, 2 need characterization, 120 pending (slices A2 to A6) |
+| `evidence/a1/` | Probe scripts and their output for slices A1 and A1b | complete |
 | `CORR016_...`, `SEC001_...` | Design documents that predate the closure | reconciled in A3 / A5 |
 
 ## Slice status
 
 | Slice | Scope | Status |
 |---|---|---|
-| A1 | Retry, blocker identity, allowance, checkpoint/resume | Maps and gap ledger written, awaiting owner review. 13 of its 21 registry rows not yet reconciled |
+| A1 | Retry, blocker identity, allowance, checkpoint/resume | Complete (A1 `82eb96c`, A1b). 21 of 21 registry rows examined: 19 reconciled, 2 `NEEDS_CHARACTERIZATION` with the exact missing evidence and the owning slice (A2, A3), 0 pending. Gaps `GAP-A1-01` to `GAP-A1-09`. Four statements of the A1 checkpoint were corrected (gap ledger, "Corrections") |
 | A2 | Semantic contract, verifier identity/specification/authority, attribution | Not started |
 | A3 | Candidate, review/approval, apply, replay, terminal gate, final result | Not started |
 | A4 | Goal intake, knowledge/Skills, planning, plan validation, direct vs enforce | Not started |

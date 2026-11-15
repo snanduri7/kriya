@@ -31,5 +31,18 @@ A1 covers the accounting columns only (open finding, family, charge, stop). Whic
 | FR-A1-14 | Repository content filter refused; membership authority could not list the tree (`RepositoryContentFilterRefused`, `BoundTreeError`) | Typed exception | Not recorded as an attempt failure | - | Not charged | None: the exception leaves the loop | Typed stop of the run |
 | FR-A1-15 | Cancellation or interruption (not an `Exception`) | - | Not recorded | - | Not charged | None | Propagates; the run record is closed by the run lifecycle (slice A3) |
 
+| FR-A1-16 | Orchestrator refusal before inference that no table lists: `no_progress_retry` (`ANCHOR_CONTEXT_NOT_ESCALATED`, `NO_PROGRESS_RETRY_EXHAUSTED`, `SAMPLING_NOT_PERMITTED`) | Reason code in `diagnostics` | **Yes** (unknown type defaults to candidate finding) | **Its own signature: a new family, scoped budgets replenished** | The mode it ran in | Continues. For `ANCHOR_CONTEXT_NOT_ESCALATED` the forced strategy transition closes the targeted budget again in the same recording; the cleared fallback one-shot stays cleared | `STOP_EXHAUSTED` or a no-progress stop. `GAP-A1-07` (`MEASURED`, probe P10) |
+
+### Slice A1b - enforce-level outcomes of a unit that stopped (`TRACED`, `SM-A1-04`)
+
+| ID | Unit outcome reaching the enforce loop | Decided by | Next | Terminal outcome if it persists |
+|---|---|---|---|---|
+| FR-A1-17 | Scope conflict whose artifacts resolve to completed owners | `build_recovery_execution_plan` | Owner recovery cycle, then the consumer step | After 3 cycles the stage fails; touched owners end `needs_review`; the plan does not commit |
+| FR-A1-18 | Scope conflict whose artifact has no resolvable owner, an ambiguous group order, or a relationship artifact that exists but whose owner has not completed | The same function; the materialized-artifact check | No recovery | The stage fails with the conflict unresolved |
+| FR-A1-19 | Recovery would change an owner that has a completed TOOL dependent | `_completed_tool_dependents` | No owner is invoked | Typed `TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE` |
+| FR-A1-20 | A `MAY_CHANGE` owner answers in any form other than the unit's typed identical-regeneration stop | The `may_change_unchanged` predicate | The group fails | The recovery is rejected even if another participant fixed the cause (`RECOVERY-MAY-CHANGE-ANSWERED-NO-CHANGE-REFUSED-IN-UNIT-001`: confirmed by trace) |
+| FR-A1-21 | Any stage ends without `completed` | The terminal block | The plan sandbox is not committed and its completions are discarded | Every accepted earlier unit's work is discarded with it; a resume starts the plan again (`GAP-A1-09`) |
+| FR-A1-22 | Typed stop of a unit that is not a scope conflict (time budget, environment, exhausted budgets) on a unit that owns files | No enforce-level decision exists for it | None | The stage fails. Only a verification-only unit's typed no-change stop has a route to an upstream owner (`SM-A1-04` step 4) |
+
 Human authority in the retry loop: none. A person acts only at the approval gate, the verifier semantic review
 and the resume request, which belong to slices A2 and A3 and to `AUTH-A1-09` / `AUTH-A1-10`.

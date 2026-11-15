@@ -2,7 +2,7 @@
   "RETRY-BLOCKER-IDENTITY-AUTHORITY-001": {
     "reconciliation": "RECONCILED",
     "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
-    "notes": "A1: confirmed, GAP-A1-01 (MEASURED probe P1-P6, TRACED AUTH-A1-02/03/12). Disposition follows the owner ruling of 2026-11-14 (not a future feature, not a contract) and is a Phase-A proposal. Contradiction H-A1-1 must be ruled first."
+    "notes": "A1/A1b: confirmed, GAP-A1-01 (MEASURED probes P1-P6 and P11: the signature errs in both directions; TRACED AUTH-A1-02/03/12/13). H-A1-1 ruled 2026-11-15: MODULE-CONTRACTS section 12 is stale design. New related gap GAP-A1-07 (an unlisted non-candidate failure replenishes scoped budgets). Disposition is a proposal for Phase D."
   },
   "RETRY-PROGRESS-SAME-BLOCKER-001": {
     "reconciliation": "DUPLICATE/SUPERSEDED",
@@ -11,35 +11,93 @@
   "RETRY-STATE-RESUME-CONTINUITY-001": {
     "reconciliation": "RECONCILED",
     "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
-    "notes": "A1: confirmed by trace, GAP-A1-02; not exercised. A1 found two parts (unit, enforce) that may need different dispositions: H-A1-3. The disposition shown follows the owner ruling of 2026-11-14 and is a Phase-A proposal."
+    "notes": "A1b: split per the owner's ruling. Unit continuity: confirmed by trace and negative control (no restore path exists), GAP-A1-02; no end-to-end resume was executed and the exact missing harness is stated there. Enforce continuity: in production nothing is reused after a failure, so the question becomes GAP-A1-09 (accepted unit work is not durable before the terminal commit). Disposition is a proposal for Phase D."
   },
   "OPEN-FINDINGS-ORDER-RESUME-001": {
     "reconciliation": "DUPLICATE/SUPERSEDED",
-    "notes": "A1: both halves are covered. 'Replacement is not order-aware' is part of GAP-A1-01 (the open set is replaced wholesale, AUTH-A1-02). 'Not checkpointed' is part of GAP-A1-02. Its planned closing unit (G4 with FindingState, OPEN-ITEMS OI-77) was not built."
+    "notes": "A1: both halves are covered. 'Replacement is not order-aware' is part of GAP-A1-01 (the open set is replaced wholesale, AUTH-A1-02). 'Not checkpointed' is part of GAP-A1-02. Its planned closing unit (G4 with FindingState, OPEN-ITEMS OI-77) was not built and its design is ruled stale (H-A1-1)."
   },
   "DEMO-TIME-BUDGET-001": {
     "reconciliation": "RECONCILED",
     "disposition": "INTENTIONAL_CURRENT_CONTRACT",
-    "notes": "A1: the run-wide shared clock is traced (AUTH-A1-08) and matches the row. The registry already classifies the value as an operator choice. Residual question (which value a real launch uses) is GAP-A1-06, NEEDS_CHARACTERIZATION, slice A5."
+    "notes": "A1: the run-wide shared clock is traced (AUTH-A1-08) and matches the row. The registry already classifies the value as an operator choice. Residual question (which value a real launch uses) is GAP-A1-06, NEEDS_CHARACTERIZATION, slice A5. A1b: the default is null, which makes the time budget absent as a bound on GAP-A1-04."
   },
-  "GUI-TRACE-ATTEMPTS-SEMANTICS-001": {
-    "reconciliation": "PENDING",
-    "notes": "A1: read, not traced. Related to GAP-A1-03 (attempt accounting in evidence). To be reconciled with the evidence schema in A6."
+  "REPAIR-EQUIVALENCE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A1b (TRACED, AUTH-A1-04): since the row was written, a repeated candidate is detected after its gates ran (same effective workspace bytes or a repeated progress vector count toward the no-progress stop; strategy changes after 2, the unit stops at 3). What the row still asks for, refusing a byte-identical candidate before a gate round, is not built: an efficiency capability, consistent with the registry's DEFERRED. Not replayed against the S3_A recording. Disposition is a proposal."
+  },
+  "SEMANTIC-SAFETY-REPAIR-CONTINUITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "A1b (MEASURED, probe P10): the staging rejection is kept as the open finding with its prohibition text and survives a resource refusal; it is replaced, and the prohibition leaves the open set, on the next candidate finding of any kind and on a no_progress_retry refusal. Same root as GAP-A1-01 (one-element open set, no blocker lifecycle) and GAP-A1-07. The row's second claim (the message does not say the edit was not applied) was not checked: prompt wording, slice A4. Disposition is a proposal and follows GAP-A1-01."
+  },
+  "ATTEMPT-ATOMIC-CANDIDATE-DISCARDS-VALID-EDIT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A1b (TRACED): confirmed as current behaviour and as a stated contract of workflow/candidate_transaction.py ('the first refusal raises and refuses the whole attempt; nothing staged'). The measured consequence (a valid edit for the blamed file is refused with its sibling's protocol failure) stands. Whether attempt atomicity is the intended contract or a defect is not decided by evidence in A1: carried to slice A3 (candidate transaction) and Phase B for the disposition."
+  },
+  "TRIAGE-ON-ORCHESTRATOR-NOTICE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A1b (TRACED): still current at the call site. retry_strategy._record_attempt_failure sets environment_failure for time_budget_exhausted and then calls attribution.attribute_failure without a guard on that stop, and a search of workflow/attribution.py found no orchestrator or time-budget exclusion. The ladder's own tiers are traced in slice A2; disposition in Phase B."
+  },
+  "RETRY-REFERENCE-CONTEXT-DEDUP-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A1b: not re-measured (the registry row is MEASURED on run 10 and records the reverted attempt). A context-efficiency improvement with a stated precondition; the current behaviour is pinned by a test and a golden and the owner ruled 'not this sprint'. No authority or truth question. Context construction is mapped in slice A4. Disposition is a proposal."
   },
   "METRICS-RETRIES-TRIGGERED-COUNTS-TERMINAL-ATTEMPT-001": {
-    "reconciliation": "PENDING",
-    "notes": "A1: read, not traced. Related to GAP-A1-03. To be reconciled with role metrics in A6."
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A1b (TRACED): confirmed. core/role_metrics.py record_attempt increments retries_triggered for every attempt that did not pass, whatever the recovery decision. Part of GAP-A1-03 (attempt accounting in evidence). Disposition with the evidence schema in slice A6 / Phase B."
   },
   "HITL-RESUME-DEFERRED-GATES-001": {
     "reconciliation": "NEEDS_CHARACTERIZATION",
-    "notes": "A1: consistent with SM-A1-03 (the candidate checkpoint is written after approval and the held gates). The row itself says resume plus deferral is untested; a deterministic resume exercise is owed."
+    "notes": "A1b: the checkpoint placement is TRACED (workflow/development_loop.py writes candidate_gates_passed after approval and the held gates; SM-A1-03). Missing evidence, exactly: a deterministic resume of a unit from that checkpoint in human-in-the-loop mode with deferred gates. No committed test does it (the row says so) and the approval and deferred-gate path is traced in slice A3, which owns this characterization."
   },
-  "SEMANTIC-SAFETY-REPAIR-CONTINUITY-001": {
+  "LEAK-SIGKILL-RECOVERY-GAP-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A1b: not re-measured. The registry's own W3-8 disposition (2026-11-01) split the row: the effect-ownership half is fixed and verified (3e1df0c); what remains is stale Docker proxy and network objects after a SIGKILL, measured safe on 2026-09-29 (no adoption, reuse, contamination or false success), routed to an operations-hardening pass with the owner's approved deferral. No retry, authority or result-truth question. Process and container ownership is mapped in slice A5. Disposition is a proposal."
+  },
+  "GUI-RECOVERY-ACTION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A1b (TRACED): the kernel recovery action exists (kriya/cli_commands/runs.py runs_recover, named by the typed blocker in cli.py). The desktop has no button for it. The state is typed and safe; the registry already classifies it a future capability."
+  },
+  "RECOVERY-UPSTREAM-OWNER-ROUTING-001": {
     "reconciliation": "NEEDS_CHARACTERIZATION",
-    "notes": "A1: not checked whether the staging rejection's failure type is now kept as an open finding by replaces_open_finding (AUTH-A1-01). A model-free probe on the real type is owed."
+    "notes": "A1b (TRACED): the stop this row observed was changed on 2026-11-11 (ATTRIBUTION-MODEL-CLAIM-HARD-STOP-001): NO_AUTHORIZED_REPAIR_TARGET now requires a deterministic attribution tier, and a deterministic tier naming only out-of-scope files is claimed first by the plan-scope escalation, which routes to owner recovery. If the 2026-10-10 stop came from an advisory tier the row is stale; that cannot be decided without the tier of that run's attribution. Missing evidence, exactly: the attribution tier of unit s2 in C2-S4_A-c3 (its sealed store). Owned by slice A2 (attribution)."
+  },
+  "RECOVERY-MAY-CHANGE-ANSWERED-NO-CHANGE-REFUSED-IN-UNIT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A1b (TRACED, FR-A1-20): confirmed. The enforce loop accepts 'legitimately unchanged' only as the unit's typed VERIFICATION_RETRY_NO_CHANGE_POSSIBLE stop with equal bytes; any other answer fails the group and the recovery. Safe failure. The unit-side settlement (workflow.py, verified_no_change.py) is traced in slice A3; disposition in Phase B."
+  },
+  "ENFORCE-UPSTREAM-WORK-PRESERVATION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A1b (TRACED + MEASURED): confirmed and made GAP-A1-09. The discard is the deliberate consequence of two contracts (atomic terminal commit; sandbox completions are not resumable). Whether accepted unit state may be preserved for review or resume without being committed is a product-policy choice the row has asked for since 2026-10-09: an owner decision (Phase D item O) unless Phase B evidence decides it."
+  },
+  "CROSS-UNIT-PRODUCER-RECOVERY-CAPABILITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A1b (TRACED, SM-A1-04, FR-A1-22): consistent with the owner's disposition of 2026-11-06. Routes that exist: owner recovery when attribution grounds the failure to a completed owner's file, and the owner-reopen episode of a verification-only unit. A file-owning consumer whose behavioural failure is not grounded to an upstream file has no route and fails closed after bounded attempts."
+  },
+  "GUI-TRACE-ATTEMPTS-SEMANTICS-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A1b (TRACED): confirmed. workflow/run_lifecycle.py writes runs.attempts = retry_count + best_of_n_candidates_tried (the full-set counter, not attempts made) and workflow/run_trace.py writes 0 on early exits. Part of GAP-A1-03. Disposition with the evidence schema in slice A6 / Phase B."
   },
   "KERNEL-RESULT-RUNID-DIVERGES-001": {
-    "reconciliation": "NEEDS_CHARACTERIZATION",
-    "notes": "A1: the row is INFERRED in the registry. A1 saw that terminal apply writes retry_state_reference='checkpoint:<run_id>' (MUT-A1-14) but did not compare the ids."
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A1b (TRACED): confirmed in part and by construction. A unit result's run_id is the trace id (workflow.py: trace_id_override or an 8-hex id), while its checkpoint id comes from control/checkpoint.py new_run_id (timestamp plus 8 hex) and is what retry_state_reference names; a checkpoint also stores a separate reference to its run record. So one unit invocation has at least two, probably three, identifiers with no single owner. The run-record side is traced with evidence identity in slice A6; disposition in Phase B."
+  },
+  "GUI-EXEC-STOP-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A1b: consistent with the owner decision of 2026-10-10 (no Stop in v1). Kernel fact relevant to it (TRACED, FR-A1-15): a cancellation is not recorded as an attempt failure and no retry state survives it; whether an interrupt at every phase leaves a recoverable state is not established, which is the precondition the row itself names."
   }
 }

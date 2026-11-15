@@ -24,6 +24,38 @@ python3 gen_coverage.py <this worktree> coverage_overrides.json
 
 Focused existing test run: `tests/test_non_candidate_failure_scoped_reset_001.py` - **9 passed in 0.94s**.
 
+## Slice A1b (2026-11-15, same baseline, same interpreter and environment)
+
+| File | What it is | Result |
+|---|---|---|
+| `a1b_probe.py`, `a1b_probe_output.txt` | Model-free probe of the pure owners. P10: the staging-rejection type and `no_progress_retry` against the open-finding predicate and the family reducer. P11: the preserved assertion with only its reported value changed. P12: the unit ceiling. P13: requirement ids per generation and the ledger history of an unrecorded id. P14: default `RetryBudgets` and the `ControlState` field list. P15: the no-progress limit | P10 the rejection is kept, survives a resource refusal, is replaced by `no_progress_retry` (scoped budgets 3/used -> 0/available) and by a compile failure. P11 new family. P12 ceiling 10 without a fallback, 11 with one. P13 distinct ids, history 0. P14 no retry or recovery field in `ControlState`. P15 1 and 2 read as 3 |
+| `a1b_tests_output.txt` | Seven committed deterministic tests run to turn traced enforce facts into measured ones | 7 passed in 67.32s |
+
+```
+<venv>/bin/python -m pytest -q -p no:cacheprovider \
+  tests/test_workflow_controller_enforce.py::test_enforce_bounds_recovery_attempts_per_downstream_owner_pair \
+  tests/test_workflow_controller_enforce.py::test_enforce_resume_never_skips_sandbox_only_completions_after_a_crash \
+  tests/test_workflow_controller_enforce.py::test_enforce_resume_skips_only_the_subtasks_already_completed \
+  tests/test_workflow_controller_enforce.py::test_enforce_resume_after_a_committed_sandbox_plan_reuses_it_and_changes_nothing \
+  tests/test_enforce_recovery_convergence_001.py::test_new_bytes_every_time_are_stopped_by_the_plan_derived_recovery_cap \
+  tests/test_enforce_recovery_convergence_001.py::test_a_repeated_convergence_state_stops_typed \
+  tests/test_resume_integrity.py::test_workflow_refuses_uncertain_commit_before_any_model_call
+```
+
+Searches recorded for the A1b single-owner and census claims (run from the worktree root):
+
+```
+grep -rnE "budgets\.[a-z_]+ *[+-]?= |budgets\.[a-z_]+\.(add|clear|discard|update)\(" kriya --include='*.py'   # 26 writer sites
+grep -c "await _invoke_bounded_subtask(" kriya/workflow/enforce_loop.py                                        # 10 call sites
+grep -n "legacy_kwargs" kriya/workflow/enforce_loop.py                                                          # resume forwarding
+```
+
+A1b limits: P10 and P11 exercise the reducers, not a full retry loop. No unit resume was executed end to end (the
+gap ledger states the missing harness). The enforce tests use an engine double that replaces the unit, so they
+measure invocation counts and resume decisions, not unit budgets. The owner-recovery self-correction body
+(`BYP-A1-13`) was not read. Not run: the full suite, `tests/state_machine`, `tests/architecture`, live models,
+qualification.
+
 ## Limits
 
 - P3 is a constructed input: the preserved assertion text with only the test method name changed. It shows what the

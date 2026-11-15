@@ -92,14 +92,77 @@ The final disposition (`FIX_REQUIRED_BEFORE_PRODUCTION`, `DISPROVED_WITH_EVIDENC
 | Reconciliation state | `NEEDS_CHARACTERIZATION`: a model-free config-resolution probe of the launch path (`cli.py::_workflow_config` and the production profile) is needed. Deferred to slice A5 (configuration authority), where that path is traced |
 | Registry rows | `DEMO-TIME-BUDGET-001` (the configuration choice itself, already classified "not a defect") |
 
-### Contradictions that need an owner ruling (A1)
+## Slice A1b (2026-11-15) - characterization of the A1 gaps, and new gaps
 
-| ID | Contradiction | Sources |
+Evidence: `evidence/a1/a1b_probe.py` and its output, `evidence/a1/a1b_tests_output.txt` (7 committed tests passed on
+this baseline), and the line-by-line read of the enforce recovery loops recorded in `AUTH-A1-11`, `AUTH-A1-14` and
+`SM-A1-04`. The A1 tables above are kept as written; where A1b changes one of them it says so here.
+
+| Gap | A1b result | State |
 |---|---|---|
-| H-A1-1 | An existing design document specifies a `Finding` with an ID and a state machine (OPEN, TARGETED, RESOLVED, SUPERSEDED, REFUSED). The WS4 ruling of 2026-11-14 rejected a blocker registry and a typed key as blocker authority. The two cannot both be the architecture | `DOC-A1-02`; sprint log 46 "Rejected / not authorized by the owner" |
-| H-A1-2 | `handover/KRIYA_ARCHITECTURE_DECISIONS.md` lists retry state among the identities the system binds; the code persists none | `DOC-A1-04`; `AUTH-A1-09` |
-| H-A1-3 | The registry describes one resume gap. The trace shows two different ones (unit and enforce) with different consequences. They may need different dispositions | `GAP-A1-02` |
-| H-A1-4 | Is a full fresh unit budget per enforce re-invocation the intended contract? | `GAP-A1-04` |
+| GAP-A1-01 | The "not established" line is now established: the same assertion with only its reported value changed is a new family (`MEASURED`, probe P11). So the signature errs in both directions: a different blocker with equal text gets no allowance (P3) and the same blocker with changed text gets a fresh one (P11). `SEMANTIC-SAFETY-REPAIR-CONTINUITY-001` is the same gap seen from the model's side: the open set holds one finding, so a staging rejection's prohibition leaves it as soon as any other candidate finding arrives (P10) | `CONFIRMED` |
+| GAP-A1-02 | Split, per the owner's instruction. **Unit continuity:** no retry state is restored; the checkpoint payload holds none and `GenerationState` is constructed with default `RetryBudgets` on every invocation (`TRACED`; P14 for the defaults). A resumed unit reuses plan, design or a gate-passed candidate only. No resume was executed end to end: the committed resume tests either stop before any model call (`tests/test_resume_integrity.py`) or use an engine double that replaces the unit (`tests/test_workflow_controller_enforce.py`), so none can show a real unit's budgets after a resume. Missing evidence, exactly: a scripted-model run of `run_generation_workflow` interrupted inside the retry loop and resumed, asserting attempt number and budgets. It needs no code change, only a harness; it is not needed to classify the gap, because the absence of any restore path is a negative-control fact. **Enforce continuity:** the A1 statement ("applied upstream work stays in the workspace and completed subtasks are skipped") is true only for a plan run in place. In production the plan runs in a sandbox, a failed or interrupted run discards every completion, and a resume plans and runs the whole plan again (`MEASURED`, `AUTH-A1-10`). The enforce recovery state of `AUTH-A1-14` is therefore lost together with everything else. The durable-state question for enforce is not "which counters to persist" but "is accepted unit work durable at all before the terminal commit": `GAP-A1-09` | `CONFIRMED` (both parts) |
+| GAP-A1-03 | Characterized. Per attempt the evidence holds: the attempt mode, the failure type, the retry action and its reason, the progress classification, the consecutive no-progress count, the changed dimensions of the progress vector (`recovery.decision`, `retry.progress_vector`, `retry.strategy_transition`). It does not hold: whether the failure opened a new family, the family signature or its digest, the counter values after the charge, or any record of the reset. `recovery.decision` is written only when attempt-evidence capture is on. A reader can replay the charge rule from the recorded modes but cannot tell a reset from the record; the trajectory is recoverable only by re-running the reducers over the raw gate output, which is what sprint log 46 did. Related registry rows confirmed by trace: `GUI-TRACE-ATTEMPTS-SEMANTICS-001` (`workflow/run_lifecycle.py` writes `attempts = retry_count + best_of_n_candidates_tried`; `workflow/run_trace.py` writes 0 on early exits) and `METRICS-RETRIES-TRIGGERED-COUNTS-TERMINAL-ATTEMPT-001` (`core/role_metrics.py` `record_attempt` counts every non-passed attempt as a triggered retry) | `CONFIRMED` |
+| GAP-A1-04 | Characterized (`BYP-A1-01`): 7 unit invocations and up to 77 Developer attempts for one unresolved blocker in one stage, more with scope revisions, with no time bound unless the operator configured one. The owner's standing ruling is that a fresh full budget per re-invocation is **not** an accepted contract until characterized; it is now characterized and still has no stated contract. The cycle caps bound invocations, not attempts per blocker | `CONFIRMED`; a contract is required (Phase C) |
+| GAP-A1-05 | Characterized (`MEASURED`, probe P15): configured 1 and 2 are accepted and read as 3; 5 is read as 5. Second contradiction found: `application/readiness.py` reports the configured value to the operator as the number of attempts after which a run stops. Third: `STRATEGY_TRANSITION_AFTER_NO_PROGRESS` is the constant 2, so "two recovery actions then stop on the third" is the coded contract and the field can only raise the stop, never lower it. The field's lower range (1, 2) has no meaning | `CONFIRMED`; the field contract is decided with configuration authority (A5, Phase C) |
+| GAP-A1-06 | Unchanged: owned by slice A5 | `NEEDS_CHARACTERIZATION` |
+
+### GAP-A1-07 - An unlisted non-candidate failure replaces the open finding and replenishes the scoped budgets
+
+| Field | Content |
+|---|---|
+| Problem | `open_findings.replaces_open_finding` treats a failure type it does not know as a finding about the candidate. The same predicate decides whether the failure inherits the previous family. `no_progress_retry` is raised by Kriya itself before any model call (`workflow/candidate_transaction.py`: the same request would be resent; `workflow/repair_orchestrator.py`: the retry evidence is identical to the previous attempt's) and is in neither exclusion table. It therefore replaces the open finding and, being new text, opens a new family |
+| Evidence | `MEASURED` on the pure owners (probe P10): after a staging rejection, a `no_progress_retry` built as its producers build it replaces the open set, and scoped budgets at `targeted=3, fallback one-shot used` become `targeted=0, one-shot available`. `TRACED`: the call order in `retry_strategy._record_attempt_failure`. For the `ANCHOR_CONTEXT_NOT_ESCALATED` variant the forced strategy transition closes the targeted budget again in the same recording, so what remains replenished is the fallback one-shot. Not executed inside a full retry loop. Historical: OPEN-ITEMS OI-78 recorded the replacement on 2026-10-19 |
+| Relation to closed work | Same mechanism as `NON-CANDIDATE-FAILURE-SCOPED-RESET-001` (closed for resource, internal and delivery types). That correction enumerated types; this type was not enumerated, and the nine closing tests do not name it |
+| First wrong owner | `open_findings.replaces_open_finding`: one predicate with two consumers whose safe defaults are opposite. "Keep an unknown finding" is safe for memory. "An unknown failure may open a family" is unsafe for an allowance. Invariant violated: "fail closed, never approximate" (an unknown type widens a budget) |
+| Affected flows | Every unit retry loop |
+| Severity | P2 candidate (same class as the run-10 defect; bounded by the unit ceiling) |
+| Existing canonical seam | The predicate itself and its exclusion tables |
+| Registry rows | None for the allowance effect. `SEMANTIC-SAFETY-REPAIR-CONTINUITY-001` records the finding-replacement half |
+| Reconciliation state | `CONFIRMED` at the owner level; a deterministic loop-level reproducer is the first step of any fix |
+
+### GAP-A1-08 - The per-requirement recovery cap cannot fire
+
+| Field | Content |
+|---|---|
+| Problem | The owner-recovery loop refuses to reopen an owner when the requirement's ledger history has 3 entries. The requirement id changes on every evaluation, so the history read is always empty. The comment above the loop still names this cap as the source of boundedness |
+| Evidence | `TRACED` (`AUTH-A1-11`); `MEASURED` (probe P13; the committed test's own docstring and assertion of three distinct requirement ids) |
+| Consequence | No unbounded behaviour: the 3-cycle loop and the run cap bound it. The effect is a decision the code and its comments attribute to an owner that never decides, and a second identity for "the same requirement" (the generation-suffixed id) that by design never recurs |
+| First wrong owner | `workflow/enforce_loop.py`, the `prior_attempts` check |
+| Severity | P3 (dead decision, misleading contract text) |
+| Registry rows | None. New in A1b |
+| Reconciliation state | `CONFIRMED` |
+
+### GAP-A1-09 - Accepted unit work is not durable before the terminal commit
+
+| Field | Content |
+|---|---|
+| Problem | In an enforce run every unit's accepted, applied work lives in the plan sandbox until the whole plan passes the terminal gates. When any later stage ends without `completed`, for any reason including the time budget, the plan does not commit, the completions are discarded, and a resume starts the plan again. A unit that stops for a reason that is not a scope conflict has no enforce-level recovery route (`FR-A1-21`, `FR-A1-22`) |
+| Evidence | `TRACED`: `MUT-A1-17`, `AUTH-A1-10`. `MEASURED`: the sandbox resume tests. Preserved: `ENFORCE-UPSTREAM-WORK-PRESERVATION-001` records four live occurrences (C2-S2_A, C2-S4_A, C2-S4_B, Scenario-04 run 1 on 2026-11-09, where three accepted units were discarded when the fourth hit the time budget) |
+| Is it a defect? | The all-or-nothing commit is a deliberate contract (PRD-004: the real workspace is immutable until every terminal gate passed; PRD-008: a sandbox-only completion is not resumable). What is not decided is whether accepted unit state may be **preserved for review or resume** without being committed. The registry row asks exactly that and has waited for an owner decision since 2026-10-09 |
+| First wrong owner | None: two contracts (atomic commit, resumable progress) with no stated relation |
+| Severity | P2 (registry): cost and convergence, never a false success |
+| Existing canonical seam | The plan sandbox and `ControlState.subtask_completion_scope` |
+| Registry rows | `ENFORCE-UPSTREAM-WORK-PRESERVATION-001` (primary); the enforce half of `RETRY-STATE-RESUME-CONTINUITY-001` |
+| Reconciliation state | `OWNER_RULING` (a product-policy choice; carried to Phase D item O unless Phase B evidence decides it) |
+
+### Corrections to the A1 checkpoint (`82eb96c`), found in A1b
+
+| A1 statement | What is true | How it was missed |
+|---|---|---|
+| "The enforce loop passes no `resume` flag to a unit" (`AUTH-A1-10`, lifecycle answer 12) | The flag is forwarded with the caller's keywords (`BYP-A1-12`) | The negative control searched for the literal `resume=` and could not see a forwarded dictionary. Negative controls for "nobody passes X" now also search for keyword forwarding at the call site |
+| "Applied upstream work stays in the workspace and completed subtasks are skipped" (`GAP-A1-02`, `SM-A1-03`) | True only for an in-place plan; production discards and reruns (`AUTH-A1-10`) | The resume block was read without the terminal block that discards sandbox completions |
+| "Per obligation: prior attempts counted from the obligation ledger's history" listed as a bound (`AUTH-A1-11`) | The check exists and cannot fire (`GAP-A1-08`) | The bound was located by search and not read |
+| "the same blocker read as a new family ... `INFERRED`" (`GAP-A1-01`, `SM-A1-02`) | `MEASURED` (probe P11) | Not probed in A1 |
+
+### Contradictions H-A1-1 to H-A1-4: owner rulings received 2026-11-15
+
+| ID | Contradiction | Ruling / result |
+|---|---|---|
+| H-A1-1 | `MODULE-CONTRACTS.md` section 12 `Finding` / `FindingState` vs the WS4 ruling rejecting a blocker registry | Ruled: section 12 is a stale AS-IS design, not implementation, and is not to be resurrected merely because a document described it. The blocker contract is designed from the truth owner in Phase C |
+| H-A1-2 | `KRIYA_ARCHITECTURE_DECISIONS.md` lists retry state among bound identities; the code persists none | Ruled: the documented binding is currently unimplemented. `GAP-A1-02` |
+| H-A1-3 | One registry resume gap, two real ones | Ruled: split into unit continuity and enforce continuity. Done above; the enforce half turned out to be `GAP-A1-09` |
+| H-A1-4 | Fresh unit budget per enforce re-invocation | Ruled: not an accepted contract until characterized. Characterized in `BYP-A1-01`; contract required in Phase C (`GAP-A1-04`) |
 
 ### Disproved or stale in A1
 

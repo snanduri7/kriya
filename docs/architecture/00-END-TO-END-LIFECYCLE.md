@@ -97,8 +97,16 @@ observed, then scoped budgets are reset, then progress is classified, then attri
     loop's own cycle caps and the run clock, not the unit's ceiling. `BYP-A1-01`, `AUTH-A1-11`.
 12. **Direct vs enforce differences relevant to retry?** Same unit loop and same policy. Direct: one invocation,
     resumable from stage checkpoints. Milestone: one invocation per milestone, each resumable. Enforce: one
-    invocation per subtask plus re-invocations for scope revision, owner recovery, replay and verifier repair; the
-    enforce loop never passes `resume` to a unit, so an unfinished unit always restarts. `BYP-A1-02`, `BYP-A1-03`.
+    invocation per subtask plus re-invocations in nine further roles (`BYP-A1-01`). A1 said here that the enforce
+    loop never passes `resume` to a unit; that was wrong (the flag is forwarded, `BYP-A1-12`). In production an
+    enforce run that failed keeps no completion, so a resume runs the whole plan again (`AUTH-A1-10`, `GAP-A1-09`).
+    `BYP-A1-02`, `BYP-A1-03`.
+13. **(A1b) Does the allowance have one real authority?** Inside a unit, one grant path with no authoritative input;
+    across invocations, none. `AUTH-A1-13`.
+14. **(A1b) How many attempts can one blocker get?** One unit: 10 or 11. One enforce stage: 7 unit invocations, up to
+    77 attempts, before the stage stops; no time bound by default. `BYP-A1-01`, `GAP-A1-04`.
+15. **(A1b) What can be reconstructed from a run's own evidence?** The mode, failure type and decision of every
+    attempt; not the family decision, the counter values or a reset. `GAP-A1-03`.
 
 ## STAGE-CHECKPOINT (A1) - AS-IS flow
 
