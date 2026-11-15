@@ -62,3 +62,46 @@ and the resume request, which belong to slices A2 and A3 and to `AUTH-A1-09` / `
 | FR-A2-09 | Test gate failed without a COMPLETE report (collection error, test-source compile failure, timeout) | nobody (by the owner's correction of 2026-11-14) | Historical retry, full unit budgets | `TRACED`; `BYP-A2-03` |
 | FR-A2-10 | Goal has a mandatory claim with no bound authority, policy `block` | `AUTH-A2-03` | Refused before any model call: `VERIFICATION_AUTHORITY_REQUIRED` with typed authority requests; or `GOAL_INSUFFICIENT_FOR_VERIFICATION` when a statement is ambiguous | `TRACED`; refusal `MEASURED` (P8, P9) |
 | FR-A2-11 | Same goal, policy `record` | `AUTH-A2-03` | Sealed and run; model-written semantics follow (`GAP-A2-01`). Run 10 is the preserved instance: 5 of 5 entries `AUTHORITY_REQUIRED` and the run proceeded | `TRACED`; preserved (registry row, sealed run 10) |
+
+## Slice A3 - failures between a staged candidate and the run's result
+
+"Stop" means a deterministic stop of the unit: `retry_strategy.py` lists the failure type among those a Developer
+retry cannot change. "Attempt failure" means the failure enters the retry accounting of slice A1 (`FR-A1` rows).
+Nothing in this table is applied to the unit workspace unless the row says so.
+
+| ID | Situation | Decided by | Outcome | Recovery available | Label |
+|---|---|---|---|---|---|
+| FR-A3-01 | The candidate transaction refuses a file (operation contract, edit protocol, write scope, integrity) | `AUTH-A3-01` | Nothing staged; attempt failure with the refusal's typed reason | Retry per `FR-A1` | `TRACED` |
+| FR-A3-02 | A declared required verification has no passing authoritative evidence | `development_loop.py::accept_candidate` (`_raise_if_required_verification_unresolved`) | `verification_infrastructure_failure`: "refusing pre-apply success" | Per that type's routing (A1) | `TRACED` |
+| FR-A3-03 | An original requirement blocks at the unit boundary | `AUTH-A3-09` | Stop `requirements_unresolved`; under `unverified_policy = block` a goal with an unbound behaviour claim is refused earlier, at admission (`FR-A2-10`; `MEASURED` P8: `verification_authority_required`, nothing generated) | None | `TRACED`; admission `MEASURED` (P8) |
+| FR-A3-04 | Static analysis does not permit; the exception-masking rule finds a mask; the artifact registry cannot be derived | `stage_apply.py::run_static_analysis_gate`, `run_semantic_safety_gate`, `run_artifact_registry_gate` | Stop; the static-analysis message carries no scanner text | None | `TRACED` (call sites; gate bodies not read) |
+| FR-A3-05 | The person declines the change | `AUTH-A3-04` | Unit result `human_rejected`, files `[]`, sandbox removed, checkpoint deleted, full trace row | A new run | `TRACED` |
+| FR-A3-06 | No decision could be obtained (expired, host gone, channel failed, unrecognized answer, decision not recordable, a launch that cannot ask) | `AUTH-A3-04` | Unit result `approval_required`; "nothing was approved and nobody declined"; the reason code is in the `approval.decision` event | A new run | `TRACED`; classification `MEASURED` (P7) |
+| FR-A3-07 | Approval required and no callback was supplied | `AUTH-A3-03` | Same result as `FR-A3-06`; the event says `unavailable` with no reason code | A new run | `TRACED` |
+| FR-A3-08 | The candidate changed after the source approval | `AUTH-A3-05` | `verification_infrastructure_failure`: nothing executed, nothing applied | The retry loop produces a new candidate, reviewed again | `TRACED`; predicate `MEASURED` (P7) |
+| FR-A3-09 | A held gate or a requirement closer fails after the approval | The gate | Attempt failure through the ordinary loop; the pre-approval review is dropped so the final review describes what failed | Retry; the next candidate is reviewed again | `TRACED` |
+| FR-A3-10 | Terminal regression blocks | `AUTH-A3-07` | Attributable: retryable `regression_test` failure. Nothing attributable: stop `regression_unattributed` | Retry, or none | `TRACED` |
+| FR-A3-11 | The last attempt fails at terminal regression after an approval | - | The run ends on its budgets; the result's `review` is the pre-approval review and `review_included_in_approval` is True; no rejected-candidate diagnostic review is produced | - | `TRACED` (`begin_attempt` resets the review only at the next iteration; `final_review` reuses it); pinned by `tests/golden/kernel/legacy_gates_exhausted.json` (the field reads `true` there). `GAP-A3-06` |
+| FR-A3-12 | The commit finds the batch is not the verified one, or has no binding | `AUTH-A3-02` | Workspace UNCHANGED; stop `workspace_commit_failed` (`VERIFIED_CANDIDATE_EVIDENCE_STALE` / `..._MISSING`) | None in the run | `MEASURED` (P6) + `TRACED` |
+| FR-A3-13 | The commit is refused for another reason (semantic safety, static-analysis guard, contract transition, intent not persisted), conflicts on a base revision, fails and rolls back, or ends UNCERTAIN | `AUTH-A3-14` | UNCHANGED: stop `workspace_commit_failed` (contract codes: `contract_registry_blocked`). UNCERTAIN: stop; enforce keeps the sandbox and reports `needs_review` with `retained_candidate_path`; later mutating runs are refused | `kriya runs recover` for UNCERTAIN | `TRACED` |
+| FR-A3-14 | The candidate is applied and the final review cannot be performed (budget refusal, deadline, provider error) | `AUTH-A3-10` | Direct and milestone: unit non-success `final_review_refused`; bytes stay; checkpoint deleted; the milestone plan stops, the unit is FAILED, later units BLOCKED (`MEASURED` P1, P3). Enforce: the unit is accepted with `ADVISORY_REVIEW_NOT_PERFORMED` (`MEASURED` P2) | Milestone: the failure callback may answer retry. None otherwise | `MEASURED` (P1-P3) + `TRACED`. `GAP-A3-03` |
+| FR-A3-15 | An enforce terminal gate reports a gap (for example an original requirement blocks, with a precise verifier detail) | `AUTH-A3-08` | Run `failed` (`needs_review` for an artifact error); the gap text is in the result (`global_*_gap`); every unit's accepted work in the plan sandbox is discarded and the sandbox removed | **None.** No unit is reopened and no repair attempt is made | `TRACED` (`enforce_loop.py` 4573-4661: after `gate_service.run` the only branches are commit or discard). `GAP-A3-02` |
+| FR-A3-16 | An exception escapes the terminal gates or the commit (enforce) | The error handler in the enforce tail | Durable state settled as the ordinary path would have; an unproven commit is UNCERTAIN; then the error propagates | `kriya runs recover` | `TRACED` |
+| FR-A3-17 | A milestone unit passes its gates but dropped an earlier dependency, or its capability transition is not in the registry | `milestones.py::_MilestonePlanDriver.check_passed_unit` | The unit is turned into a failure (`dependency_regression` / `contract_registry_incomplete`) although its bytes are already in the workspace | The failure callback | `TRACED` |
+| FR-A3-18 | Milestone replay did not run, or found a regression | `AUTH-A3-15` | Plan result `milestone_replay_not_executed` / `milestone_replay_failed`; the integration unit is BLOCKED | None | `TRACED` |
+| FR-A3-19 | The integration unit fails (for example an original requirement blocks at plan level) | `AUTH-A3-09` in the integration unit | Plan result `integration_failed`; the milestones' commits stay in the workspace and are reported as retained | A new run | `TRACED` |
+| FR-A3-20 | The process dies while a held candidate waits for its review | - | No candidate checkpoint exists (it is written after the held gates); the launch record's pending review is closed EXPIRED by `finish` when that runs | A resume starts from the last earlier stage checkpoint and regenerates the candidate | `TRACED` (registry `HITL-RESUME-DEFERRED-GATES-001`) |
+| FR-A3-21 | Post-commit persistence fails (artifact registry, learning, plan document, control state) | The writer | The run's verified result stands; the failure is listed in `post_commit_persistence_errors` | Operator | `TRACED` |
+| FR-A3-22 | The pre-approval review cannot be produced | `AUTH-A3-12` | Approval proceeds; the approver is told "NOT ATTACHED" with the reason code; `review.pre_approval_unattached` event | - | `TRACED` |
+
+UNKNOWN behaviour in this slice, in one place:
+
+| Unknown | What the code does | Fail closed? |
+|---|---|---|
+| No approval decision | `FR-A3-06`, `FR-A3-07` | Yes |
+| No binding / changed binding | `FR-A3-12` | Yes |
+| Commit outcome unproven | UNCERTAIN (`FR-A3-13`, `FR-A3-16`) | Yes |
+| Requirement PENDING / UNKNOWN / UNVERIFIED | Blocks only under the `block` policies; otherwise the run succeeds with the truth reported beside it | **No** under the defaults (`GAP-A3-01`) |
+| Replay with no verdict | Recorded, not a failure (`AUTH-A3-15`) | No, bounded by the integration suite |
+| Invalid `sensitive_paths` regex | Logged, that pattern not enforced (`AUTH-A3-03`) | **No** for that pattern |
+| Final review not performed | Non-success on direct and milestone, accepted on enforce (`FR-A3-14`) | Divergent |

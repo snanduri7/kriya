@@ -16,21 +16,21 @@ Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`, t
 | STAGE-SUBTASK-SELECTION | Subtask selection (direct, milestone, enforce) | A4 | A1 part below |
 | STAGE-CONTEXT | Context construction | A4 | pending |
 | STAGE-MODEL-RUNTIME | Runtime / model selection and qualification | A6 | pending |
-| STAGE-GENERATION | Generation | A3 | pending |
-| STAGE-CANDIDATE | Candidate formation | A3 | pending |
-| STAGE-REVIEW | Review / source approval | A3 | pending |
-| STAGE-GATES | Deterministic gates | A3 | pending |
+| STAGE-GENERATION | Generation | A3 (candidate formation), A4 / A6 (the Developer request) | A3 part filled (`AUTH-A3-01`); the request itself is owed |
+| STAGE-CANDIDATE | Candidate formation | A3 | **filled** (`AUTH-A3-01`, `AUTH-A3-02`, `SM-A3-01`, `GAP-A3-04`) |
+| STAGE-REVIEW | Review / source approval | A3 | **filled** (`AUTH-A3-03..05`, `AUTH-A3-12`, `AUTH-A3-13`, `SM-A3-02`, `GAP-A3-05`, `GAP-A3-06`) |
+| STAGE-GATES | Deterministic gates | A3 | **filled** (`AUTH-A3-06..08`, `GAP-A3-02`) |
 | STAGE-VERIFIER-ID | Generated-verifier identification | A2 | **filled** (`AUTH-A2-06`, `GAP-A2-02`) |
 | STAGE-VERIFIER-AUTH | Verifier semantic authority | A2 | **filled** (`AUTH-A2-07..09`, `SM-A2-01`, `GAP-A2-03`) |
 | STAGE-ATTRIBUTION | Failure attribution | A2 | **filled** (`AUTH-A2-10`, `AUTH-A2-11`) |
 | STAGE-RETRY | Retry | A1 | **filled** |
 | STAGE-RECOVERY | Recovery / owner reopen | A1 (accounting), A3 (apply) | A1 part filled |
-| STAGE-APPLY | Candidate apply | A3 | pending |
-| STAGE-REPLAY | Replay | A3 | pending |
-| STAGE-FINAL-VERIFICATION | Integration / final verification | A3 | pending |
+| STAGE-APPLY | Candidate apply | A3 | **filled** (`AUTH-A3-14`, `SM-A3-03`, `MUT-A3-03`, `MUT-A3-04`) |
+| STAGE-REPLAY | Replay | A3 | **filled** (`AUTH-A3-15`, `AUTH-A2-13`, `MUT-A3-13`) |
+| STAGE-FINAL-VERIFICATION | Integration / final verification | A3 | **filled** (`AUTH-A3-08`, `AUTH-A3-09`, `GAP-A3-01`) |
 | STAGE-EVIDENCE | Evidence / audit | A6 | pending |
 | STAGE-CHECKPOINT | Checkpoint / resume | A1 | **filled** |
-| STAGE-TERMINAL | Terminal result | A3 | pending |
+| STAGE-TERMINAL | Terminal result | A3 | **filled** (`AUTH-A3-10`, `AUTH-A3-11`, `SM-A3-04`, `SM-A3-05`, `GAP-A3-01`, `GAP-A3-03`) |
 
 ## STAGE-RETRY (A1) - AS-IS flow
 
@@ -148,3 +148,51 @@ goal text (+ optional operator artifacts: --requirements, --acceptance, approval
          no  -> attribution ladder picks targets                            AUTH-A2-10, AUTH-A2-11
   -> retry accounting                                                       STAGE-RETRY
 ```
+
+## STAGE-CANDIDATE, STAGE-GATES, STAGE-REVIEW, STAGE-APPLY, STAGE-REPLAY, STAGE-FINAL-VERIFICATION, STAGE-TERMINAL (A3) - AS-IS flow
+
+Every step cites the row that holds the fact; nothing is defined here. The full 21-field stage documents and the
+integration contracts (Candidate -> Review, Candidate -> Gates, Approval -> Mutation, Apply -> Replay, Replay ->
+Final Result, Evidence -> Terminal Result) are derivative views written after slice A6, from these rows.
+
+```mermaid
+flowchart TD
+    A[Developer answer, resumed candidate or replayed verifier] --> B[Candidate transaction: sandbox batch<br/>AUTH-A3-01, MUT-A3-01]
+    B --> C{Human-in-the-loop and source written?<br/>AUTH-A3-06}
+    C -- no --> D[Executing gates<br/>STAGE-GATES]
+    C -- yes --> E[Pom corrections, then bind<br/>AUTH-A3-02]
+    D --> E2[Bind<br/>AUTH-A3-02]
+    E --> F[Required verification, static analysis, semantic safety, artifact registry]
+    E2 --> F2[Required verification, requirement closers, static analysis, semantic safety, artifact registry<br/>AUTH-A3-09]
+    F --> G{Approval needed?<br/>AUTH-A3-03}
+    F2 --> G
+    G -- yes --> H[Pre-approval review, then the person decides<br/>AUTH-A3-12, AUTH-A3-04, SM-A3-02]
+    H -- declined or unavailable --> X[Nothing applied<br/>FR-A3-05..07, MUT-A3-05]
+    H -- approved, held --> I[Held gates and closers under the byte guard<br/>AUTH-A3-05]
+    H -- approved, not held --> J
+    G -- no --> J[Verifier seam A, terminal regression, verifier seam B<br/>AUTH-A2-08, AUTH-A3-07]
+    I --> J
+    J --> K[Commit to the unit workspace<br/>AUTH-A3-14, SM-A3-03, MUT-A3-03]
+    K --> L[Final review, unit result<br/>AUTH-A3-12, AUTH-A3-10]
+    L --> M{Executor}
+    M -- direct --> R[Run result = unit result<br/>AUTH-A3-11]
+    M -- milestone --> N[Next unit; replay phase; integration unit<br/>SM-A3-05, AUTH-A3-15]
+    N --> R
+    M -- enforce --> O[Next unit in the plan sandbox; then eight terminal gates<br/>AUTH-A3-08, SM-A3-04]
+    O -- gap --> P[failed: sandbox discarded, no repair<br/>FR-A3-15, GAP-A3-02]
+    O -- eligible --> Q[Commit to the real workspace<br/>MUT-A3-04]
+    Q --> R
+```
+
+| Stage | Owner today | Decides | Does not decide | Rows |
+|---|---|---|---|---|
+| STAGE-CANDIDATE | `candidate_transaction.py`, `verification_binding.py` | Which bytes are the candidate; whether a later batch is the same | Whether the candidate is correct | `AUTH-A3-01`, `AUTH-A3-02`, `GAP-A3-04` |
+| STAGE-GATES | `gate_orchestrator.py`, `development_loop.py::accept_candidate`, `run_terminal_regression`; enforce `terminal_gate_service.py` | Deterministic acceptance of the candidate | Requirement truth beyond its own gate (`AUTH-A3-09`); retry (`STAGE-RETRY`) | `AUTH-A3-06`, `AUTH-A3-07`, `AUTH-A3-08` |
+| STAGE-REVIEW | `stage_apply.py::approval_gate`, `policy/approval.py`, `control/launch_approval.py`, `stage_review.py` | Whether a person must approve; what the person decided | Anything about correctness: the Reviewer is advisory | `AUTH-A3-03`, `AUTH-A3-04`, `AUTH-A3-05`, `AUTH-A3-12`, `AUTH-A3-13`, `GAP-A3-05`, `GAP-A3-06` |
+| STAGE-APPLY | `terminal_commit.py`, `repository/commit.py`, callers `stage_apply.py`, `commit_service.py` | Whether the workspace holds the candidate | Whether requirements are verified | `AUTH-A3-14`, `SM-A3-03`, `MUT-A3-03`, `MUT-A3-04` |
+| STAGE-REPLAY | `milestones.py::replay_prior_milestone_report`; verifier replay `verifier_replay.py`; commit recovery `control/recovery.py` | Whether earlier milestones still verify; whether a carried verifier is valid; what an interrupted commit left | - | `AUTH-A3-15`, `AUTH-A2-13`, `MUT-A3-13` |
+| STAGE-FINAL-VERIFICATION | `requirements.py`; enforce `TerminalGateService`; milestone integration unit | Requirement outcomes and truth; what blocks | The run status (`GAP-A3-01`) | `AUTH-A3-08`, `AUTH-A3-09` |
+| STAGE-TERMINAL | `state.py::final_workflow_quality_passed`, `outcome.py`, the enforce tail, `plan_executor.py::_terminal` | The unit's and the run's status and failure category | Requirement truth (attached, not folded in) | `AUTH-A3-10`, `AUTH-A3-11`, `GAP-A3-01`, `GAP-A3-03` |
+
+Not traced in A3 and still owed: STAGE-GENERATION (the Developer request itself: prompt composition, response
+protocol, model dispatch). A3 starts at the parsed answer. Slices A4 (context) and A6 (dispatch) own it.

@@ -1,0 +1,60 @@
+approval callback answered with NoneType, which is neither a bool nor an ApprovalOutcome: not approved
+approval callback answered with str, which is neither a bool nor an ApprovalOutcome: not approved
+approval callback answered with int, which is neither a bool nor an ApprovalOutcome: not approved
+
+=== P1 unit pass predicate and the refused final review
+applied, review performed  -> final_workflow_quality_passed = True
+applied, review refused    -> final_workflow_quality_passed = False
+applied, review refused    -> terminal_failure_category     = final_review_refused
+
+=== P2 one unit result, two executors
+plan_executor._passed(result)                 = False
+enforce_loop.enforce_unit_gates_accepted      = True
+enforce_loop.advisory_review_refusal is None  = False
+enforce_loop.committed_files(result)          = ['a.py']
+
+=== P3 milestone plan, second unit's final review refused after apply
+driver calls: [('run_unit', 'm1'), ('complete_unit', 'm1'), ('run_unit', 'm2'), ('retry_failed_unit', 'm2'), ('unit_failed', 'm2')]
+plan result status: milestone_failed | quality_gates_passed: None
+work_unit_states: {'m1': ('VERIFIED', []), 'm2': ('FAILED', ['WORK_UNIT_FAILED', 'STATUS:failed']), 'm3': ('BLOCKED', ['DEPENDENCY_FAILED'])}
+committed_work_units key present: False | value: None
+
+=== P4 commit eligibility vs requirement truth
+TerminalGateReport(ran=True, requirements_verified=False).commit_eligible = True
+requirements: ['REQ-1'] | outcomes (no verdict recorded): {'REQ-1': 'pending'}
+requirement_truth: OPEN_REQUIREMENTS
+requirements_fully_verified: False
+blocking_requirements(unknown=record, unverified=record) -> []
+blocking_requirements(unknown=block, unverified=record) -> [('REQ-1', 'pending')]
+blocking_requirements(unknown=record, unverified=block) -> []
+blocking_requirements(unknown=block, unverified=block) -> [('REQ-1', 'pending')]
+
+=== P5 approval.decision record content
+approval.decision details keys: ['outcome', 'triggers'] | kind: approval.decision | authority: authoritative
+approval.decision details keys: ['outcome', 'reason_code', 'triggers'] | kind: approval.decision | authority: authoritative
+launch pending review keys: ['candidate_digest', 'decision', 'expires_at', 'files', 'kind', 'reason', 'reason_sha256', 'reason_truncated', 'requested_at', 'review_id', 'sequence', 'status']
+launch pending review carries candidate_digest: sha256:25d50dcc11a6 ...
+
+=== P6 five digests of one candidate, and the commit guard
+sha256:23f8ffb00123735134fd31d982ea6bf3c3519c938d3e9f6c6d1b08178f18de80  <- approval diff digest (policy.approval.candidate_digest, launch record + decision file)
+3db10b131d657ab002121b79c8cacc3303d22f2f921fcdbdecd55b10fd0fb805  <- verification binding digest (verification_binding.bind_candidate, memory only)
+875cedc37868326439fe0a384c9a2ab93b956fc0180d8e7d6ca120c67452e6b2  <- commit candidate hash (repository.commit.candidate_digest, RunRecord cycle + commit evidence)
+1d1c7d3b200c55647dd1f6e69320ff6628fce42fba6b6376d641e4449b2d757b  <- checkpoint candidate digest (resume_fingerprints.candidate_snapshot_digest, checkpoint)
+9e26bf369911c45c243c684147b23fc9e1dcfcf257d299a1c632016a6fcd33f4  <- per-file staged digest (state.candidate_digests, memory only)
+distinct values: 5 of 5
+binding_refusal(same batch)    = None
+binding_refusal(changed bytes) = VERIFIED_CANDIDATE_EVIDENCE_STALE
+binding_refusal(no binding)    = VERIFIED_CANDIDATE_EVIDENCE_MISSING
+
+=== P7 approval answer classification, held execution, staleness
+classify_approval_answer(True) -> approved / APPROVAL_GRANTED
+classify_approval_answer(False) -> declined / APPROVAL_DECLINED
+classify_approval_answer(None) -> unavailable / APPROVAL_RESULT_UNRECOGNIZED
+classify_approval_answer('yes') -> unavailable / APPROVAL_RESULT_UNRECOGNIZED
+classify_approval_answer(1) -> unavailable / APPROVAL_RESULT_UNRECOGNIZED
+classify_approval_answer(ApprovalOutcome(decision=<ApprovalDecision.APPROVED: 'approved'>, reason_code='APPROVAL_GRANTED')) -> approved / APPROVAL_GRANTED
+defer_execution_until_source_review(enabled=True, mode='human-in-the-loop', wrote_source={'a.py'}) = True
+defer_execution_until_source_review(enabled=True, mode='guardrails', wrote_source={'a.py'}) = False
+mode 'autonomous': AutonomyModeError: AUTONOMY_MODE_UNKNOWN: autonomy.mode is not a Kriya autonomy mode. Allowed values (exact, case-sensitive): 'guardrails', 'human-in-the-loop'.
+defer(enabled=True, human-in-the-loop, wrote nothing) = False
+stale(None) = False | stale(lambda: True) = False | stale(lambda: False) = True

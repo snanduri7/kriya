@@ -251,3 +251,155 @@ executed.
 | DOC-A2-03 | `handover/claude-context/requirements-and-brownfield.md`, "Claims (FS-1C1)" and "Claim strength (B2-COV)" | "B3 has no producer yet"; "human approval: not implemented" | Stale sentences: the same file's B3 section and `workflow/acceptance_approval.py`, `contract_compilation.py` (`CLOSER_ACCEPTANCE_APPROVAL`) show it implemented (`TRACED`) |
 | DOC-A2-04 | `workflow/verifier_replay.py` module contract | "a replay that FAILS ... is evidence against the owner's repair" | Current, with a precondition the text does not state: it holds as authority only for a verifier a person accepted. For an unmapped verifier (`GAP-A2-02`) a never-accepted test still has that role (`TRACED`) |
 | DOC-A2-05 | `handover/claude-context/requirements-and-brownfield.md` as a whole | Describes requirement lineage and closers | Matches the code where A2 read it (`AUTH-A2-01`). It does not describe the sealed verification contract's admission rule or WS3; whether another context file does was not checked in A2 |
+
+## Slice A3 (2026-11-15) - candidate, approval, apply, replay, final result
+
+Evidence: `evidence/a3/` (probes P1 to P8 with output, two committed tests re-run on this baseline). Every gap below
+uses `AS-IS -> GAP -> REQUIRED CONTRACT -> IMPLEMENTATION DELTA -> ACCEPTANCE PROOF`. The last three are `PROPOSED`
+outlines only: Phase C designs them from the truth owners backward and nothing here is implemented or authorized.
+
+### The four mandatory rows
+
+| Registry row | A3 result | Evidence | Gap |
+|---|---|---|---|
+| `REQUIREMENT-CLOSURE-UNVERIFIED-RECORDED-AS-SUCCESS-001` | **Confirmed, current.** Under the default policies a direct run reports `quality_gates_passed: True` with its only requirement `unverified`, truth `OPEN_REQUIREMENTS`, and the candidate applied (a substitute `app.py` beside an unchanged `main.py`). Under `requirement_unverified_policy = block` the same goal is refused at admission and nothing is generated. The enforce aggregate and the milestone integration unit follow the same rule | `MEASURED` P8, P4; committed tests `test_F_*` (2 passed); `TRACED` `AUTH-A3-09`, `AUTH-A3-11` | `GAP-A3-01` |
+| `MILESTONE-UNIT-REVIEW-REFUSAL-FOLD-UNMEASURED-001` | **Measured; no longer unknown.** (1) A refused final review of an applied unit makes that unit a non-success on the direct and milestone path. (2) It does **not** discard other units' accepted work: earlier units stay VERIFIED and committed, the refused unit's own bytes stay in the workspace, nothing is rolled back. (3) The plan stops: the unit is FAILED, later units are BLOCKED, the milestone is not completed, its checkpoint is deleted. (4) So the review is authoritative for unit status and plan continuation on that path and advisory under enforce, for the identical unit result. The owner ruling the row asks for is still owed | `MEASURED` P1, P2, P3; `TRACED` `AUTH-A3-10`, `SM-A3-05` | `GAP-A3-03` |
+| `TERMINAL-REQUIREMENT-FAILURE-NO-REPAIR-001` | **Confirmed, current.** After the terminal gates the enforce tail has two branches, commit or discard. A gap of any of the eight gates ends the run `failed`, discards every unit's accepted work in the plan sandbox and removes the sandbox. No unit is reopened even when the gap text names a precise defect | `TRACED` `SM-A3-04`, `FR-A3-15` (not executed: an enforce run was not driven) | `GAP-A3-02` |
+| `KERNEL-APPROVAL-RECORD-NO-CANDIDATE-DIGEST-001` | **Confirmed, current, and wider than the row.** The `approval.decision` event carries `outcome` and `triggers` only. Its consumers are still the two metrics modules. The live decision is bound to bytes only indirectly: the commit equals the pre-approval binding (`AUTH-A3-02`), and no record relates the approval to that binding or to the commit's candidate hash. Five functions digest "the candidate" and yield five unrelated values for one file. A desktop run records the digest of the presented diffs and keeps the diff text; a terminal run records no digest at all | `MEASURED` P5, P6; `TRACED` `AUTH-A3-13` | `GAP-A3-04` |
+
+### GAP-A3-01 - "Success" and "applied" do not mean the original requirements were verified
+
+| | |
+|---|---|
+| AS-IS | A unit succeeds when its gates passed, its candidate was committed and its review was performed (`AUTH-A3-10`). A run succeeds when its units and terminal gates passed and the commit completed (`AUTH-A3-11`). Requirement outcomes block only where the policy says so: VIOLATED always; PENDING, UNKNOWN and UNVERIFIED only under the `block` policies (`AUTH-A3-09`). The defaults are `record`; the production profile sets `block`. The typed truth is computed once and reported beside the status; "it never changes the lifecycle status". `TerminalGateReport.requirements_verified` is evidence only and does not enter `commit_eligible` |
+| Evidence | `MEASURED` P8 (success with `OPEN_REQUIREMENTS`, wrong file applied), P4 (`commit_eligible` True with `requirements_verified` False; PENDING blocks only under `unknown_policy = block`); `TRACED` both reporters |
+| GAP | (1) The words SUCCESS and APPLIED are read as "the request was satisfied" and the code does not establish that. (2) The lifecycle has no state for "applied, requirements open, needs review" (registry `RUN-TERMINAL-NEEDS-REVIEW-AFTER-APPLY-NOT-REPRESENTABLE-001`). (3) Under `record`, UNKNOWN fails open for the result status. (4) Which policy a production and a desktop launch really run under is not established (handed to A5 by A2) |
+| First wrong owner | The status rule of `AUTH-A3-10` / `AUTH-A3-11`: it is the one place that turns evidence into the word a person reads, and it does not consume requirement truth |
+| Violated invariant | The final result consumes verified evidence and never implies more than was established |
+| Affected stages | STAGE-FINAL-VERIFICATION, STAGE-TERMINAL; all three executors |
+| REQUIRED CONTRACT (`PROPOSED`) | The terminal status must be a function of commit state **and** requirement truth, with a distinct terminal value when the candidate is applied and a mandatory requirement is open; or `block` must be the only supported policy. The choice is the owner's (the registry row records that `block` "would fail nearly every demo run today") |
+| IMPLEMENTATION DELTA (`PROPOSED`) | One owner (`requirement_truth`) already exists; the delta is in the two status rules and the lifecycle vocabulary, not in a new authority |
+| ACCEPTANCE PROOF (`PROPOSED`) | The P8 scenario must not end in a status a person reads as verified; mutation: removing the truth input from the status rule must fail a test on each executor |
+| Registry rows | `REQUIREMENT-CLOSURE-UNVERIFIED-RECORDED-AS-SUCCESS-001`, `INTEGRATION-PASS-REQUIREMENT-POLICY-001` (same root, milestone executor), and from A2 `REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001` (why almost every behaviour requirement stays open) |
+| Severity (candidate) | P1: product truth. Owner policy choice required (Phase D item) |
+
+### GAP-A3-02 - Nothing can repair a candidate that fails an enforce terminal gate
+
+| | |
+|---|---|
+| AS-IS | `SM-A3-04`: terminal gates run once, after the last unit. A gap discards the plan sandbox and every unit's accepted work (`GAP-A1-09`) |
+| Evidence | `TRACED` |
+| GAP | A defect that only the whole-candidate check can see (an original requirement, a migration residue, a terminal obligation) has no route back to its owning unit. The run cost is lost; a re-run starts from the workspace's original state. Fail closed, never a false success |
+| First wrong owner | None is wrong: the terminal gate decides correctly. The missing piece is a transition from a terminal gap to an owner, which no state machine defines |
+| REQUIRED CONTRACT (`PROPOSED`) | Either state that a terminal gap is final (intentional contract, documented), or define one bounded re-entry: a typed gap, an owner resolved by the existing owner authority, a charge against an allowance, and the terminal gates re-run on the new candidate. It depends on `GAP-A1-01` (blocker identity) and `GAP-A1-09` (durability of accepted unit work) |
+| ACCEPTANCE PROOF (`PROPOSED`) | A scripted enforce run whose only defect is a terminal requirement gap: either a typed, documented final stop, or one repair and a second terminal pass; never an unbounded loop |
+| Registry rows | `TERMINAL-REQUIREMENT-FAILURE-NO-REPAIR-001` |
+| Severity (candidate) | P2: efficiency and completion, not safety |
+
+### GAP-A3-03 - The final review decides unit status on two executors and is advisory on the third
+
+| | |
+|---|---|
+| AS-IS | `final_workflow_quality_passed` folds in "no final-review refusal". Direct and milestone read that field; enforce reads `enforce_unit_gates_accepted`, which accepts an applied unit whose only missing part is the review (owner ruling R2, 2026-11-11, scoped to enforce) |
+| Evidence | `MEASURED` P1 (the fold), P2 (same result, two answers), P3 (milestone plan stops, earlier unit stays VERIFIED) |
+| GAP | One truth ("was this unit's work accepted?") has two rules. On the milestone path the workspace holds the unit's committed bytes while the run record says the unit FAILED and the milestone is not completed; a later `--from-milestones` run meets committed paths that no completed milestone accounts for (the ledger does record the commits with a failed loop outcome). The Reviewer's verdict text never decides anything on any path; only the absence of the call does |
+| First wrong owner | `RunState.final_workflow_quality_passed`: it mixes "the candidate is committed and verified" with "an advisory call completed" |
+| REQUIRED CONTRACT (`PROPOSED`) | One predicate for "unit accepted" used by every executor, with the review's absence reported and not folded in; or an explicit owner ruling that the review is authoritative on the direct and milestone paths, written as a contract. Open owner ruling (the registry row) |
+| ACCEPTANCE PROOF (`PROPOSED`) | P2 must print the same answer for both readers; P3 must either complete unit 2 with an advisory note or stop with a documented, typed reason |
+| Registry rows | `MILESTONE-UNIT-REVIEW-REFUSAL-FOLD-UNMEASURED-001` |
+| Severity (candidate) | P2 |
+
+### GAP-A3-04 - A candidate has five identities and no record links an approval to the bytes committed
+
+| | |
+|---|---|
+| AS-IS | `MEASURED` P6: the approval diff digest (launch record, decision file), the verification binding digest (memory), the commit candidate hash (RunRecord cycle, commit evidence), the checkpoint candidate digest and the per-file staged digests are five different values computed by five functions from different serializations. The commit guard compares binding with binding and is sound. The approval is tied to the binding only by ordering (`BYP-A3-15`) and, in held mode, by the guard. The `approval.decision` event has no digest (P5) |
+| GAP | (1) Audit: after the fact nobody can show from the records which bytes a person approved in a terminal run, or that the desktop-approved diff is the committed batch. (2) Authority, narrow: the approved digest is never compared with what is verified or committed; the residual window needs the sandbox to change and change back. (3) The diff shown is text and does not show a mode or binary change that the commit carries (`BYP-A3-16`) |
+| First wrong owner | `stage_apply.py::approval_gate`: it re-reads the sandbox to build the diff instead of deriving the approval subject from the bound batch, and it records no identity |
+| REQUIRED CONTRACT (`PROPOSED`) | One candidate identity (the verification binding) is the approval subject: the diff is rendered from the bound batch, the approval record carries the binding digest, and the commit evidence carries the same digest, so approved = verified = committed is checkable from records. The registry row's own revisit condition ("if the trace must show WHICH bytes were approved") is met by the documentation standard of this closure |
+| IMPLEMENTATION DELTA (`PROPOSED`) | A field on the event and on the commit evidence, and the diff source; no new owner |
+| ACCEPTANCE PROOF (`PROPOSED`) | From a stored run alone: the approval record's digest equals the commit evidence's digest. Negative control: change one sandbox byte between the bind and the diff and the approval is refused as stale |
+| Registry rows | `KERNEL-APPROVAL-RECORD-NO-CANDIDATE-DIGEST-001`, `GUI-REVIEW-APPLY-BINDING-001` |
+| Severity (candidate) | P2 (audit), P3 (the residual window) |
+
+### GAP-A3-05 - Under enforce, source approval is per unit: no plan-level subject, and the size trigger can be split
+
+| | |
+|---|---|
+| AS-IS | `BYP-A3-01`, `BYP-A3-02`. Each unit's gate measures that unit's diff. The terminal commit asks nobody |
+| Evidence | `TRACED` (not executed) |
+| GAP | In `guardrails` mode the "large change needs a person" rule depends on how the Planner cut the work: the same total change asks under a direct run and not under an enforce plan of small units. In human-in-the-loop mode a person sees N unit diffs and never the whole change that is committed |
+| First wrong owner | None in code: the gate does what it was written to do. The plan-level approval subject does not exist |
+| REQUIRED CONTRACT (`PROPOSED`) | Owner policy: is the approval subject the unit or the plan's terminal candidate? If the plan: the triggers are evaluated on the terminal batch before `MUT-A3-04` |
+| Registry rows | None found; new in A3 |
+| Severity (candidate) | P2: authority. Owner policy choice (Phase D item) |
+
+### GAP-A3-06 - The review text attached to a result can describe something other than the final state
+
+| | |
+|---|---|
+| AS-IS | (1) `FR-A3-11`, `BYP-A3-14`: a pre-approval review (pre-build in held mode) is returned as the final review, including after the candidate failed terminal regression, with `review_included_in_approval: True`. (2) `stage_review.py` attaches whatever the Reviewer returned and never looks at a truncation signal, so a review cut at the output cap is shown to the approver as a complete report (the registry row measured one such run) |
+| Evidence | `TRACED`; golden pin for (1); negative-control search for (2) |
+| GAP | Advisory text only, but it is the text a person approves from |
+| REQUIRED CONTRACT (`PROPOSED`) | A review is labelled with the candidate state it saw (pre-build, post-gates, rejected) and with whether it is complete |
+| Registry rows | `KERNEL-FINAL-REVIEW-REUSES-PRE-BUILD-REVIEW-001`, `REVIEWER-OUTPUT-CAP-RUNAWAY-LATENCY-001` (the attachment half; the latency half is slice A6) |
+| Severity (candidate) | P3 |
+
+### GAP-A3-07 - In held mode the attempt's closing evidence is written before its executing gates run
+
+| | |
+|---|---|
+| AS-IS | `attempt.closed` and the obligations snapshot are emitted when `run_attempt` returns (`attempt.py`: `run_attempt` is wrapped by `_attempt_evidence_boundary`); the held gates run later inside `accept_candidate`. The gate outcomes themselves are recorded when they run |
+| Evidence | `TRACED` (decorator position and call order); not executed |
+| GAP | The attempt's closing record reads "candidate gates not passed" for an attempt whose gates later passed. Observational |
+| Registry rows | `EVIDENCE-HELD-GATES-001` |
+| Severity (candidate) | P3 |
+
+### Registry rows of slice A3 that did not need a gap
+
+| Row | Result (label) |
+|---|---|
+| `HITL-RESUME-DEFERRED-GATES-001` (handed over by A1) | Characterized (`TRACED`, `SM-A3-01` resume paragraph, `FR-A3-20`): the checkpoint follows the held gates, so a resume cannot skip an unrun gate; a crash during the review loses the candidate; a resumed held candidate is approved again, POM validation runs again, the executing gates are skipped only on matching fingerprints, closers and terminal regression run again. No committed test of the combined path was found by name. The row's Best-of-N remark was not re-traced (default 1) |
+| `GUI-REVIEW-LOCAL-TRUST-001` | Stale as written: decisions no longer travel through a file. They arrive over the launch's private review channel with a one-shot in-memory capability; the decision file is audit output and is never read; there is no `launch-decision` command at the baseline (search). The channel's own claim excludes ptrace and account compromise (`AUTH-A3-04`) |
+| `HITL-OTHER-APPROVAL-TRIGGERS-DEFERRAL-001` | Confirmed current (`BYP-A3-06`); open owner decision |
+| `MANAGED-SERVICE-APPROVAL-001` | Fail-closed constant present; owner-approved deferral; `BYP-A3-17` notes the non-held modes |
+| `DESKTOP-LOOKUP-QUERY-APPROVAL-001` | Confirmed current (`BYP-A3-11`): four review kinds, no lookup kind |
+| `ENFORCE-CLOSURE-STABILITY-CACHE-REUSE-001` | Confirmed current: `TerminalGateRequest` has no baseline or cache field (`TRACED`); an optimization |
+| `REVIEW-DIFF-SIDECAR-RETENTION-001` | Confirmed current: `control/retention.py` has no launch handling (search); `MUT-A3-07` |
+| `RUN-ATTEMPT-GATE-EXTRACTION-001` | The gate sequence lives in `gate_orchestrator.py`; self-correction is still interleaved and writes candidate files (`MUT-A3-02`). A decomposition item, not a defect |
+| `STATIC-RULE-ID-IN-EVIDENCE-001` | Confirmed current: no `rule_id` anywhere in `core/attempt_evidence` (search) |
+| `MANAGED-SERVICE-ENV-STATE-BINDING-001`, `OPTIONAL-RUNTIME-GRADED-FAILURE-POLICY-001`, `RUNTIME-LINE-EXPECTED-NONZERO-001`, `APPLICATION-OUTPUT-PROGRAM-STREAM-001` | The symbols each row cites exist at the baseline; the behaviour was not re-traced in A3. Each is a recorded owner decision or a presentation item, not a new authority fact |
+
+Handed to later slices with the reason:
+
+| Row | To | Why A3 could not settle it |
+|---|---|---|
+| `GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001` | A4 | The decision is made in plan normalization (`plan_normalization.py::scope_verification_to_requirements`) from `acceptance.py::goal_requires_runtime_behavior`: plan validation scope |
+| `RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001`, `WAVE8-PY-RUNTIME-ONLY-VENV-BOOTSTRAP-001`, `WAVE8-DOCKER-REFUSAL-BECOMES-FALSE-VERDICT-001` | A5 | One owner, the contained project environment (`tools/validate.py::_ensure_project_venv_impl`); tools and containment scope. Their mechanism needs a container, which a model-free probe cannot supply: A5 must state whether the characterization is possible under the freeze |
+| `KERNEL-STAGING-WORKSPACE-BASE-ESCAPES-001` | A5 | Root and write-gate authority |
+| `GATE-RESULT-PURPOSE-ABSENT-ON-TESTS-GATE-001`, `TECHNICAL-VERIFICATION-BARE-ROWS-001` | A6 | Evidence records and their desktop projection. A3 found the purpose is declared by a decorator on three orchestrating functions (`core/attempt_evidence/scope.py::declares_gate_purpose`); which entry runs the tests gate outside them was not found |
+
+### Open items A3 hands on
+
+- A4: the direct and enforce paths close requirements at different places with different inputs. At the enforce
+  terminal the `file_creation` and `runtime_stdout` closers are called with `None` and close nothing ("the units'
+  own pre-apply boundary is where these two are decided"), while an enforce unit carries no requirement goal
+  (`plan_executor.py::WorkUnitInvocation.requirement_goal` is None for it). Whether those two closers can ever fire
+  under enforce is the direct/enforce convergence question (`ENFORCE-EXECUTE-PLAN-CONVERGENCE-001`).
+- A5: writers into the plan sandbox and the workspace that are not a unit's commit (tools, MCP), which decide whether
+  `BYP-A3-01`'s "by construction" holds; `BYP-A3-07`; `BYP-A3-09` (does self-correction write and execute before a
+  review); the policy a real launch runs under (`GAP-A3-01` item 4).
+- A6: `GAP-A3-07` and the evidence rows above; the Reviewer latency half of `GAP-A3-06`.
+- Phase D (owner policy): `GAP-A3-01` (terminal truth), `GAP-A3-03` (review authority), `GAP-A3-05` (approval
+  subject), `HITL-OTHER-APPROVAL-TRIGGERS-DEFERRAL-001`.
+
+### Documents reconciled in A3
+
+| ID | Document | Claim | Classification (label) |
+|---|---|---|---|
+| DOC-A3-01 | `handover/claude-context/generation-pipeline.md`: stage 6 (approval gate and outcome contract), stage 8 (final review refusal), "Verification binding", "Commit authority", "Terminal eligibility", "Enforce terminal requirement truth", "Enforce unit acceptance" | As the document states them | CURRENT AND CONSISTENT with the code A3 read (`TRACED`; the sentences beyond the compared paragraphs were not checked). Its closing remark that the milestone path's use of the pass field is unmeasured is now out of date: measured in A3 (P1-P3) |
+| DOC-A3-02 | `docs/architecture/CORR016_AUTHORIZED_CONTRACT_EVOLUTION_DESIGN.md`, status line "DESIGN ONLY ... Not implemented" | Nothing of it is implemented | PARTIALLY CURRENT. `workflow/contract_authority.py` states that the DIRECT authorization of this design (Revision 2) is implemented and DERIVED is designed and deferred (`TRACED` from that module's contract; its code was not read). The status line is stale; the design text is a historical proposal for the DERIVED half |
+| DOC-A3-03 | Registry `KERNEL-FINAL-REVIEW-REUSES-PRE-BUILD-REVIEW-001` ("INFERRED, not confirmed") versus `OPEN-ITEMS.md` OI-42 ("E4 MEASURED") | Evidence status of the same finding | The registry text is STALE; A3 confirms the behaviour by trace and the golden pin |
+| DOC-A3-04 | Registry `GUI-REVIEW-LOCAL-TRUST-001` and `OPEN-ITEMS.md` OI-102 | A same-user actor can write a decision file or run `kriya launch-decision` | STALE / CONTRADICTED BY CODE (see the table above) |
+| DOC-A3-05 | Registry `KERNEL-APPROVAL-RECORD-NO-CANDIDATE-DIGEST-001`, `closure_evidence` | The event's only consumers are two metrics modules; the live approval is bound to candidate bytes | First half CURRENT (search). Second half PARTIALLY CURRENT: the commit is bound to the verified bytes; the approval is not bound to them by any comparison (`GAP-A3-04`) |
+| DOC-A3-06 | `workflow/stage_apply.py::_abort_without_applying`, in-place restore branch and its comment | Restores the user's real files when there is no worktree isolation | DOCUMENTED BEHAVIOUR NOT REACHABLE at the baseline: the direct path refuses to run in place (`MUT-A3-05`) |

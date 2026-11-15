@@ -140,3 +140,143 @@ before the terminal regression and again before apply). State lives in memory: p
 
 Not in this machine: a pre-existing test the run did not change (never a subject); a verifier replayed after an owner
 recovery (`AUTH-A2-13`); anything across a process restart (the ledger is not persisted: `AUTH-A1-14`, `GAP-A1-02`).
+
+## Slice A3
+
+The diagrams restate the tables beside them and decide nothing; where they differ, the table is right and the
+difference is a defect of this document.
+
+### SM-A3-01 - One candidate, from the Developer's answer to the apply (`TRACED`; `M` = `MEASURED` by probe)
+
+Owner of the sequence: `development_loop.py::accept_candidate`, entered after `attempt.py::run_attempt` returned.
+"Held" is the human-in-the-loop branch of `AUTH-A3-06`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PROPOSED: Developer answer / resumed candidate / replayed verifier
+    PROPOSED --> REFUSED: any transaction phase raises (AUTH-A3-01)
+    PROPOSED --> STAGED: sandbox batch committed (MUT-A3-01)
+    STAGED --> PRECHECKED: completeness, static rules, stack contract
+    PRECHECKED --> GATES_PASSED: not held - executing gates pass
+    PRECHECKED --> BOUND: held - executing gates deferred (AUTH-A3-06)
+    GATES_PASSED --> BOUND: bind_candidate (AUTH-A3-02)
+    BOUND --> CHECKED: required verification, closers (not held), static analysis, semantic safety, artifact registry
+    CHECKED --> AWAITING_APPROVAL: a trigger fired (AUTH-A3-03)
+    CHECKED --> ACCEPTED_FOR_TERMINAL: no trigger
+    AWAITING_APPROVAL --> ABORTED: declined / unavailable / no callback (AUTH-A3-04)
+    AWAITING_APPROVAL --> HELD_GATES: approved, held
+    AWAITING_APPROVAL --> ACCEPTED_FOR_TERMINAL: approved, not held
+    HELD_GATES --> ACCEPTED_FOR_TERMINAL: gates and closers pass, bytes unchanged (AUTH-A3-05)
+    ACCEPTED_FOR_TERMINAL --> TERMINAL_PASSED: verifier seam A, terminal regression, verifier seam B (AUTH-A3-07, AUTH-A2-08)
+    TERMINAL_PASSED --> APPLIED: commit_terminal_candidate COMMITTED (AUTH-A3-14, MUT-A3-03)
+    APPLIED --> [*]: final review, unit result (AUTH-A3-10)
+    REFUSED --> [*]: attempt failure (STAGE-RETRY)
+    ABORTED --> [*]: unit result, nothing applied
+```
+
+| From | Event | To | Fact row |
+|---|---|---|---|
+| PROPOSED | every phase of the transaction passes | STAGED | `AUTH-A3-01` |
+| PROPOSED | first refusal | REFUSED, attempt failure | `AUTH-A3-01`, `FR-A3-01` |
+| STAGED | non-executing checks pass; not held; executing gates pass | GATES_PASSED (`candidate_gates_succeeded`) | `gate_orchestrator.py::_run_executing_candidate_gates` |
+| STAGED | non-executing checks pass; held (`M` P7) | BOUND with the executing gates deferred; the deterministic pom corrections are applied first so the review shows them | `AUTH-A3-06`, `gate_orchestrator.py::apply_pre_review_candidate_corrections` |
+| GATES_PASSED | `accept_candidate` starts | BOUND | `AUTH-A3-02` |
+| BOUND | required verification unresolved | attempt failure `verification_infrastructure_failure` | `FR-A3-02` |
+| BOUND | a requirement blocks (not held) | deterministic stop | `AUTH-A3-09`, `FR-A3-03` |
+| BOUND | static analysis, semantic safety or artifact registry refuses | deterministic stop | `FR-A3-04` |
+| BOUND | all pass; not held | checkpoint `candidate_gates_passed` written | `MUT-A3-06` |
+| CHECKED | no trigger | ACCEPTED_FOR_TERMINAL | `AUTH-A3-03` |
+| CHECKED | trigger, callback present | AWAITING_APPROVAL, after the pre-approval review | `AUTH-A3-12` |
+| CHECKED | trigger, no callback | ABORTED `approval_required` | `FR-A3-07` |
+| AWAITING_APPROVAL | declined | ABORTED `human_rejected` | `FR-A3-05` |
+| AWAITING_APPROVAL | unavailable | ABORTED `approval_required` | `FR-A3-06` |
+| AWAITING_APPROVAL | approved, held | HELD_GATES under the guard, self-correction off | `AUTH-A3-05` |
+| HELD_GATES | bytes changed | attempt failure, nothing executed or applied | `FR-A3-08` |
+| HELD_GATES | a held gate or a closer fails | attempt failure; the pre-approval review is dropped | `FR-A3-09` |
+| HELD_GATES | all pass | checkpoint `candidate_gates_passed` written; ACCEPTED_FOR_TERMINAL | `MUT-A3-06` |
+| ACCEPTED_FOR_TERMINAL | a generated verifier is unsettled | typed stop or one regeneration | `AUTH-A2-08` |
+| ACCEPTED_FOR_TERMINAL | terminal regression blocks | attempt failure or `REGRESSION_UNATTRIBUTED` stop | `AUTH-A3-07`, `FR-A3-10` |
+| TERMINAL_PASSED | - | checkpoint `developer_success` written | `MUT-A3-06` |
+| TERMINAL_PASSED | commit committed | APPLIED: `overall_attempt_succeeded`, `quality_gates_succeeded` | `AUTH-A3-14` |
+| TERMINAL_PASSED | commit refused, conflicted or uncertain | deterministic stop `workspace_commit` | `FR-A3-12`, `FR-A3-13` |
+| APPLIED | final review performed | unit success | `AUTH-A3-10` |
+| APPLIED | final review refused or errored | unit non-success `final_review_refused`, bytes stay (`M` P1) | `FR-A3-14` |
+
+Resume transitions (`TRACED`): from a `candidate_gates_passed` or `developer_success` checkpoint the candidate is
+rebuilt through the transaction (PROPOSED to STAGED). Its executing gates are skipped only when every verification
+fingerprint matched (`resume_fingerprints.py::ResumePlan.skip_candidate_gates`); binding, requirement closers,
+approval and terminal regression run again. In human-in-the-loop mode the held half is called with the same skip
+flag, so POM validation runs and the executing gates are skipped on the restored outcomes. Nothing is restored from
+before the approval of a held candidate: no checkpoint exists there (`FR-A3-20`).
+
+### SM-A3-02 - A desktop review record (`TRACED`)
+
+Owner: `control/launch.py` (the record) and `control/launch_approval.py::_wait` (the transitions). One pending review
+at a time.
+
+| From | Event | To | Workflow answer |
+|---|---|---|---|
+| (none) | change gate asks; the diff sidecar and the record are stored | PENDING | waits |
+| (none) | no review channel, an empty change set, or the sidecar or record cannot be stored | not offered | UNAVAILABLE `APPROVAL_LAUNCH_CANNOT_ASK` |
+| PENDING | valid `decision` frame (review id, kind, digest, capability, not expired), recorded durably | APPROVED / REJECTED (DECIDED for a verifier semantic review) | APPROVED / DECLINED |
+| PENDING | decision accepted but the record cannot be written | PENDING in memory, unchanged on disk | UNAVAILABLE `APPROVAL_DECISION_NOT_RECORDED` |
+| PENDING | wall-clock expiry (3600 s), host gone, channel failed, wait interrupted, launch ended | EXPIRED | UNAVAILABLE |
+| PENDING | wrong, replayed or cross-review decision | PENDING (the capability is not consumed) | still waiting |
+
+### SM-A3-03 - One commit transaction (`TRACED`; binding refusals `M` P6)
+
+Owner: `AUTH-A3-14`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> REFUSED_BEFORE_INTENT: binding / semantic safety / static analysis / contract transition
+    [*] --> NO_CHANGES: empty batch
+    [*] --> INTENT: RunRecord cycle opened
+    INTENT --> NOT_COMMITTED: intent or registry staging not persisted
+    INTENT --> IN_PROGRESS: evidence fsynced before any byte
+    IN_PROGRESS --> COMMITTED: all operations applied, digest re-read, registry promoted
+    IN_PROGRESS --> ROLLED_BACK: a failure, every applied path restored
+    IN_PROGRESS --> UNCERTAIN: rollback or evidence write failed, interrupt unproven, digest mismatch, promotion failed
+    UNCERTAIN --> COMMITTED: kriya runs recover proves every operation applied
+    UNCERTAIN --> ROLLED_BACK: recover proves none applied
+    UNCERTAIN --> COMMITTED: recover --complete-partial with matching candidate hashes
+```
+
+| State | Workspace | Run consequence |
+|---|---|---|
+| REFUSED_BEFORE_INTENT, NOT_COMMITTED, ROLLED_BACK | UNCHANGED | deterministic stop `workspace_commit_failed`; enforce: `needs_review` |
+| NO_CHANGES | UNCHANGED | counted as committed |
+| COMMITTED | holds the candidate | unit or run continues to its success bookkeeping |
+| UNCERTAIN | unknown | `needs_review`; the enforce sandbox is retained as the only copy of the bytes; later mutating runs are refused until recovery |
+
+### SM-A3-04 - The enforce terminal (`TRACED`)
+
+Owner: the tail of `enforce_loop.py` (lines 4470-4921 at the baseline).
+
+| From | Event | To |
+|---|---|---|
+| stage loop ended | a subtask is not completed | no gates run (`TERMINAL_GATES_NOT_RUN`); sandbox completions discarded; `failed`, or `needs_review` when a subtask is NEEDS_REVIEW |
+| stage loop ended | all subtasks completed | VERIFYING: eight terminal gates on the plan sandbox (`AUTH-A3-08`) |
+| VERIFYING | any gap | sandbox completions discarded, sandbox removed, `failed` (`needs_review` for an artifact error). **No transition back to a unit** (`GAP-A3-02`) |
+| VERIFYING | commit eligible | COMMITTING (`SM-A3-03`) |
+| COMMITTING | COMMITTED | completions adopted as the workspace's, derived artifacts saved, learning persisted, `success` |
+| COMMITTING | not committed | `needs_review`, `workspace_commit_failed` |
+| any | exception | the durable state is settled as the ordinary path would have (pessimistic until the journal proves the commit), then the error propagates |
+
+### SM-A3-05 - A work unit in the direct / milestone executor (`TRACED`; `M` P3)
+
+Owner: `plan_executor.py::_execute` (`_Lifecycle`). States: PENDING, RUNNING, VERIFIED, FAILED, BLOCKED, STALE.
+
+| From | Event | To |
+|---|---|---|
+| PENDING | durable completion validated by resume | VERIFIED (`COMPLETION_REUSED`), not run |
+| PENDING / STALE | driver precondition stops | BLOCKED; later units BLOCKED; plan result is the stop |
+| RUNNING | unit result `quality_gates_passed` true and the driver's post-check keeps it | driver `complete_unit`; VERIFIED |
+| RUNNING | otherwise, and the driver does not retry | FAILED; dependents BLOCKED `DEPENDENCY_FAILED`, independents BLOCKED `PLAN_HALTED_AFTER_FAILURE`; plan result is the driver's failure result (`M`: a unit whose candidate was applied and whose review was refused takes this edge) |
+| RUNNING | the driver answers retry (milestone failure callback) | RUNNING again |
+| all units VERIFIED | plan phases pass | plan success |
+| any | a result claims success while a unit is not VERIFIED | `needs_review`, `PLAN_TERMINAL_MISMATCH` |
+
+A unit that fails after earlier units committed leaves those commits in the real workspace; a multi-unit result says
+so (`committed_work_units`, `committed_changes_retained`) when a RunRecord exists. Probe P3 ran without a RunRecord,
+so that key was absent there: an artifact of the probe harness, not a product statement.

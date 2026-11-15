@@ -1,0 +1,21 @@
+P8 default policies (requirement_unverified_policy=record)
+  quality_gates_passed = True
+  candidate_gates_passed = True
+  terminal_regression_passed = True
+  overall_attempt_passed = True
+  failure_category = None
+  files = ['app.py']
+  requirements.outcomes = {'REQ-1': 'unverified'}
+  requirement_truth = status 'OPEN_REQUIREMENTS', verified 0, accepted 0, total 1
+  app.py in workspace = True | main.py unchanged = True
+P8 requirement_unverified_policy=block
+  quality_gates_passed = False
+  candidate_gates_passed = None
+  terminal_regression_passed = None
+  overall_attempt_passed = None
+  failure_category = 'verification_authority_required'
+  files = []
+  requirements.outcomes = None
+  requirement_truth = status None, verified None, accepted None, total None
+  app.py in workspace = False | main.py unchanged = True
+2 passed in 36.92s

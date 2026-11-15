@@ -53,8 +53,9 @@
     "notes": "A1b (TRACED): confirmed. core/role_metrics.py record_attempt increments retries_triggered for every attempt that did not pass, whatever the recovery decision. Part of GAP-A1-03 (attempt accounting in evidence). Disposition with the evidence schema in slice A6 / Phase B."
   },
   "HITL-RESUME-DEFERRED-GATES-001": {
-    "reconciliation": "NEEDS_CHARACTERIZATION",
-    "notes": "A1b: the checkpoint placement is TRACED (workflow/development_loop.py writes candidate_gates_passed after approval and the held gates; SM-A1-03). Missing evidence, exactly: a deterministic resume of a unit from that checkpoint in human-in-the-loop mode with deferred gates. No committed test does it (the row says so) and the approval and deferred-gate path is traced in slice A3, which owns this characterization."
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Characterized in A3 (handed over by A1), TRACED: the candidate_gates_passed checkpoint is written only after the held gates ran, so a resume cannot skip an unrun gate; a crash during the source review leaves no candidate checkpoint and the candidate is regenerated (FR-A3-20); a resumed held candidate is rebuilt, approved again, has POM validation run again, skips its executing gates only when every verification fingerprint matched, and has its requirement closers and terminal regression run again (SM-A3-01 resume paragraph). No committed test of the combined resume-plus-held path was found by name search. The row's Best-of-N remark was not re-traced (default N is 1). Whether a pre-review checkpoint is wanted is an owner decision."
   },
   "LEAK-SIGKILL-RECOVERY-GAP-001": {
     "reconciliation": "RECONCILED",
@@ -154,5 +155,145 @@
   "WAVE5-PRD022-DUPLICATE-OWNER-NAMED-SYMBOL-001": {
     "reconciliation": "RECONCILED",
     "notes": "A2: not an attribution or verifier gap; ownership grounding at planning time (A4). The row's open proof (a production-profile run either edits the owner or fails closed) needs a live run and cannot be produced under the freeze. TRACED context: under policy block a goal with an unbound behaviour claim is refused before any model call (AUTH-A2-03), which is a stronger fail-closed path than the one the row traced; whether this row's goal is of that shape was not checked. Carried to Phase D as a freeze-lift evidence item."
+  },
+  "REQUIREMENT-CLOSURE-UNVERIFIED-RECORDED-AS-SUCCESS-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "A3 mandatory row: confirmed current. MEASURED P8: under the default record policies a direct run reports quality_gates_passed True with REQ-1 unverified, requirement_truth OPEN_REQUIREMENTS and the substitute file applied; under requirement_unverified_policy=block the same goal is refused at admission. MEASURED P4: commit_eligible ignores requirements_verified. Committed tests test_F_* re-run (2 passed). GAP-A3-01; rows AUTH-A3-09, AUTH-A3-10, AUTH-A3-11. Implementation required: yes, after an owner ruling on terminal truth for OPEN_REQUIREMENTS (Phase D item); depends on A2's REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001 and on the launch policy question handed to A5. Disposition is a proposal for Phase D."
+  },
+  "TERMINAL-REQUIREMENT-FAILURE-NO-REPAIR-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A3 mandatory row: confirmed current, TRACED (SM-A3-04, FR-A3-15): after the eight terminal gates the enforce tail either commits or discards; a gap ends the run failed, discards every unit's accepted work and removes the sandbox; no unit is reopened. Not executed (no enforce run was driven). GAP-A3-02. Disposition open for Phase B/C: either a documented final stop (intentional contract) or one bounded re-entry; depends on GAP-A1-01 and GAP-A1-09."
+  },
+  "MILESTONE-UNIT-REVIEW-REFUSAL-FOLD-UNMEASURED-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A3 mandatory row: measured, no longer unknown. MEASURED P1: an applied unit with a refused final review is quality_gates_passed False / final_review_refused. MEASURED P2: the same unit result is a failure for plan_executor._passed and an acceptance for enforce_unit_gates_accepted. MEASURED P3: in a three-unit milestone plan the first unit stays VERIFIED, the refused unit is FAILED, the next is BLOCKED; nothing is rolled back and no other unit's work is discarded. So the review is authoritative for unit status and plan continuation on the direct/milestone path and advisory under enforce. GAP-A3-03, BYP-A3-12. The owner ruling the row asks for is still owed (Phase D item)."
+  },
+  "KERNEL-APPROVAL-RECORD-NO-CANDIDATE-DIGEST-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A3 mandatory row: confirmed current and wider than the row. MEASURED P5: approval.decision carries outcome and triggers (and reason_code when unavailable), no digest. Consumers are still metrics/derive.py and metrics/evidence.py (search). MEASURED P6: five functions digest the candidate and give five unrelated values; the verification binding digest is memory-only; the commit guard itself is sound (same batch passes, changed bytes STALE, no binding MISSING). No record links an approval to the committed bytes; a terminal run records no digest of what was approved. GAP-A3-04, AUTH-A3-13. The row's own revisit condition (the trace must show which bytes were approved) is met by the documentation standard; disposition for Phase B."
+  },
+  "GUI-REVIEW-APPLY-BINDING-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "TRACED, completing the row's partial trace. The commit recomputes the verification binding and refuses any batch that differs from the one bound before the approval (AUTH-A3-02, MEASURED P6), so a changed candidate is not applied. The row's literal claim still holds: the approved diff digest is never compared with the binding or the committed bytes; the diff is read from the sandbox after the binding was taken (BYP-A3-15), and a mode or binary change is not visible in it (BYP-A3-16). Same root as KERNEL-APPROVAL-RECORD-NO-CANDIDATE-DIGEST-001: GAP-A3-04."
+  },
+  "GUI-REVIEW-LOCAL-TRUST-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Stale as written (DOC-A3-04). TRACED: a desktop decision arrives only over the launch's private review channel with a one-shot capability held in memory (control/review_channel.py, launch_approval._wait); the persisted decision file is audit output written after acceptance and never read as authority; no launch-decision command exists at the baseline (negative control in check_citations_a3.py). The channel's own stated limit remains: not a defence against ptrace, memory inspection or account compromise. AUTH-A3-04."
+  },
+  "HITL-OTHER-APPROVAL-TRIGGERS-DEFERRAL-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current. TRACED + MEASURED P7: execution is held only in human-in-the-loop mode with source written; guardrails mode is not held, so a sensitive-path, size or process-profile approval is asked after the gates built, tested and ran the candidate. BYP-A3-06, AUTH-A3-06. Open owner decision (Phase D item)."
+  },
+  "EVIDENCE-HELD-GATES-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current, TRACED (not executed): attempt.closed and the obligations snapshot are written when run_attempt returns; held gates run later in accept_candidate. Observational. GAP-A3-07; the evidence boundary itself is slice A6."
+  },
+  "KERNEL-FINAL-REVIEW-REUSES-PRE-BUILD-REVIEW-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed by trace, upgrading the row's INFERRED (DOC-A3-03; OPEN-ITEMS OI-42 already says MEASURED): begin_attempt resets pre_approval_review only at the next iteration, the reset in accept_candidate covers only the held gates, and final_review reuses an existing pre-approval review. A last attempt that fails terminal regression after approval returns that review with review_included_in_approval True; pinned in tests/golden/kernel/legacy_gates_exhausted.json. FR-A3-11, BYP-A3-14, GAP-A3-06. Advisory text only."
+  },
+  "INTEGRATION-PASS-REQUIREMENT-POLICY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "Same root as REQUIREMENT-CLOSURE-UNVERIFIED-RECORDED-AS-SUCCESS-001, on the milestone executor: the integration unit completes on its gates plus the plan-level requirement check, which blocks an unverified or unknown requirement only under the block policies (TRACED: milestones.py complete_unit caveat; AUTH-A3-09). GAP-A3-01. One correction covers both rows; disposition follows the owner ruling on GAP-A3-01."
+  },
+  "MANAGED-SERVICE-APPROVAL-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "The human-in-the-loop fail-closed constant MANAGED_SERVICE_APPROVAL_UNSUPPORTED exists at the baseline (citation check); the owner approved the deferral of a typed managed-service review subject on 2026-10-15. Not re-traced beyond the constant. BYP-A3-17 records that outside human-in-the-loop mode a model-chosen service runs with no review subject (the row's own statement, not re-measured)."
+  },
+  "MANAGED-SERVICE-ENV-STATE-BINDING-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "The read the row describes (validator.python_environment_error in the managed-service admission) exists at the baseline (runtime_verification.py; citation check). The row's unreachability argument was not re-traced in A3. A hardening observation with a fail-closed outcome; no new authority fact. Disposition for Phase B."
+  },
+  "OPTIONAL-RUNTIME-GRADED-FAILURE-POLICY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A recorded owner policy question (may a model-inferred optional check be terminal). The advisory-only predicate the row names exists at the baseline; behaviour not re-traced in A3. Not a false success. Owner policy (Phase D item list)."
+  },
+  "RUNTIME-LINE-EXPECTED-NONZERO-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "A projection defect (the result's runtime line follows the process record, not the grounded disposition); EXPECTED_NONZERO_EXIT_GROUNDED exists at the baseline. Fail closed, wrong wording. Not re-traced in A3; the projection belongs with the evidence and desktop visibility pass of slice A6."
+  },
+  "GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "disposition": "-",
+    "notes": "Handed to slice A4. The decision is made at plan normalization (plan_normalization.scope_verification_to_requirements from acceptance.goal_requires_runtime_behavior; both exist at the baseline), which is plan-validation scope. Missing evidence: whether the row's deterministic reproducer (tests/test_greenfield_runtime_verification_dropped.py) still shows the dropped verifier after the runtime_stdout closer of 2026-11-08."
+  },
+  "RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "disposition": "-",
+    "notes": "Handed to slice A5 (tools and containment). One owner with the two WAVE8 rows below: the contained project environment (tools/validate.py PolymorphicValidator._ensure_project_venv_impl). Missing evidence: the mechanism, which the row itself records as INFERRED; it needs a container, so A5 must state whether it can be characterized under the freeze."
+  },
+  "WAVE8-PY-RUNTIME-ONLY-VENV-BOOTSTRAP-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "disposition": "-",
+    "notes": "Handed to slice A5; same owner as RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001. The row records a mitigation (one bounded retry) and a root-cause finding of transient container faults; nothing re-measured in A3."
+  },
+  "WAVE8-DOCKER-REFUSAL-BECOMES-FALSE-VERDICT-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "disposition": "-",
+    "notes": "Handed to slice A5; same owner. The architectural question (a daemon refusal should be a typed environment verdict, never a plain False gate verdict) is an UNKNOWN-behaviour question for the containment owner."
+  },
+  "ENFORCE-CLOSURE-STABILITY-CACHE-REUSE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed current, TRACED: TerminalGateRequest carries no baseline or stability cache field, and the enforce terminal's suite_preservation closer is called with SUITE_BASELINE_LAZY_CAPTURE. An optimization the owner deferred on 2026-10-10 (by design); no correctness gap. AUTH-A3-08."
+  },
+  "REVIEW-DIFF-SIDECAR-RETENTION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "Confirmed current: control/retention.py contains no launch handling (negative control in check_citations_a3.py); the sidecar holding the exact approved diff text is stored before a review becomes pending (control/launch.py request_change_approval). MUT-A3-07. Disposition taken from the row's own target (before production readiness): a retention policy for launch records and sidecars. A proposal for Phase D."
+  },
+  "GATE-RESULT-PURPOSE-ABSENT-ON-TESTS-GATE-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "disposition": "-",
+    "notes": "Handed to slice A6 (evidence). A3 found that a gate purpose is declared by a decorator on three orchestrating functions in gate_orchestrator.py (core/attempt_evidence/scope.py declares_gate_purpose). Missing evidence: which entry runs the tests gate outside them, or why the purpose is lost inside one. Diagnostic only."
+  },
+  "REVIEWER-OUTPUT-CAP-RUNAWAY-LATENCY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Attachment half confirmed, TRACED: stage_review.py attaches the Reviewer's text and never reads a truncation signal (negative control: no finish_reason in the file), so a review cut at the output cap reaches the approver as a complete report. GAP-A3-06. The latency half (a non-streamed completion running to the cap) is model-runtime scope, slice A6."
+  },
+  "KERNEL-STAGING-WORKSPACE-BASE-ESCAPES-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "disposition": "-",
+    "notes": "Handed to slice A5 (root and write-gate authority). Not re-traced in A3. Missing evidence: whether a staged write whose base is the workspace file still reaches the guarded batch commit and raises an untyped BatchCommitError; the row's reach is INFERRED."
+  },
+  "RUN-ATTEMPT-GATE-EXTRACTION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "TRACED: the gate sequence lives in workflow/gate_orchestrator.py; the self-correction loops are still interleaved with the gates and write candidate files (MUT-A3-02, BYP-A3-10), so the sequence is not a mutation-free verification boundary. A decomposition item with no behavioural gap of its own; the ordering that keeps those writes inside the binding is recorded in AUTH-A3-05 and BYP-A3-10."
+  },
+  "DESKTOP-LOOKUP-QUERY-APPROVAL-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed current, TRACED: policy/approval.py KINDS has four review kinds and none for a lookup; a desktop launch declines the lookup query and review (control/launch.py decline_decision). BYP-A3-11. A future capability (a third pending-review kind end to end plus a lookup evidence record); egress authority itself is slice A5/A6."
+  },
+  "TECHNICAL-VERIFICATION-BARE-ROWS-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "disposition": "-",
+    "notes": "Handed to slice A6 (desktop evidence visibility). The cause of the bare rows is UNKNOWN by the row's own account and a defensive fix shipped; there is no kernel fact for A3 to trace. Missing evidence: the DOM of a bare row, which only the owner's next look at the rebuilt app can supply; A6 must say whether it stays an explicit Phase-D item."
+  },
+  "APPLICATION-OUTPUT-PROGRAM-STREAM-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A capability the runtime executor does not have (the program's own stream recorded apart from the launcher's); the result carries the captured output bounded (outcome.py runtime_observation). Not re-traced beyond that field. No authority fact."
+  },
+  "STATIC-RULE-ID-IN-EVIDENCE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed current: no rule_id anywhere in kriya/core/attempt_evidence (negative control in check_citations_a3.py). An evidence-schema addition, not a defect."
   }
 }

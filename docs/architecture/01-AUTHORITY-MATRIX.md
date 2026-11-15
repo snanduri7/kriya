@@ -274,3 +274,391 @@ product semantics exist before the Developer writes code or a test** (`AUTH-A2-0
    (`GAP-A2-02`).
 10. **Unattended, direct and non-enforce limits.** `AUTH-A2-08`, `GAP-A2-03`.
 11. **Replay / O0, full-set regeneration refusal, side routes.** `AUTH-A2-13`, `FR-A2-05`, `BYP-A2-06` to `BYP-A2-08`.
+
+## Slice A3 - candidate, approval, apply, replay, final result (2026-11-15)
+
+From this slice on every row carries the full field set of the owner's documentation addendum (2026-11-15). A field
+whose fact lives in another map cites that row instead of restating it. Paths are under `kriya/`. Three executors
+appear: **direct** (one unit, `workflow/plan_executor.py`), **milestone** (several units through the same executor,
+each committing to the real workspace) and **enforce** (`workflow/enforce_loop.py`: units commit into one plan
+sandbox, one terminal commit to the real workspace). "Unit" means one `run_generation_workflow` invocation.
+
+Evidence: probes P1 to P8 are `evidence/a3/a3_probe.py` and `a3_probe_result_truth.py` with their output files; the
+two committed tests are in `evidence/a3/a3_tests_output.txt`.
+
+### AUTH-A3-01 - What bytes are this attempt's candidate?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Which files, with which exact bytes, the attempt staged in its sandbox |
+| Owner | `workflow/candidate_transaction.py::CandidateTransaction` (phases `check_operation_contracts`, `capture_originals`, `stage`, `commit`), writing through `policy/filesystem.py::AuthorizedFileWriter.commit_batch` |
+| Why this owner | It is the only path by which Developer output, a resumed candidate (`attempt.py::run_attempt`, `reusing_candidate`) and a replayed verifier (`replaying_verifier`) reach the sandbox; all three use the same write path |
+| Authoritative inputs | The parsed Developer response (file proposals), the attempt's write scope (`AttemptContext.write_scope_mode`, `allowed_write_relpaths`, `protected_relpath`), the captured originals |
+| Evidence allowed | The staged bytes themselves; each file's raw digest is recorded in `RunState.candidate_digests` at commit (`_commit_staged_writes`) |
+| Evidence forbidden | Model prose about what it wrote; a path the response names but the stage did not prepare |
+| Model role | Candidate generator |
+| Human role | None at this point |
+| Persisted state | Sandbox files (a git worktree outside the workspace); `candidate_digests`, `all_files_written`, `identical_rewrites`, `all_original_raw` in memory. Nothing durable until a checkpoint (`MUT-A3-06`) |
+| State transitions | `SM-A3-01`: PROPOSED to STAGED or REFUSED |
+| Downstream consumers | Every gate (`gate_orchestrator.py`), the tree binding (`file_integrity.py::VerificationTreeBinding`), the verified binding (`AUTH-A3-02`), the approval diff (`AUTH-A3-03`) |
+| Mutations authorized | `MUT-A3-01` (sandbox only) |
+| Mutations forbidden | Any real-workspace byte; any path outside the write scope (`PolicyDeniedError` before the first write of the batch) |
+| Failure / UNKNOWN | The first refusal in any phase refuses the whole attempt: nothing staged, `decision = "refused"`, typed reason from `_refusal_reason`. A byte-identical rewrite is not a change: the path is removed from `all_files_written` and recorded in `identical_rewrites` |
+| Retry / recovery | A refusal is an attempt failure routed by `retry_strategy.py` (`FR-A1` rows) |
+| Checkpoint / resume | A resumed candidate is rebuilt from the checkpoint's `final_files` through this same transaction |
+| Audit emitted | `candidate.change` attempt-evidence record (`gate_orchestrator.py::_record_candidate_change`); `validation.invalidated` event |
+| Alternate paths | `BYP-A3-10` (gate-side candidate mutations: deterministic pom corrections and the self-correction loops write sandbox files after the transaction) |
+| Invariant | Nothing reaches the sandbox until every proposal of the response passed its checks; the batch re-checks revisions and rolls back on an interrupted write |
+| Negative control | Writers of `candidate_digests` (search `candidate_digests[`): `_commit_staged_writes` and `gate_orchestrator.py` (the pom correction, line `state.candidate_digests["pom.xml"] = ...`). No third writer |
+| AS-IS evidence | `TRACED` (`candidate_transaction.py` lines 1396-1598) |
+| Required contract | Same owner. Open point: `GAP-A3-04` (identity) |
+| Limitation | Self-correction's own bookkeeping of the files it writes was not traced in A3 (`BYP-A3-10`) |
+
+### AUTH-A3-02 - Is the batch being committed the batch that was verified?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Equality of the commit batch with the batch bound when acceptance started |
+| Owner | `workflow/verification_binding.py::bind_candidate` (the identity) and `binding_refusal` (the decision), consulted first thing inside `workflow/terminal_commit.py::commit_terminal_candidate` |
+| Why this owner | It sits inside the one real-workspace transaction, so both callers (direct/milestone apply and enforce commit) get it and neither can skip it |
+| Authoritative inputs | The materialized batch (`terminal_commit.py::materialize_candidate`): per file the workspace-relative path, operation, sha256 of the exact bytes or a deletion marker, mode, expected base revision, expected base existence |
+| Evidence allowed | Bytes read from the sandbox at bind time and again at commit time |
+| Evidence forbidden | Any stored digest, name or earlier report: the commit recomputes from the bytes it is about to write |
+| Model role | None |
+| Human role | None |
+| Persisted state | **Memory only.** Direct/unit: `RunState.verified_candidate_binding`, set at the start of `development_loop.py::accept_candidate`, cleared by `attempt_lifecycle.py::begin_attempt`. Enforce: `TerminalGateReport.verified_candidate`, set by `TerminalGateService._bind_candidate` before the first terminal gate |
+| State transitions | `SM-A3-01`: BOUND; a mismatch moves the commit to REFUSED (`SM-A3-03`) |
+| Downstream consumers | The commit guard; the post-review guard of `AUTH-A3-05`; `verifier_replay.py` (reads the binding of a refused candidate) |
+| Mutations authorized | None by itself; it is a precondition of `MUT-A3-03` and `MUT-A3-04` |
+| Mutations forbidden | A commit with no binding (`VERIFIED_CANDIDATE_EVIDENCE_MISSING`) or a different one (`VERIFIED_CANDIDATE_EVIDENCE_STALE`): nothing is written |
+| Failure / UNKNOWN | A batch that cannot be materialized has no binding (`None`), so the commit refuses. Fail closed |
+| Retry / recovery | The refusal is a `workspace_commit` failure, a deterministic stop, never a Developer retry (`FR-A3-12`) |
+| Checkpoint / resume | Not checkpointed. A resumed run binds again after rebuilding the candidate |
+| Audit emitted | On refusal: `workspace_commit.failed` event with the reason code. On success: none; the binding digest is written nowhere (`GAP-A3-04`) |
+| Alternate paths | `commit_service.py::commit_verified_candidate` returns `completed=True` without calling the commit when `candidate_root == workspace_path` (`BYP-A3-07`) |
+| Invariant | The real workspace receives only bytes equal to those bound before approval and terminal verification |
+| Negative control | `MEASURED` P6: same batch passes, a changed byte refuses `..._STALE`, no binding refuses `..._MISSING`. Callers of `commit_terminal_candidate`: `stage_apply.py::apply_terminal_candidate` and `commit_service.py::commit_verified_candidate` only |
+| AS-IS evidence | `TRACED` + `MEASURED` (P6) |
+| Required contract | Same owner; the digest should be recorded (Phase C, `GAP-A3-04`) |
+| Limitation | The binding covers the commit batch only: `all_files_written` on the direct path, the plan's planned files on the enforce path. A sandbox file outside that set is neither bound nor committed |
+
+### AUTH-A3-03 - Must a person approve this source change?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | `need_human_approval` for one unit's candidate |
+| Owner | `workflow/stage_apply.py::approval_gate` |
+| Why this owner | It is the single pre-apply gate of a unit, called once from `accept_candidate` |
+| Authoritative inputs | `state.all_files_written` (no files means no approval), `autonomy.mode` through `config/authority.py::is_human_in_the_loop`, `autonomy.sensitive_paths` (regex on each written path), `autonomy.risk_threshold_lines` against the unit's unified-diff line count (default 100), `process_profiles.enabled` and `enforce_approval` with the route's `human_review_required` |
+| Evidence allowed | The diff computed here from the sandbox files and the captured originals; the configuration values above |
+| Evidence forbidden | Reviewer text, ownership findings and the static-analysis banner: shown to the approver, never an input of the decision (comments at the call sites: "they never decide the approval themselves") |
+| Model role | None in the decision. Diagnostic for the approver: the pre-approval review (`AUTH-A3-12`) |
+| Human role | None in deciding whether approval is needed; the configuration is the operator's |
+| Persisted state | The four triggers are written into the `approval.decision` event (`AUTH-A3-13`) |
+| State transitions | `SM-A3-01`: to AWAITING_APPROVAL, or straight on when no trigger fires |
+| Downstream consumers | The held-gate step (`AUTH-A3-05`), which requires that approval was actually asked |
+| Mutations authorized | None |
+| Mutations forbidden | Apply without approval when a trigger fired |
+| Failure / UNKNOWN | An autonomy mode outside `guardrails` / `human-in-the-loop` raises a typed error (`MEASURED` P7). An invalid `sensitive_paths` regex is logged and **not enforced** (the loop continues): fail open for that one pattern |
+| Retry / recovery | None |
+| Checkpoint / resume | Recomputed on resume; a resumed candidate is asked about again (`SM-A3-01`) |
+| Audit emitted | `approval.decision` (`AUTH-A3-13`); the audit-only approval-rule check `audit_approval_rules` |
+| Alternate paths | `BYP-A3-01` (no plan-level approval under enforce), `BYP-A3-02` (the size trigger is per unit), `BYP-A3-05` (an empty change set), `BYP-A3-06` (outside human-in-the-loop the gates execute before the approval) |
+| Invariant | A unit that wrote source in human-in-the-loop mode is never applied without an approval outcome of APPROVED |
+| Negative control | Callers of `approval_gate`: `development_loop.py::accept_candidate` only (search `approval_gate(`) |
+| AS-IS evidence | `TRACED` (`stage_apply.py` lines 178-464) |
+| Required contract | Open: whether the size trigger and the approval subject should be plan-wide under enforce (`GAP-A3-05`, owner policy) |
+| Limitation | The invalid-regex fail-open was read, not executed |
+
+### AUTH-A3-04 - What did the person decide?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | APPROVED, DECLINED or UNAVAILABLE, with a reason code from the closed table `policy/approval.py::APPROVAL_REASON_CODES` |
+| Owner | `policy/approval.py::resolve_approval` with `classify_approval_answer` |
+| Why this owner | One classification for every approval site; `ApprovalOutcome` has no truth value, so no site can read an answer through Python truthiness |
+| Authoritative inputs | The callback's resolved answer: an `ApprovalOutcome`, or a real `bool` |
+| Evidence allowed | Terminal: an explicit `y`/`yes` or `n`/`no` (`cli.py::_terminal_answer`). Desktop launch: a `decision` frame over the launch's private review channel that carries the review identity and the one-shot capability (`control/review_channel.py`, `control/launch_approval.py::_wait`) |
+| Evidence forbidden | Anything else: `None`, a number, a string, a mock, an unresolved awaitable are UNAVAILABLE (`MEASURED` P7). The persisted decision file is audit output and is never read as authority. End of file, a bare Enter, Ctrl-C, an expired review or a vanished host are UNAVAILABLE, never a decline |
+| Model role | None |
+| Human role | Authority. `--yes` outside a launch is the operator's standing approval (`BYP-A3-03`); inside a launch `--yes` cannot take effect |
+| Persisted state | Desktop: the launch record's `pending_approval` (status, decision, `candidate_digest` = digest of the presented diffs, per-file diff digests), written **before** the workflow continues; the review-diff sidecar; the decision file (`MUT-A3-07`). Terminal: only the `approval.decision` event |
+| State transitions | `SM-A3-02` |
+| Downstream consumers | `approval_gate` (continue, or `_abort_without_applying`) |
+| Mutations authorized | APPROVED: the unit may go on to its remaining gates and its apply. It authorizes no other bytes |
+| Mutations forbidden | DECLINED and UNAVAILABLE: nothing applied; the sandbox is removed |
+| Failure / UNKNOWN | UNAVAILABLE ends the unit `approval_required`; DECLINED ends it `human_rejected`. A decision that cannot be made durable is `APPROVAL_DECISION_NOT_RECORDED`: not honoured |
+| Retry / recovery | Neither is retried. The checkpoint is deleted (`_abort_without_applying`) |
+| Checkpoint / resume | A decision is never restored from a checkpoint; a resumed run asks again |
+| Audit emitted | `AUTH-A3-13` |
+| Alternate paths | `BYP-A3-03`, `BYP-A3-04` (no callback), `BYP-A3-11` (a desktop launch cannot be asked anything but a change, a runtime command or a verifier review) |
+| Invariant | Only an explicit, attributable approval approves |
+| Negative control | `MEASURED` P7 (six answers). The channel's refusal of forged, replayed and cross-review decisions is pinned by committed tests (not re-run) |
+| AS-IS evidence | `TRACED` + `MEASURED` (P7) |
+| Required contract | Same |
+| Limitation | Same-user threat model: the channel defends against a workload that can rewrite files, not against ptrace or account compromise (its own stated claim) |
+
+### AUTH-A3-05 - Is the candidate still the one the person approved (held execution)?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether a source approval still covers the bytes about to be built, tested or run |
+| Owner | `policy/approval.py::stale`, fed by the guard `development_loop.py::accept_candidate` installs (`_candidate_is_the_reviewed_one`), raised as a typed failure by `attempt.py::assert_candidate_unchanged_since_source_review` |
+| Why this owner | One predicate for every execution boundary after a source review |
+| Authoritative inputs | The binding of `AUTH-A3-02` taken before the review, and a binding recomputed from the sandbox at each check |
+| Evidence allowed | Recomputed bytes only |
+| Evidence forbidden | The diff digest shown to the person; any cached state |
+| Model role | None |
+| Human role | None |
+| Persisted state | None (`AttemptContext.post_source_review_guard`, memory) |
+| State transitions | `SM-A3-01`: HELD_GATES to FAILED (stale) |
+| Downstream consumers | `gate_orchestrator.py` (before compile, before the runtime-command review), `runtime_verification.py` (before Maven preparation and before each command), `accept_candidate` (before the held gates, after them, after the requirement closers) |
+| Mutations authorized | None |
+| Mutations forbidden | Execution of, and any apply of, a candidate that differs from the reviewed one. While the guard is set the three self-correction loops are not entered (`gate_orchestrator.py` and `runtime_verification.py`: `ctx.post_source_review_guard is None` in each loop condition) |
+| Failure / UNKNOWN | Stale: `verification_infrastructure_failure` "CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW". A binding that cannot be computed is stale (the guard returns False) |
+| Retry / recovery | The retry loop is the only way to a new candidate, which is reviewed again |
+| Checkpoint / resume | Not persisted; `begin_attempt` clears it |
+| Audit emitted | The gate outcome of the failure |
+| Alternate paths | `BYP-A3-09` (an attempt of an attended run that wrote no source is not held) |
+| Invariant | In an attended human-in-the-loop run, no gate executes model-authored bytes other than the ones a person approved |
+| Negative control | Readers of `post_source_review_guard`: the three loop conditions and `assert_candidate_unchanged_since_source_review`. Writers: `accept_candidate` (set, cleared in `finally`) and `begin_attempt`. `MEASURED` P7 for `stale` |
+| AS-IS evidence | `TRACED`; `MEASURED` (P7) for the predicate. This settles `BYP-A2-07` for every attempt that wrote source |
+| Required contract | Same |
+| Limitation | `BYP-A3-09` |
+
+### AUTH-A3-06 - Is execution held until the source review?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether this attempt's executing gates (POM validation, compile, tests, runtime verification) and the requirement closers that run tests wait for the approval |
+| Owner | `policy/approval.py::defer_execution_until_source_review` |
+| Inputs | The caller's flag (always True from `development_loop.py`), `autonomy.mode`, whether the run has written source |
+| Rule | Held only in human-in-the-loop mode and only when source was written (`MEASURED` P7: `guardrails` is not held; no source is not held). Held even with no approver: the run then ends `approval_required` having executed nothing |
+| Model / human role | None / none (owner decision of 2026-10-15 recorded in the docstring) |
+| Persisted state | None (`AttemptContext.deferred_executing_gates`, a partial bound to this attempt; cleared by `run_attempt` and `begin_attempt`) |
+| Consumers | `attempt.py::run_attempt` (hold or run), `accept_candidate` (runs the held half after approval; refuses `EXECUTION_DEFERRED_WITHOUT_SOURCE_REVIEW` when the gates were held but no review was asked) |
+| Failure / UNKNOWN | An unreadable mode raises; nothing is treated as not held by default |
+| Checkpoint / resume | The `candidate_gates_passed` checkpoint is written only after the held half ran, so a resume can never skip an unrun gate. A crash during the review leaves no candidate checkpoint (`FR-A3-20`) |
+| Audit emitted | The attempt's `attempt.closed` evidence record is written when `run_attempt` returns, before the held gates run (`GAP-A3-07`) |
+| Alternate paths | `BYP-A3-06` |
+| Invariant | See `AUTH-A3-05` |
+| AS-IS evidence | `TRACED` + `MEASURED` (P7) |
+| Required contract | Open owner decision: whether the other approval triggers should hold execution too (`HITL-OTHER-APPROVAL-TRIGGERS-DEFERRAL-001`) |
+
+### AUTH-A3-07 - Did the candidate pass terminal regression (direct, milestone and enforce unit)?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether the full suite on the still-isolated candidate blocks acceptance |
+| Owner | `development_loop.py::run_terminal_regression`; attribution of a failing suite to the candidate by `workflow/suite_attribution.py::attribute_suite_result` when a baseline was captured |
+| Inputs | The full-suite result from `tools/validate.py::PolymorphicValidator.run_tests` on the sandbox; the captured brownfield baselines; the stability cache |
+| Evidence allowed | Validator output; the PRE/POST delta; an isolated pristine replay for ambiguous tests |
+| Evidence forbidden | Model text |
+| Model / human role | None / none |
+| Persisted state | `RunState.terminal_regression_succeeded`, `terminal_full_suite_result` (memory); kept for reuse after apply (`MUT-A3-10`) |
+| Consumers | The generated-verifier pass seams (`AUTH-A2-08`), the `developer_success` checkpoint, the apply, `final_workflow_quality_passed` (`AUTH-A3-10`) |
+| Failure / UNKNOWN | Blocking with an attributable test: a retryable `regression_test` failure. Blocking with nothing attributable: the deterministic stop `REGRESSION_UNATTRIBUTED`. An environment result stops the run (`_stop_on_environment_gate_result`) |
+| Checkpoint / resume | Always re-run on resume (the comment in `run_attempt`: "terminal regression always runs") |
+| Audit emitted | `validation_baseline.*` events (advisory authority), the gate outcome |
+| Alternate paths | Under enforce the plan-level commit has no full-suite gate of its own: each unit ran its own; the terminal gates are the eight of `AUTH-A3-08` |
+| Invariant | Nothing is applied by a unit whose terminal regression blocked |
+| AS-IS evidence | `TRACED` (lines 1220-1479 read; the tail of the function was not read line by line) |
+| Required contract | Same |
+
+### AUTH-A3-08 - May the enforce candidate be committed?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | `TerminalGateReport.commit_eligible` |
+| Owner | `workflow/terminal_gate_service.py::TerminalGateService.run` |
+| Rule | The gates ran and none of eight gaps is set: migration, stack contract, preserved references, static analysis, semantic safety, terminal obligations, original requirements, artifact registry |
+| Inputs | The plan sandbox, the plan, the obligation ledger, the requirement set, the autonomy configuration, the sealed verification contract, the operator's acceptance artifacts |
+| Evidence allowed | Deterministic checks on the candidate; for original requirements the verifier's verdicts and the deterministic closers, then the requirement policy (`AUTH-A3-09`) |
+| Evidence forbidden | The plan's own acceptance text (docstring of `_requirement_gap`); a raised exception is never reported as an unmet requirement |
+| Model role | Diagnostic: the spec-compliance verifier's verdicts are recorded, and a model "satisfied" never closes a requirement (`requirements.py::requirement_outcomes`) |
+| Human role | None at this gate (acceptance artifacts and dispositions were bound before generation) |
+| Persisted state | Memory; each gate's result goes to attempt evidence (`_record_terminal_report`) and to `terminal_gate_outcome` events |
+| Consumers | `commit_service.py::commit_verified_candidate` (raises if not eligible), the enforce aggregate |
+| Mutations authorized | `MUT-A3-04` |
+| Mutations forbidden | A commit of an ineligible candidate |
+| Failure / UNKNOWN | A gate validator that raises is a failed gate for static analysis and terminal obligations; an unexpected exception elsewhere propagates to the controller's error handler. `requirements_verified` is reported and **does not enter `commit_eligible`** (`MEASURED` P4) |
+| Retry / recovery | **None.** A gap ends the run; no unit is reopened (`FR-A3-15`, `GAP-A3-02`) |
+| Checkpoint / resume | Not checkpointed; sandbox completions are discarded when the gates fail (`MUT-A3-11`) |
+| Audit emitted | `gate.result` per terminal gate with `commit_eligible`; `requirements_verified` on the requirements gate |
+| Alternate paths | `terminal_obligations` and `preserved_references` exist only under enforce (documented in `generation-pipeline.md`) |
+| Invariant | The real workspace is untouched until every terminal gate passed |
+| Negative control | Constructors of a `TerminalGateReport(ran=True, ...)`: the service only |
+| AS-IS evidence | `TRACED` + `MEASURED` (P4) |
+| Required contract | Open: `GAP-A3-01`, `GAP-A3-02` |
+
+### AUTH-A3-09 - Requirement outcome, requirement truth, and what blocks
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | (a) each original requirement's outcome; (b) the run's typed truth `ALL_VERIFIED` / `RESOLVED_WITH_OPERATOR_ACCEPTANCE` / `OPEN_REQUIREMENTS` / `CONTRADICTED`; (c) which requirements forbid success |
+| Owner | (a) `workflow/requirements.py::requirement_outcomes`; (b) `requirement_truth`, derived only from (a); (c) `blocking_requirements` |
+| Why this owner | One derivation from the obligation ledger; every reporter calls it |
+| Inputs | Ledger records: the verifier's verdict, deterministic closures bound to the candidate's evidence id, counter-evidence, operator dispositions, non-claim records; the two policies `autonomy.requirement_unknown_policy` and `requirement_unverified_policy` (default `record`; the production profile sets `block`, `config/resolution.py`) |
+| Evidence allowed | Deterministic closure for the exact candidate; operator acceptance (counted as accepted, never as verified) |
+| Evidence forbidden | A model "satisfied" without deterministic closure (downgraded to UNVERIFIED); a model "violated" without counter-evidence (downgraded to UNVERIFIED) |
+| Model role | Diagnostic. One exception that blocks: a model "missing" on an UNVERIFIED requirement blocks under either policy (`_model_reported_missing`) |
+| Human role | Operator acceptance and dispositions, bound before generation |
+| Persisted state | The ledger (memory; snapshotted in checkpoints as `EFFECTIVE_LEDGER_KEY`); the result field `requirement_truth`; the `requirement.truth` run event; the launch record copy |
+| Consumers | Unit: `development_loop.py::_close_and_check_requirements`. Enforce: `TerminalGateService._requirement_gap`. Reporters: `outcome.py::completed_result`, the enforce aggregate, `control/launch.py::_requirement_truth_field`, `application/history.py` (the last `requirement.truth` event) |
+| Mutations authorized | None. A blocking requirement stops the unit or the terminal gate |
+| Mutations forbidden | None under `record`: **an open requirement does not stop the apply** |
+| Failure / UNKNOWN | VIOLATED always blocks. PENDING and UNKNOWN block only under `unknown_policy = block`; UNVERIFIED only under `unverified_policy = block` or a model "missing" (`MEASURED` P4). Under the defaults UNKNOWN **fails open** |
+| Retry / recovery | A unit-level block is the deterministic stop `requirements_unresolved` (`retry_strategy.py`: "The Developer cannot supply the verifier's missing verdict"). A terminal block ends the run (`FR-A3-15`) |
+| Checkpoint / resume | The ledger snapshot is restored on resume |
+| Audit emitted | `requirement.closure` and `requirement.truth` events (authoritative); `closure_attempts` in the enforce result |
+| Alternate paths | `BYP-A3-08` (the last `requirement.truth` event can describe a candidate that was not the applied one) |
+| Invariant | Truth has one derivation; it never changes the lifecycle status (comment at the enforce aggregate) |
+| Negative control | Callers of `requirement_truth(`: `development_loop.py`, `outcome.py`, `enforce_loop.py` (through `deps`), `shadow_mode.py` copies the result field into an event. No reader recomputes outcomes |
+| AS-IS evidence | `TRACED` + `MEASURED` (P4, P8, the two committed tests) |
+| Required contract | Open: `GAP-A3-01` |
+
+### AUTH-A3-10 - Did the unit succeed?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | A unit result's `quality_gates_passed` and `failure_category` |
+| Owner | `workflow/state.py::RunState.final_workflow_quality_passed`; the category by `workflow/outcome.py::terminal_failure_category`; the result by `outcome.py::completed_result` |
+| Rule | All of: candidate gates succeeded, terminal regression succeeded, the attempt succeeded, quality gates succeeded (set only by `apply_terminal_candidate` after a committed apply), no open API-contract recovery, **and no final-review refusal** |
+| Inputs | Terminal run state only ("never historical-attempt truth") |
+| Evidence allowed | The flags the gates and the apply set |
+| Evidence forbidden | The Reviewer's verdict text: it is returned as `review` and decides nothing. Only the fact that the review request could not be performed enters the rule |
+| Model role | None in the rule. The Reviewer is diagnostic (`AUTH-A3-12`) |
+| Human role | None here |
+| Persisted state | The result dict; the trace row (`status` success / failure); the launch record's `ended` block (a copy) |
+| Consumers | `plan_executor.py::_passed` (direct and milestone), `enforce_loop.py::enforce_unit_gates_accepted` (enforce), the CLI exit code |
+| Failure / UNKNOWN | A unit whose candidate **was applied** and whose final review could not be performed reports `quality_gates_passed = False`, `failure_category = final_review_refused`, `final_review_refusal.candidate_applied = True`, nothing rolled back (`MEASURED` P1) |
+| Retry / recovery | The checkpoint is deleted when the unit passed, or when it was applied and only the review was refused |
+| Audit emitted | The trace row; `attempt.passed` with `applied: True`; `review.refused` |
+| Alternate paths | `BYP-A3-12`: the same unit result is a failure for the direct and milestone executor and an acceptance for the enforce loop (`MEASURED` P2) |
+| Invariant | `quality_gates_passed = True` implies the candidate was committed to the unit's `workspace_path`. It does **not** imply requirements verified (`AUTH-A3-09`) |
+| Negative control | Writers of `quality_gates_succeeded = True`: `stage_apply.py::apply_terminal_candidate` (the verification-only path was not searched in A3) |
+| AS-IS evidence | `TRACED` + `MEASURED` (P1, P2, P8) |
+| Required contract | Open: `GAP-A3-01`, `GAP-A3-03` |
+
+### AUTH-A3-11 - Did the run succeed (plan level)?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The run's terminal status |
+| Owner | Enforce: the tail of `enforce_loop.py` (`aggregated["status"]`). Direct and milestone: `plan_executor.py::_terminal` over the driver's result (`milestones.py::_MilestonePlanDriver.plan_result` / `unit_failed`) |
+| Rule, enforce | `success` when every subtask completed, the terminal gates are commit-eligible and the commit completed; `needs_review` when a subtask is NEEDS_REVIEW, the artifact derivation failed or the commit failed; otherwise `failed` |
+| Rule, direct / milestone | Success only when every unit is VERIFIED; a result that claims success otherwise is turned into `needs_review` with `PLAN_TERMINAL_MISMATCH` |
+| Inputs | Unit results (`AUTH-A3-10`), the terminal gate report (`AUTH-A3-08`), the commit result (`AUTH-A3-14`) |
+| Evidence forbidden | Recomputing unit truth: the aggregate copies it. Requirement truth is attached, never folded into the status |
+| Model / human role | None / none |
+| Persisted state | The result; the `.enforce` trace row; the approved plan's `lifecycle_state`; `ControlState.subtask_states`; the RunRecord's `work_unit_states`; the launch record |
+| Failure / UNKNOWN | An exception in the gates or the commit ends the run as an error after the durable state is settled pessimistically; an unproven commit is `UNCERTAIN` and `needs_review`, never `failed` |
+| Retry / recovery | Milestone: `milestone_failure_callback` may answer `retry` for a failed unit. Enforce: owner recovery inside the stage loop (`SM-A1-04`), none after the terminal gates |
+| Checkpoint / resume | `SM-A1-03`, `GAP-A1-09` |
+| Alternate paths | `BYP-A3-13` (milestone units are committed to the real workspace before the plan is verified) |
+| Invariant | Partial completion is never success |
+| AS-IS evidence | `TRACED` + `MEASURED` (P3) |
+| Required contract | Open: `GAP-A3-01`, `GAP-A3-02`, `GAP-A3-03` |
+
+### AUTH-A3-12 - What authority does the Reviewer have?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | None about the candidate. Its text is advice for the approver (`stage_review.py::pre_approval_review`) and the run's review text (`final_review`) |
+| Owner | `workflow/stage_review.py` |
+| Inputs | The goal, the gate evidence, the project BEFORE view, the candidate files or the candidate diff |
+| Model role | Diagnostic |
+| Human role | The approver reads the pre-approval report |
+| Persisted state | `RunState.pre_approval_review` (memory), the result's `review`, the launch review's `reason` text |
+| What its failure does | Pre-approval review fails: recorded (`review.pre_approval_unattached`, advisory), the approver is told, approval proceeds. Final review refused or errored: `final_review_refusal`, which makes the unit a non-success on the direct and milestone path and is advisory under enforce (`AUTH-A3-10`) |
+| Reuse rule | When a pre-approval review exists, `final_review` returns it and makes no second call |
+| Alternate paths | `BYP-A3-14` (the reused review can predate the build and describe a candidate that then failed terminal regression); a review cut off at the output cap is attached as if complete (`GAP-A3-06`) |
+| Invariant | Reviewer text never changes a gate verdict |
+| Negative control | `stage_review.py` contains no read of a finish reason or truncation flag (search `finish_reason`, `OUTPUT_TRUNCATED`, `truncat` in the file: comments only) |
+| AS-IS evidence | `TRACED` |
+| Required contract | Open: `GAP-A3-03`, `GAP-A3-06` |
+
+### AUTH-A3-13 - What record proves an approval?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The durable account of a human approval decision |
+| Owners | Three records, three writers. (1) `workflow.py::_record_approval_decision`: the `approval.decision` run event with `outcome`, `triggers` and, when unavailable, `reason_code`. (2) `control/launch.py` + `launch_approval.py::build_pending`: the launch record's `pending_approval` with `review_id`, `candidate_digest` (digest of the presented diffs), per-file `diff_sha256`, `reason_sha256`, status and decision; plus the review-diff sidecar holding the exact diff text. (3) `launch_approval.py::_write_audit_decision`: the decision file |
+| What none of them carries | The verification binding digest (`AUTH-A3-02`) or the commit's `candidate_hash`. `MEASURED` P5: the event's detail keys are exactly `outcome`, `triggers` (and `reason_code`). `MEASURED` P6: five functions each digest "the candidate" and give five different values for one file |
+| Consumers | `metrics/derive.py` (outcome counts) and `metrics/evidence.py` (allowed fields). No gate reads any of the three (search `approval.decision` in `kriya/`) |
+| Model / human role | None / the decision recorded is the person's |
+| Failure / UNKNOWN | The launch record write must succeed before the workflow continues; the decision file's failure is logged and changes nothing |
+| Checkpoint / resume | Not read on resume |
+| Invariant | A record is output only; authority is the live decision of `AUTH-A3-04` |
+| AS-IS evidence | `TRACED` + `MEASURED` (P5, P6) |
+| Required contract | Open: `GAP-A3-04` |
+| Limitation | A terminal (non-desktop) run keeps no digest of what was approved at all |
+
+### AUTH-A3-14 - Who may write the real workspace, and what state is a commit in?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether the real workspace holds the candidate: COMMITTED, UNCHANGED (not committed or rolled back) or UNCERTAIN |
+| Owner | `workflow/terminal_commit.py::commit_terminal_candidate` over `repository/commit.py::commit_revision_grounded_batch`. After an interruption: the commit evidence journal with the owning RunRecord's commit cycle (`commit_service.py::interrupted_commit_outcome`), and `control/recovery.py` for an explicit recovery |
+| Order inside the commit | Binding (`AUTH-A3-02`), empty batch, semantic-safety refusal, static-analysis guard, contract transition, durable RunRecord intent, registry staging, the batch (preflight, snapshot, IN_PROGRESS evidence, staging, apply with a per-file base re-check, COMMITTED evidence), re-read digest check, registry promotion, settle |
+| Inputs | The materialized batch; each path's expected base revision (direct: the bytes the run first read; enforce: the workspace revision when the plan started) |
+| Evidence allowed | Bytes on disk and the fsynced journal |
+| Evidence forbidden | In-memory flags after an exception: "the local flags say nothing then: the journal decides" |
+| Model / human role | None / none (explicit recovery is an operator command) |
+| Persisted state | `<workspace>/.kriya` commit evidence (schema 2: exact before and after byte state per operation), the RunRecord commit cycle with `candidate_hash`, staged temp files while unsettled |
+| State transitions | `SM-A3-03` |
+| Mutations authorized | `MUT-A3-03`, `MUT-A3-04`, `MUT-A3-09` |
+| Mutations forbidden | A commit while an earlier commit is uncertain (`UncertainCommitError`); a write whose base changed (`FileRevisionConflict`) |
+| Failure / UNKNOWN | Controlled failure before the apply: nothing changed. During the apply: every applied path is restored, ROLLED_BACK. A failed rollback or evidence write: UNCERTAIN. Fail closed: UNCERTAIN blocks later mutating runs until recovery settles it |
+| Retry / recovery | Never a Developer retry (`workspace_commit` is a deterministic stop). `kriya runs recover` settles only what the evidence and the bytes prove; a partial commit only by `--complete-partial` with matching candidate hashes; no crash rollback (base bytes are not durable) |
+| Audit emitted | Commit evidence, RunRecord cycle, `workspace_commit.failed` / `workspace_commit_completed` |
+| Alternate paths | `BYP-A3-07`; `stage_apply.py::_abort_without_applying` restores original bytes in an in-place run (`MUT-A3-05`, unreachable at the baseline) |
+| Invariant | One transaction, two callers, all-or-nothing per batch |
+| Negative control | Callers of `commit_terminal_candidate` (two, see `AUTH-A3-02`); `handover/claude-context/generation-pipeline.md` names a committed test pinning this (`tests/test_gate_f_closer_sequence.py`, not re-run) |
+| AS-IS evidence | `TRACED` (`terminal_commit.py` 245-413, `repository/commit.py` 557-746, `recovery.py` docstring; the recovery functions were not read) |
+| Required contract | Same |
+
+### AUTH-A3-15 - Did earlier milestones still verify before integration (milestone replay)?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Per completed milestone: its persisted verification commands re-executed against the current workspace, PASS, FAIL, not evaluable or not executed |
+| Owner | `workflow/milestones.py::replay_prior_milestone_report`, run as the plan phase `REPLAY_PRIOR_VERIFICATIONS` before the integration unit |
+| Inputs | `MilestoneRunState.verification_commands`, captured after each milestone by a Run-Verifier judgment (model-inferred commands, Python targets grounded deterministically) |
+| Evidence allowed | The executed commands' output and the `[VERIFICATION]` marker |
+| Model role | Proposer of the commands at capture time; none at replay |
+| Human role | In human-in-the-loop mode the exact command set is approved through the run's approval channel before it executes (docstring: "never re-resolved after the approval") |
+| Failure / UNKNOWN | A replay that did not run is the typed terminal `milestone_replay_not_executed`, never "no regression". A regression is `milestone_replay_failed`. No verdict (`not_evaluable`) is recorded and not counted as a failure: **fail open for that case**, bounded by the integration unit's own suite |
+| Retry / recovery | None |
+| Persisted state | The milestone run-state sidecar |
+| Alternate paths | Enforce has no such phase |
+| AS-IS evidence | `TRACED` (docstring and the first 40 lines; `_authorize_replay` not read) |
+| Required contract | Same; listed for completeness of "replay". Verifier replay after an owner repair is `AUTH-A2-13` |
+
+### A3 answers to the slice questions (each cites its row)
+
+1. **Candidate identity and transaction.** `AUTH-A3-01`, `AUTH-A3-02`; five unlinked digests, `GAP-A3-04`.
+2. **Review and source approval.** Need: `AUTH-A3-03`. Decision: `AUTH-A3-04`. Reviewer: `AUTH-A3-12`.
+3. **Approval record and candidate digest binding.** `AUTH-A3-13`. The live binding is sound for
+   verified-to-committed (`AUTH-A3-02`); approved-to-verified holds by ordering and, in human-in-the-loop mode, by
+   the guard (`AUTH-A3-05`), not by comparing the approved digest with anything (`BYP-A3-15`).
+4. **Deferred gates.** `AUTH-A3-06`, `AUTH-A3-05`, `FR-A3-20`.
+5. **Terminal regression.** `AUTH-A3-07`.
+6. **Apply authority, rollback.** `AUTH-A3-14`.
+7. **Replay.** Milestone replay: `AUTH-A3-15`. Verifier replay: `AUTH-A2-13`. Commit recovery: `AUTH-A3-14`.
+8. **Requirement closure.** `AUTH-A3-09`.
+9. **Final-result aggregation, success and failure truth.** `AUTH-A3-10`, `AUTH-A3-11`.
+10. **Milestone review and refusal.** `AUTH-A3-10`, `BYP-A3-12`, `GAP-A3-03`.
+11. **Repair after a terminal requirement failure.** None exists: `AUTH-A3-08`, `GAP-A3-02`.
+12. **Audit record.** `AUTH-A3-13`, `GAP-A3-04`, `GAP-A3-07`.
+
+**What Kriya's words mean today (AS-IS).**
+
+| Word in a result | What the code established | What it does not establish |
+|---|---|---|
+| `quality_gates_passed: True` (unit) | Candidate gates, terminal regression, a committed apply into the unit's `workspace_path`, a performed final review | That any original requirement is verified (`AUTH-A3-09`); that a person approved (only when a trigger fired) |
+| `status: success` (enforce) | Every unit accepted, eight terminal gates without a gap, the real-workspace commit completed | Requirements verified under `record`; a plan-level approval |
+| `status: success` (milestone) | Every unit VERIFIED, replay phase without failure, integration unit passed | The same |
+| applied / committed | The bytes equal the verified binding and are in the workspace | Verified against the user's requirements |
+| `requirement_truth: ALL_VERIFIED` | Every mandatory requirement closed by deterministic evidence for this candidate | - |
+| `review_included_in_approval: True` | A pre-approval review text exists | That it describes the final candidate's built or tested state (`BYP-A3-14`) |
