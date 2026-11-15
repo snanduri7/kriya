@@ -105,3 +105,42 @@ UNKNOWN behaviour in this slice, in one place:
 | Replay with no verdict | Recorded, not a failure (`AUTH-A3-15`) | No, bounded by the integration suite |
 | Invalid `sensitive_paths` regex | Logged, that pattern not enforced (`AUTH-A3-03`) | **No** for that pattern |
 | Final review not performed | Non-success on direct and milestone, accepted on enforce (`FR-A3-14`) | Divergent |
+
+## Slice A4 - failures before the first unit runs, and in the inputs every unit shares
+
+"Before any model call" is stated only where the code order was read. Nothing in this table is applied to a
+workspace.
+
+| ID | Failure | Detected by | Outcome | Retry / recovery | Fails safely? | Label |
+|---|---|---|---|---|---|---|
+| FR-A4-01 | Requirement contract unreadable, malformed, inside the workspace, or bound to another goal | `requirement_contract.py` | `REQUIREMENT_CONTRACT_INVALID` / `REQUIREMENT_CONTRACT_GOAL_MISMATCH`, before any model call | None | Yes | `TRACED` |
+| FR-A4-02 | Knowledge gap, unconfirmed | `AUTH-A4-05` | `status: knowledge_gap` before any model call (direct: stage 0; enforce: before planning) | The person confirms and reruns | Yes for the gate; the coverage input is weak (`GAP-A4-03`) | `TRACED`, `MEASURED` P5 |
+| FR-A4-03 | Knowledge gap first named by the Planner's text in an enforce unit | Unit stage 0 with coordinate-scoped acknowledgement | The unit returns `knowledge_gap`; it becomes the run's result only while no file is established, otherwise the unit is an ordinary non-passing unit | None | Yes (stops), but the trigger is model text | `TRACED`, `MEASURED` P5 for the predicate |
+| FR-A4-04 | Goal not admissible under a blocking requirement policy; verification authority required | `verification_contract.refusal()` (slice A2) | Enforce: `failure`, `GOAL_ADMISSION` or `VERIFICATION_AUTHORITY`, authority requests sealed. Direct: the same refusal inside the unit | The operator supplies authority | Yes | `TRACED` (call sites) |
+| FR-A4-05 | Baseline authority cannot run; or the baseline already satisfies every mandatory claim | `contract_baseline.py` (enforce only) | `VERIFICATION_AUTHORITY_UNAVAILABLE` typed stop; or `NoMutationRequired`: a **success without a model call** | None | Yes | `TRACED` |
+| FR-A4-06 | Planner answer empty, truncated or not JSON (direct) | `classify_plan_completeness` | `planner_output_incomplete`; no repair | None | Yes | `TRACED` |
+| FR-A4-07 | Planner structured block fails the schema, names an unknown or non-plannable tool, or modifies an absent path (direct) | The same, plus `_classify_against_project` | Up to 2 repairs, then `planner_output_schema_invalid` | Bounded repair | Yes | `TRACED` |
+| FR-A4-08 | Planner names a path outside path authority (direct) | Schema validator inside `PlannedFile` | `planner_output_unauthorized_path`, never repaired | None | Yes | `TRACED` |
+| FR-A4-09 | Structured plan invalid (enforce), any of the 37 `plan_validation` reason codes or the loop's own checks | `AUTH-A4-10` | Up to 2 repairs, then `needs_review`, `PLANNING_ERROR`, `STRUCTURED_PLAN_REPAIR_EXHAUSTED`; never whole-goal execution | Bounded repair with preservation of validated facts | Yes | `TRACED`, `MEASURED` P3 |
+| FR-A4-10 | A repair fixes one thing and silently regresses another | The two regression checks on the obligation ledger | The candidate is still invalid (`SEMANTIC_CONTRACT_REGRESSION_REJECTED`, `PRESERVED_REFERENCE_REGRESSION_REJECTED`); the slot is spent | None extra | Yes | `TRACED` |
+| FR-A4-11 | Planner call stopped by the run deadline | `InferenceDeadlineError` | Typed deadline stop (`deadline_stop_result`) on both shapes | None | Yes; the CLI text after it is inaccurate (registry `CLI-RESUME-HINT-DESIGN-STAGE-STOP-TEXT-001`) | `TRACED` |
+| FR-A4-12 | Plan sandbox or skills run shadow cannot be created | `create_git_worktree`, `RunShadowRefused` | Typed stop or `STRUCTURED_PLAN_UNAVAILABLE`; learning discarded | None | Yes | `TRACED` |
+| FR-A4-13 | A skill folder cannot be loaded | `SkillEngine.discover_and_load` | Logged; the skill is absent from the run; the run continues | None | **No signal in the result**: a rule the operator relies on can be missing silently | `TRACED` |
+| FR-A4-14 | Applicable skill unverified, or a goal library has no skill | `stage_analysis.py` section 1.2 | Live lookup if enabled and approved, else the person is asked once; declining proceeds "best-effort" and the names are recorded as unresolved skill gaps | None | Proceeds by design, with a record | `TRACED` |
+| FR-A4-15 | Live lookup: unsafe term, search or fetch error, nothing usable, callback error | `AUTH-A4-06` | Nothing is sent or nothing is used; the run continues | None | Yes | `TRACED`, `MEASURED` P6 |
+| FR-A4-16 | Current Project View, grounded owner candidates or Code Intelligence localization unavailable | `stage_analysis.py`, `stage_planning.py`, the enforce planning loop | Recorded or logged; planning continues with less evidence | None | Degrades; plan validation still reads the disk | `TRACED` |
+| FR-A4-17 | The request's runtime requirement is not recognized | `AUTH-A4-13` | A Planner runtime verifier is removed, or the plan is refused as unjustified | Plan repair in the refused case | **No** for a false negative: success without execution (`GAP-A4-05`) | `TRACED`; the fixed case `MEASURED` by tests |
+| FR-A4-18 | Unknown execution mode | `WorkflowController.execute`, the config schema | Raises / schema refusal | None | Yes | `TRACED` |
+| FR-A4-19 | The Architect's design names a library the goal did not (direct and milestone units) | Stage 2A of `stage_architecture.py` | Approval callback asked; declined: `human_rejected`; no decision: `approval_required`; **no callback: proceeds with a warning** | None | Yes with a callback; no without one (`BYP-A4-18`) | `TRACED` |
+
+### UNKNOWN handling in this slice
+
+| UNKNOWN | What the code does | Fails safely? |
+|---|---|---|
+| Release date of a named version unknown (or offline) | Not a temporal gap | No, by design of offline mode |
+| Ecosystem of the workspace unknown | Assumed Java for the registry lookup | Benign: a miss is "unknown release date" |
+| Whether a sentence is a requirement or context | Every separable statement is a requirement or a constraint | Over-inclusive (safe); the blocking policies then refuse what cannot be closed |
+| Whether the goal is ambiguous | Not represented (`AUTH-A4-03`) | No |
+| Whether a skill applies to a unit | Decided on text that includes Planner prose (`AUTH-A4-08`) | Not safe or unsafe: unbound |
+| Whether the request requires execution | A miss reads "no" (`AUTH-A4-13`) | No |
+| A plan criterion id that does not resolve at render time | Silently omitted from the unit goal | Relies on `validate_plan` having rejected it |

@@ -403,3 +403,196 @@ Handed to later slices with the reason:
 | DOC-A3-04 | Registry `GUI-REVIEW-LOCAL-TRUST-001` and `OPEN-ITEMS.md` OI-102 | A same-user actor can write a decision file or run `kriya launch-decision` | STALE / CONTRADICTED BY CODE (see the table above) |
 | DOC-A3-05 | Registry `KERNEL-APPROVAL-RECORD-NO-CANDIDATE-DIGEST-001`, `closure_evidence` | The event's only consumers are two metrics modules; the live approval is bound to candidate bytes | First half CURRENT (search). Second half PARTIALLY CURRENT: the commit is bound to the verified bytes; the approval is not bound to them by any comparison (`GAP-A3-04`) |
 | DOC-A3-06 | `workflow/stage_apply.py::_abort_without_applying`, in-place restore branch and its comment | Restores the user's real files when there is no worktree isolation | DOCUMENTED BEHAVIOUR NOT REACHABLE at the baseline: the direct path refuses to run in place (`MUT-A3-05`) |
+
+## Slice A4 (2026-11-15) - goal, knowledge, Skills, plan, executor convergence
+
+Evidence: `evidence/a4/` (probes P1 to P10 with output; two committed test files re-run on this baseline, 37 passed).
+Every gap below uses `AS-IS -> GAP -> REQUIRED CONTRACT -> IMPLEMENTATION DELTA -> ACCEPTANCE PROOF`. The last three
+are `PROPOSED` outlines only: Phase C designs them from the truth owners backward and nothing here is implemented or
+authorized.
+
+### The mandatory row
+
+| Registry row | A4 result | Evidence | Gap |
+|---|---|---|---|
+| `ENFORCE-EXECUTE-PLAN-CONVERGENCE-001` | **Confirmed, current, and larger than "orchestration only".** The row's own statement holds: the enforce loop orders, resumes and completes its subtasks itself; a STRUCTURED `WorkUnitInvocation` is provenance and is not executed by `execute_plan`. The question asked of this slice was whether the two executors recompute or diverge on plan truth. They do: seven result-bearing facts are decided differently (table in `GAP-A4-01`), four of them measured. What they share is real and should be kept: the unit primitive, `TerminalGateService`, the commit service, the tool-membership validator, the skill selector and renderer | `TRACED` (`AUTH-A4-14`); `MEASURED` P2, P3, P10; A3's P1 to P3 and P8 | `GAP-A4-01` |
+
+### GAP-A4-01 - Two executors establish different truths for the same words
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A4-04`, `AUTH-A4-14`. The same goal in the same product runs the direct shape in a folder with no `kriya.yaml` and the enforce shape after Project Setup (`MEASURED` P10). The divergences: |
+| | **(a) Plan validity.** Enforce: `validate_plan` and six further checks. Direct: schema, path authority, tool membership, action against the project view. A cyclic plan with two owners of one file is `complete` on direct and has six reason codes on enforce (`MEASURED` P3). |
+| | **(b) Where requirements are verified.** Direct: inside the unit, before its apply, where the retry loop can still act. Enforce: once, at the terminal, with no route back (`AUTH-A4-15`, `GAP-A3-02`). |
+| | **(c) Two closers are unreachable under enforce.** The unit-level closure block runs only `if requirement_set is not None` (`development_loop.py::_close_and_check_requirements`), and an enforce unit has none (`MEASURED` P2). The terminal calls `close_requirements_by_file_creation` with `created_paths=None` and `close_requirements_by_runtime_stdout` with `gate_outcomes=None`; its comment says they "close nothing here (fail closed; the units' own pre-apply boundary is where these two are decided)". For an enforce unit that boundary never decides them. A FILE_CREATION or runtime-stdout requirement can therefore be closed by its deterministic record on direct and never on enforce (`TRACED`; the closers were not executed). |
+| | **(d) Final review.** Refusal fails an applied unit on direct and milestone, advisory on enforce (`GAP-A3-03`, `MEASURED` A3). |
+| | **(e) Approval subject.** Direct: the whole change, once. Enforce: each unit; no plan-level subject (`GAP-A3-05`). |
+| | **(f) When the workspace changes.** Direct and milestone: each unit commits to the real workspace as it passes; a later failure leaves earlier commits. Enforce: one terminal commit; a failure discards everything (`GAP-A1-09`). |
+| | **(g) Durable unit identity and resume.** Direct and milestone: a unit record, checkpoint selection, validated completion reuse. Enforce: no unit record (`work_unit_record` returns None), its own `ControlState`, and a resume that in production reuses nothing (`AUTH-A1-10`, `GAP-A4-06`). |
+| | Also by shape: the skills run shadow exists only on enforce (`BYP-A4-07`); the Current Project View "before" reaches only the direct Reviewer and spec check (registry `REQUIREMENT-VERIFIER-ENFORCE-PATH-NO-PROJECT-BEFORE-001`). |
+| Evidence | `MEASURED` P2, P3, P10 and A3 P1 to P3, P8; `TRACED` for (b), (c), (f), (g) |
+| GAP | "The plan was valid", "the requirements were checked", "the change was approved", "success" and "nothing was applied" each mean something different depending on a configuration flag. No document states the differences as a contract, and two sources disagree about which shape the product uses (`DOC-A4-02`). |
+| First wrong owner | No single function is wrong. The missing owner is the statement of result truth above both executors: each executor is the only authority for its own run and nothing requires them to agree |
+| Violated invariant | Direct and enforce establish compatible truth (Phase B cross-slice check) |
+| Affected stages | STAGE-PLAN-VALIDATION, STAGE-SUBTASK-SELECTION, STAGE-FINAL-VERIFICATION, STAGE-REVIEW, STAGE-APPLY, STAGE-CHECKPOINT, STAGE-TERMINAL |
+| Bypass paths | `BYP-A4-01`, `BYP-A4-14`, `BYP-A3-01`, `BYP-A3-12` |
+| REQUIRED CONTRACT (`PROPOSED`) | One table of result truths that both executors must satisfy: what must hold before "valid plan", "requirements verified", "approved", "applied", "success"; each truth with one deciding owner that both executors call. Merging the executors is one way to get there and not the requirement. Items (c), (d) and (e) need a decision each; (b) and (f) are legitimate design differences that must be stated, with the consequence for repair and for partial application |
+| IMPLEMENTATION DELTA (`PROPOSED`) | Smallest first: (c) give the enforce terminal the evidence the two closers need (per-unit created paths and runtime outcomes are already produced by the units) or state that those claims are closed only by other methods under enforce; then (d) and (e) per the owner's rulings. No new executor |
+| ACCEPTANCE PROOF (`PROPOSED`) | One scripted goal run through both shapes yields the same requirement truth and the same status word; negative control: a FILE_CREATION requirement closed on direct is closed on enforce; mutation: removing the shared owner from either executor fails a test |
+| Registry rows | `ENFORCE-EXECUTE-PLAN-CONVERGENCE-001`, `REQUIREMENT-VERIFIER-ENFORCE-PATH-NO-PROJECT-BEFORE-001` |
+| Severity (candidate) | P1 for the truth divergence (the enforce shape is what Project Setup turns on); the executor merge itself stays a P2 architecture item. Dependencies: `GAP-A3-01`, `GAP-A3-02`, `GAP-A3-03`, `GAP-A3-05`, `GAP-A1-09` |
+
+### GAP-A4-02 - Skill relevance has no authority below the goal, and the Planner and a unit can select different skills
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A4-08`, `AUTH-A4-09`. One predicate, two input texts: the user's goal for the Planner, the composed unit goal for each unit. A selected skill is rendered whole into every request |
+| Evidence | `MEASURED` P4; registry `SKILL-RELEVANCE-CONTEXT-SCOPE-001` (`MEASURED` in run 10, preserved) |
+| GAP | (1) The stated invariant "the Planner sees the same applicable skills the Developers will be given" does not hold when the Planner's own text names another skill, tag or library version. A cross-unit decision made by the Planner can then be contradicted by a rule the Planner never saw, or a unit can lose a skill the plan relied on. (2) No rule-level or unit-level applicability exists, so a test unit receives every production rule and the block is mandatory text in every request |
+| First wrong owner | `stage_analysis.py::analyze_work_unit` passes `ctx.goal` (the composed unit goal) to the selector; the selector itself is sound |
+| Violated invariant | One truth, one owner: skill applicability for a run is decided twice from different evidence; model text is evidence, never authority |
+| REQUIRED CONTRACT (`PROPOSED`) | The set of applicable skills is decided once per run from the goal of record and repository facts, and every unit receives a projection of that set. Applicability of a rule to a unit is declared by the skill (owner ruling 2026-11-14: authored, not lexical, filename or embedding retrieval, and not truncation) |
+| IMPLEMENTATION DELTA (`PROPOSED`) | Pass the goal of record (already available as `grounding_goal`) to the selector for an enforce unit; the authored relevance is a later, separate feature |
+| ACCEPTANCE PROOF (`PROPOSED`) | P4 as a test: the unit's selection equals the Planner's; mutation: selecting on the composed goal fails it |
+| Registry rows | `SKILL-RELEVANCE-CONTEXT-SCOPE-001` |
+| Severity (candidate) | P2 |
+
+### GAP-A4-03 - The knowledge gate takes a folder name as proof of skill coverage
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A4-05`: `os.listdir` of the skills directory, substring match of a library alias in the folder name |
+| Evidence | `MEASURED` P5: an empty folder `my-notes-on-ignite-core-outage` removes the gap for `org.apache.ignite:ignite-core`; `OPEN-ITEMS.md` OI-81 records the same measurement. `MEASURED` P11: the template Kriya itself scaffolds (`generate_skill_template`: no rule, unverified) removes it too |
+| GAP | A human gate is opened by something that is neither a loaded skill nor verified. Kriya creates such a folder itself: after a knowledge gap the CLI offers to scaffold one, and auto-accrual scaffolds one after a run that used a suggested dependency (`MUT-A4-11`), so the gate closes itself for later runs without any knowledge having been added (`BYP-A4-19`). When `paths.skills` is inside the workspace the folder is project-controlled, so a repository can suppress the gate that asks a person to confirm a knowledge risk. The unit-level analysis does detect "no skill exists" on loaded skills (`missing_skill_candidates`), but that only prompts, it does not stop |
+| First wrong owner | `KnowledgeGuard.check_goal` (it owns the coverage decision and does not consult the skill store) |
+| Violated invariant | Evidence binds to identity, nothing is transferred by name; UNKNOWN fails safely |
+| REQUIRED CONTRACT (`PROPOSED`) | Coverage = a loaded skill whose tags name the library and whose verification is Kriya's (`AUTH-A4-07`); anything else is "not covered" |
+| IMPLEMENTATION DELTA (`PROPOSED`) | The guard receives the engine's skills instead of a directory path. Scenario 04's reliance on the current behaviour with `offline_mode` (owner-accepted for that scenario) must be re-decided |
+| ACCEPTANCE PROOF (`PROPOSED`) | P5 as a test: an empty or unverified folder leaves the gap; a verified covering skill clears the structural gap |
+| Registry rows | `KNOWLEDGEGUARD-SKILL-IDENTITY-001` |
+| Severity (candidate) | P2 (registry P3): it is an authority input controlled by workspace bytes |
+
+### GAP-A4-04 - Text fetched from the web reaches model requests outside the untrusted fence
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A4-06`. Two routes. (1) Retry: `live_lookup.py::_augment_error_with_live_lookup` appends up to 2,000 characters of a fetched page per term to `state.error_context` under a plain "Reference material found" banner. (2) Skills: rules that SkillGapAgent extracted from a fetched page (or a human-supplied URL) are written into the skill and rendered in the conventions block, labelled "Unverified Rules" |
+| Evidence | `MEASURED` P7 for route 1 (no fence marker; the page text is outside any fence). Route 2 `TRACED` (`stage_analysis.py`, `render_skill_conventions`) |
+| GAP | The cross-cutting rule "learned or retrieved text stays inside the untrusted-context fencing" is not applied to live-lookup text. Route 1 places attacker-controllable page text at the head of the next Developer request. Route 2 passes it through a model first and persists it as skill rules |
+| First wrong owner | `_augment_error_with_live_lookup` (route 1). Route 2: `stage_analysis.py` renders newly extracted rules into `convention_prompt` |
+| Violated invariant | Model and retrieved text is evidence, never authority; untrusted text is fenced |
+| Bounded by | Web lookup is off by default and in the Project Setup profile; every query needs an authorization; route 2 also needs the person's review of the found references |
+| REQUIRED CONTRACT (`PROPOSED`) | Any text whose origin is a fetched page enters a request only through `untrusted_context.py::fence_untrusted_reference`; extracted rules stay unverified and fenced until promoted by a person or proven by a committed run |
+| IMPLEMENTATION DELTA (`PROPOSED`) | Fence the appended material in route 1; for route 2 decide whether same-run folding of new rules is kept (fenced) or dropped |
+| ACCEPTANCE PROOF (`PROPOSED`) | P7 as a test: the page text is inside the fence; the inventory test for bytes sources lists live lookup |
+| Registry rows | None (new). Related: `DESKTOP-LOOKUP-QUERY-APPROVAL-001` (A3) |
+| Severity (candidate) | P2 security, opt-in path. P1 if web lookup is part of a production profile (owed by A5) |
+
+### GAP-A4-05 - "Does the request require execution?" is a pattern match whose miss deletes verification
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A4-13`, `FR-A4-17` |
+| Evidence | `TRACED`; the fixed owner goal `MEASURED` by 7 committed tests |
+| GAP | The specific defect of `GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001` is fixed at the baseline: the owner goal is read as requiring runtime behaviour and the application is executed. The class remains: the reading has no UNKNOWN, a miss removes a Planner verifier that was right, and the result does not say "the application was not run" in a way that affects status. Run-verification without the requirement is advisory by design |
+| First wrong owner | None wrong for the measured goals; the authority for "what the user required" is a regular expression set because no semantic contract exists (`GAP-A2-01`) |
+| REQUIRED CONTRACT (`PROPOSED`) | Removal of a runtime verifier is recorded as a typed, result-visible fact ("runtime behaviour not required by the request: not executed"), and the semantic contract of `GAP-A2-01`, once it exists, is the input instead of the pattern set |
+| ACCEPTANCE PROOF (`PROPOSED`) | A corpus of goal wordings with expected readings (the registry row asks for it); a result field for the not-executed case |
+| Registry rows | `GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001` (stale for its stated defect, `DOC-A4-03`) |
+| Severity (candidate) | P2 |
+
+### GAP-A4-06 - An enforce resume compares the hash of a fresh Planner answer
+
+| | |
+|---|---|
+| AS-IS | `SM-A4-01`: every enforce invocation calls the Planner again; subtask states are reused only if the new raw plan's `content_hash()` equals the stored `current_plan_hash`. The hash covers every field, including `plan_id`, which is the run id (`build_engineering_plan_from_planner_output(plan_id=run_id)`) |
+| Evidence | `MEASURED` P9 (same subtasks, another `plan_id`: different hash); `TRACED` for the rest |
+| GAP | Reuse requires a model to reproduce its earlier plan byte for byte, and the resuming run to carry the same run id. Together with `AUTH-A1-10` (a production enforce run reuses nothing unless the earlier run already committed the whole plan) the subtask-resume path of enforce is not reachable in practice. It fails safe: the plan runs fresh |
+| UNKNOWN | Whether a resumed enforce run keeps the earlier run id was not established (`run_coordinator` not read) |
+| REQUIRED CONTRACT (`PROPOSED`) | Either state "enforce does not resume within a plan" as the contract and remove the unreachable branch, or persist the validated plan and resume against it (depends on `GAP-A1-02`, `GAP-A1-09`) |
+| Registry rows | None new; belongs with `GAP-A1-02` |
+| Severity (candidate) | P3 (dead capability, safe) |
+
+### GAP-A4-07 - Goal ambiguity is not represented
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A4-03` |
+| Evidence | `TRACED`; `MEASURED` P1 ("Make it better." is `REQ-1`); negative control: no producer of clarifications |
+| GAP | Nothing can say "this request has two readings" before a model picks one. The first place a reading is examined by a person is the verifier semantic review, after generation, and only when a typed channel exists |
+| First wrong owner | None exists; this is the same absence as `GAP-A2-01`, seen from intake |
+| REQUIRED CONTRACT (`PROPOSED`) | Part of the canonical semantic contract: an explicit "unresolved" state that blocks or records per policy, and the existing `clarifications` input as the resolution channel |
+| Registry rows | None new |
+| Severity (candidate) | P2, owner policy (whether Kriya asks, refuses or records) |
+
+### GAP-A4-08 - Planner-authored integration decisions bind other units with no review
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A4-12`, `BYP-A4-16`: a recorded decision is "AUTHORITATIVE for this stage" and overrides an applicable skill's alternatives |
+| Evidence | `TRACED` |
+| GAP | This is the one place Planner text is given authority over Developer output by design (SHARED-DECISION-AUTHORITY-001, owner ruling 2026-11-10). It is validated for form (a selection from its own menu, no conflict) and not for substance; no person sees it; attribution of a failure caused by a wrong decision is a known limit of the pipeline document |
+| REQUIRED CONTRACT (`PROPOSED`) | Record it as an intentional contract with its limits, or make the decision part of the semantic contract a person can review. Owner policy |
+| Registry rows | None |
+| Severity (candidate) | P3; intentional by owner ruling, listed so the authority matrix is complete |
+
+### Updates to gaps of earlier slices
+
+| Gap | What A4 adds |
+|---|---|
+| `GAP-A3-05` (P1 authority-bypass candidate by owner ruling of 2026-11-15) | **No aggregate authority in A4's scope.** Plan acceptance involves no person and no size or risk measure (`AUTH-A4-10`; search of `enforce_loop.py` between validation and the first unit). `risk_threshold_lines` has exactly one reader, `stage_apply.py`, evaluated per unit invocation. The decomposition that sets the subject of that trigger is authored by the Planner (`BYP-A4-10`). Reachability: only with `autonomy.mode: guardrails`; the packaged default and the Project Setup profile are human-in-the-loop (`MEASURED` P10), where every unit that wrote source is approved, still per unit and with no plan-level subject. Slice A5 still owes the tool, MCP and configuration side before the classification is final |
+| `GAP-A3-04` | The owner's split is recorded for Phase B: (A) runtime authorization binding, (B) audit binding; a sound commit guard does not weaken either |
+| `GAP-A3-01` | The Project Setup profile sets no requirement policy, so a desktop project created by Setup runs enforce with `record` / `record` (`MEASURED` P10). The production profile is owed by A5 |
+| `GAP-A3-02` | `GAP-A4-01` (b) and (c): the enforce terminal is the only place requirements are verified and two closers cannot fire there |
+| `GAP-A2-01` | `GAP-A4-05` and `GAP-A4-07` are the same absence seen from plan normalization and from intake |
+
+### Registry rows of slice A4 that did not need a gap of their own
+
+| Row | Result (label) |
+|---|---|
+| `PLAN-PRESERVED-REFERENCE-SOURCE-ATTRIBUTION-001` | Confirmed as a design limit, not a defect: per-source attribution in `planning_request.py::find_missing_grounded_production_artifacts`; Kriya refused and applied nothing. Function located, body not read (`TRACED` at the symbol) |
+| `PLAN-FORM-NORMALISATION-001` | Confirmed current: four normalizers exist (`plan_normalization.py`), none derives a unique requires-to-provides edge or the plan kind; `REFACTOR_BASELINE_MISSING` is still raised for a refactor route (`plan_validation.py`). `TRACED` |
+| `PLAN-EXTERNAL-PACKAGE-CAPABILITY-001` | Primary cause is model behaviour; the secondary repair-feedback fix is pinned by `tests/test_plan_external_package_capability_001.py` (`MEASURED`: 30 tests passed at the baseline). Still not exercised live, as the row says |
+| `ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001` | Confirmed current: `REJECTED_FALSE_PREMISE` is read by `requirement_disposition.py`, `authority_request.py` and the CLI option only; no planning or validation code reads a disposition (search). `TRACED`. Belongs with `GAP-A4-01` and the verified-no-change rows of A2 |
+| `SKILL-WORKSPACE-PERSISTENT-VERIFICATION-ATTESTATION-001` | Confirmed: a workspace skill's verification is run-local (`MEASURED` P8, `SM-A4-04`). Future feature by owner decision |
+| `SKILL-RULE-PROVENANCE-PROJECT-SUPPLIED-001` | Confirmed current (`MEASURED` P8): `BYP-A4-06`. The effect is prompt labelling; it grants no write, tool or approval authority. It is still model-visible instruction text from the repository outside the fence |
+| `SKILL-QPID-RULE-DOCTOR-ADVICE-STALE-001` | Confirmed current: `skills/qpid/rules.txt` line 20 still says "or run `kriya doctor` if none is given". A skill-content item |
+| `GOAL-STATED-JAVA-VERSION-TOOLCHAIN-AUTHORITY-001` | Confirmed current: `workflow/toolchain.py` states the goal-stated JDK handed to the toolchain owner is "Always None today"; `jdk_home_for_version` has no caller (search). An ownership gap by owner ruling: no heuristic. Slice A5 owns toolchain authority |
+| `JAVA-DEVELOPER-WRONG-PACKAGE-PATH-001` | Confirmed: no check of a Java package declaration against its directory exists (search for a reason code: none). Model behaviour; Kriya failed closed. A candidate improvement, not a defect |
+| `LOCALIZATION-DEVELOPER-PATH-OVERLOAD-001` | Not characterized further: `graph_retrieval.py::_code_intelligence_candidates` shows no fold by lookup key in its first 30 lines; the registry itself says no Developer-path loss was measured. Retrieval is slice A6 material |
+| `GUI-SKILLS-BUILD-001`, `GUI-SKILLS-MUTATION-001` | Confirmed current: KUP exposes `skills.list` and `skills.describe` only; `skills/service.py` is read-only; creation, approval, promotion and unverify are CLI commands (`cli.py`). Future features |
+| `KERNEL-ATTEMPT-CONTEXT-PLACEMENT-001` | Confirmed: `AttemptContext` is in `workflow/attempt.py`. A decomposition item (`OPEN-ITEMS.md` OI-46) |
+| `CLI-RESUME-HINT-DESIGN-STAGE-STOP-TEXT-001` | Confirmed current: `cli.py` still prints "Checkpoint saved" and "[GENERATION BUDGET EXHAUSTED]" in the failure branches (strings present at lines 3699, 3769, 4852, 4880); the conditions were not re-read. Message accuracy |
+| `LSP-GROUNDING-CONSUMER-CHAIN-DEAD-001` | Confirmed: `tools/lsp.py::JdtlsClient.start` is the typed refusal. Dormant by owner decision |
+
+Rows handed over by A3 and settled here:
+
+| Row | Result |
+|---|---|
+| `GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001` | **Stale for its stated defect** (`MEASURED`: the row's own reproducer file now asserts the opposite and passes, 7 tests). The class is `GAP-A4-05` |
+| `REQUIREMENT-VERIFIER-ENFORCE-PATH-NO-PROJECT-BEFORE-001` (an A2 row) | Belongs to `GAP-A4-01`. Its "blocking" text ("the desktop path is the direct path; the enforce path is not used by the demo") is contradicted by the Project Setup profile (`DOC-A4-02`) |
+
+### Open items A4 hands on
+
+- A5: `BYP-A4-07` (skill writes and Git commits into a skills root inside the workspace on the direct and milestone
+  shapes; whether the workspace write gate covers the skills directory); whether a desktop launch can confirm a
+  knowledge gap; the requirement policy and web-lookup setting of the production profile; the rest of the
+  `GAP-A3-05` trace (tools, MCP, configuration); `GOAL-STATED-JAVA-VERSION-TOOLCHAIN-AUTHORITY-001`.
+- A6: STAGE-GENERATION, the Developer request itself, including where `error_context` and the conventions block sit
+  (`BYP-A4-04`); `LOCALIZATION-DEVELOPER-PATH-OVERLOAD-001`; an audit event per outbound lookup query.
+- Phase B: whether a resumed enforce run keeps its run id (`GAP-A4-06`).
+- Phase D (owner policy), added by A4: `GAP-A4-01` items (c), (d), (e); `GAP-A4-07`; `GAP-A4-08`; the Scenario-04
+  reliance in `GAP-A4-03`.
+
+### Documents reconciled in A4
+
+| ID | Document | Claim | Classification (label) |
+|---|---|---|---|
+| DOC-A4-01 | `handover/claude-context/generation-pipeline.md`, "Shared decisions across subtasks" and the comment in `skill_conventions.py` | The Planner sees the same applicable skills the Developers are given | PARTIALLY CURRENT: the same two functions are used (`TRACED`); the same set is not guaranteed because the inputs differ (`MEASURED` P4) |
+| DOC-A4-02 | Registry `REQUIREMENT-VERIFIER-ENFORCE-PATH-NO-PROJECT-BEFORE-001` ("the desktop path is the direct path") versus `application/project_init.py` ("this profile turns the enforced workflow on") | Which shape the desktop product runs | The registry text is STALE / CONTRADICTED BY CODE for a folder initialized by Project Setup; it holds for a folder with no configuration (`MEASURED` P10) |
+| DOC-A4-03 | Registry `GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001` and `OPEN-ITEMS.md` OI-93 ("reproduced ... the run ends success with nothing executed") | The owner goal is read as not requiring runtime behaviour | IMPLEMENTED THEN SUPERSEDED: the reproducer test asserts the corrected reading and passes (`MEASURED`) |
+| DOC-A4-04 | Registry `ENFORCE-EXECUTE-PLAN-CONVERGENCE-001` ("not a defect ... class B, orchestration only, no parallel decider") versus `OPEN-ITEMS.md` OI-113 ("authority / security defect (Class A) ... owner decision: one authoritative execution path; measured duplicate order/lifecycle/dependency/terminal logic") | The class of the convergence item | The two documents CONTRADICT each other. Code: the terminal commit decision is shared (the registry is right about that one decider), and seven result-bearing facts differ (`GAP-A4-01`), which supports OI-113's class. Neither is rewritten here |
+| DOC-A4-05 | `handover/claude-context/generation-pipeline.md` line 20 ("ONE executor, `plan_executor.execute_plan()`" for direct and milestone; the enforce subtask loop passes its `WorkUnitInvocation`) | Executor ownership | CURRENT AND CONSISTENT (`TRACED`); it does not claim that enforce runs through `execute_plan` |
+| DOC-A4-06 | `kriya/workflow/terminal_gate_service.py` comment at the `file_creation` / `runtime_stdout` closers ("the units' own pre-apply boundary is where these two are decided") | Where those two claims are closed under enforce | CONTRADICTED BY CODE for enforce units: they have no requirement set, so their pre-apply boundary runs no closer (`GAP-A4-01` (c)) |
+| DOC-A4-07 | `kriya/config/config.py::WorkflowControllerConfig` docstring ("TOOL-tagged subtasks are refused outright") | Enforce and TOOL subtasks | STALE: TOOL subtasks execute through the governed path since TOOL-001 (`enforce_loop.py` comment at the validation call). Slice A5 owns the tool path |
+| DOC-A4-08 | `docs/user_guide.md` (requirements: "The Planner and the Architect are shown the list and asked to cite the ids they serve") | Requirement lineage | CURRENT AND CONSISTENT with `stage_planning.py` and the enforce request (`TRACED`); the Architect half was not read |

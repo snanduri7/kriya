@@ -1,0 +1,23 @@
+control 'clarifications=': found in [] (no producer supplies requirement clarifications)
+control 'activate_run_shadow(': found in ['kriya/skills/skill.py', 'kriya/workflow/enforce_loop.py'] (only the enforce loop starts the skills run shadow)
+control 'persist_run_learning(': found in ['kriya/skills/skill.py', 'kriya/workflow/enforce_loop.py'] (only the enforce loop persists run learning)
+control 'risk_threshold_lines': found in ['kriya/config/authority.py', 'kriya/config/config.py', 'kriya/workflow/stage_apply.py'] (the size trigger has one reader, per unit)
+control 'generate_skill_template(': found in ['kriya/cli.py', 'kriya/tools/knowledge.py', 'kriya/workflow/stage_apply.py'] (two callers write a skill template without the engine)
+control 'check_enabled': found in ['kriya/config/authority.py', 'kriya/config/config.py', 'kriya/workflow/stage_architecture.py'] (knowledge.check_enabled gates stage 2A only)
+control 'skill_applies_to_goal(': found in ['kriya/workflow/skill_conventions.py', 'kriya/workflow/skill_extraction.py', 'kriya/workflow/stage_analysis.py'] (two callers of the skill selector)
+control '.check_goal(': found in ['kriya/workflow/stage_architecture.py', 'kriya/workflow/stage_knowledge_guard.py', 'kriya/workflow/workflow_controller.py'] (three callers of the knowledge gate (the first run of this check found the third))
+control 'requirement_goal=': found in ['kriya/workflow/plan_executor.py'] (only WorkUnitInvocation.for_unit assigns a requirement goal)
+control 'PlanSourceKind.STRUCTURED,': found in ['kriya/workflow/enforce_loop.py'] (only the enforce loop builds a STRUCTURED invocation)
+absent 'fence_untrusted_reference' in kriya/workflow/live_lookup.py: True (live-lookup text is not fenced where it is produced)
+absent 'fence_untrusted_reference' in kriya/workflow/retry_strategy.py: True (nor where it is appended to the error context)
+absent 'REJECTED_FALSE_PREMISE' in kriya/workflow/plan_validation.py: True (plan validation reads no disposition)
+absent 'REJECTED_FALSE_PREMISE' in kriya/workflow/enforce_loop.py: True (the enforce loop reads no false-premise disposition)
+absent 'REJECTED_FALSE_PREMISE' in kriya/workflow/plan_normalization.py: True (plan normalization reads no disposition)
+absent 'SkillEngine' in kriya/tools/knowledge.py: True (the knowledge gate never consults the skill store)
+absent 'yaml.safe_load' in kriya/tools/knowledge.py: True (the knowledge gate never reads a skill's metadata)
+absent 'requirement_unverified_policy' in kriya/application/project_init.py: True (Project Setup sets no requirement policy)
+validate_plan call sites: ['kriya/workflow/enforce_loop.py', 'kriya/workflow/file_resolution.py', 'kriya/workflow/obligations.py', 'kriya/workflow/owner_recovery.py', 'kriya/workflow/plan_revision.py', 'kriya/workflow/plan_schema.py', 'kriya/workflow/plan_validation.py', 'kriya/workflow/planner_repair.py', 'kriya/workflow/planner_validation.py', 'kriya/workflow/shadow_mode.py', 'kriya/workflow/subtask_checkpoint.py']
+migration_mode holders: ['kriya/cli.py', 'kriya/workflow/shadow_mode.py', 'kriya/workflow/workflow_controller.py', 'kriya/workflow/workflow_types.py']
+classify_plan_completeness call sites: ['kriya/workflow/file_resolution.py', 'kriya/workflow/planner_repair.py', 'kriya/workflow/planner_validation.py', 'kriya/workflow/stage_planning.py']
+jdk_home_for_version holders: ['kriya/platform/toolchain_locator.py']
+files=49 symbols=218 controls=18 problems=0

@@ -1,0 +1,97 @@
+{
+  "ENFORCE-EXECUTE-PLAN-CONVERGENCE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "A4 mandatory row: confirmed current and larger than 'orchestration only'. TRACED AUTH-A4-14: two executors (plan_executor.execute_plan for direct and milestone; enforce_loop.EnforceLoop for the structured plan), sharing the unit primitive, TerminalGateService, the commit service, the tool-membership validator and the skill selector. They decide seven result-bearing facts differently (GAP-A4-01 a-g): plan validity (MEASURED P3), where requirements are verified, two closers unreachable under enforce (TRACED; MEASURED P2 for the missing requirement set), final review authority (GAP-A3-03), approval subject (GAP-A3-05), when the workspace changes (GAP-A1-09), durable unit identity and resume. Project Setup turns the enforce shape on (MEASURED P10). The disposition is for the truth divergence: one statement of result truth both executors satisfy; merging the executors stays a design option (P2 architecture item). The registry (class B, not a defect) and OPEN-ITEMS OI-113 (Class A, owner decision 'one authoritative execution path') contradict each other: DOC-A4-04. Implementation required: yes, order after GAP-A3-01 and the owner rulings on GAP-A3-03 and GAP-A3-05. Disposition is a proposal for Phase D."
+  },
+  "PLAN-PRESERVED-REFERENCE-SOURCE-ATTRIBUTION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "Design limit, not a defect: per-source attribution in planning_request.find_missing_grounded_production_artifacts; Kriya refused and applied nothing. TRACED at the symbol (body not read). Row AUTH-A4-10. A plan-wide preservation declaration would be an extension needing an owner decision. Implementation required: no."
+  },
+  "PLAN-FORM-NORMALISATION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (TRACED): plan_normalization.py has four normalizers (same-file owners, immutable-test redirect, verification contracts, verification scope); none derives a unique requires-to-provides edge or the plan kind; REFACTOR_BASELINE_MISSING is still raised for a refactor route. Fails closed (plan refused after 2 repairs): efficiency and completion, not safety. AUTH-A4-10, AUTH-A4-16, SM-A4-01. OPEN-ITEMS OI-95 classes it A. Disposition left for Phase B (it depends on whether Planner-form friction is a production blocker)."
+  },
+  "PLAN-EXTERNAL-PACKAGE-CAPABILITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Primary cause is model behaviour (the registry's own classification). The secondary repair-feedback fix is pinned: tests/test_plan_external_package_capability_001.py re-run at the baseline, 30 passed (MEASURED, evidence/a4/a4_tests_output.txt). Not exercised live, as the row says. FR-A4-09. The owner decision on a plan-contract home for third-party libraries is still open; disposition in Phase B."
+  },
+  "ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "Confirmed current (TRACED, negative control in evidence/a4/check_citations_a4.py): REJECTED_FALSE_PREMISE is read by requirement_disposition.py, authority_request.py and the CLI option only; plan_validation.py, plan_normalization.py and enforce_loop.py read no disposition, so a dispositioned false premise does not constrain the plan. OPEN-ITEMS OI-115 records the owner decision (a sealed false premise is a scoped negative constraint). Latent false-success exposure per the row; depends on the verified-no-change rows of A2 and on GAP-A4-01. Disposition is a proposal for Phase D."
+  },
+  "KNOWLEDGEGUARD-SKILL-IDENTITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "Confirmed current and wider than the row. MEASURED P5: an empty folder whose name contains the artifact id removes the knowledge gap. MEASURED P11: the template KnowledgeGuard.generate_skill_template itself writes (no rule, unverified; auto-accrual in stage_apply.py and the CLI scaffold prompt) removes it too, so the gate closes itself for later runs. The gate never consults the skill store (negative control). When paths.skills is inside the workspace the folder is project-controlled. GAP-A4-03, AUTH-A4-05, BYP-A4-03, BYP-A4-19, MUT-A4-11. Registry priority P3; A4 proposes P2 because a human gate is opened by workspace-controlled bytes. Scenario 04's owner-accepted reliance (offline mode) must be re-decided. Disposition is a proposal for Phase D."
+  },
+  "SKILL-RELEVANCE-CONTEXT-SCOPE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed current (TRACED AUTH-A4-08, AUTH-A4-09): selection is per goal text, rendering is the whole skill, the block is mandatory text; no rule-level or unit-level relevance authority exists and no embedding retrieval is implemented or proposed. The row's subject (an authored relevance authority) is a future feature by owner ruling of 2026-11-14. NEW in A4 and not part of that disposition: the Planner and a unit can select different skills because the unit's selection reads the composed unit goal (MEASURED P4) - GAP-A4-02 item 1, a fix candidate (pass the goal of record to the selector)."
+  },
+  "SKILL-WORKSPACE-PERSISTENT-VERIFICATION-ATTESTATION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed: a workspace skill cannot attest its own verification or gap acknowledgement (MEASURED P8: claim true, honoured false); verification of a workspace skill is run-local (SM-A4-04, AUTH-A4-07). Fail closed today; the attestation is a future feature by owner decision."
+  },
+  "SKILL-RULE-PROVENANCE-PROJECT-SUPPLIED-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (MEASURED P8): a workspace skill's rule with no provenance record is rendered under the trusted 'Rules:' header, outside the untrusted fence, and the Planner is told not to contradict the rules. Effect is prompt content and labelling; no write, tool or approval authority (the W3-1 census in the row). BYP-A4-06, AUTH-A4-07, AUTH-A4-09. Disposition in Phase B together with GAP-A4-04 (which text may sit outside the fence) and the attestation row."
+  },
+  "SKILL-QPID-RULE-DOCTOR-ADVICE-STALE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current: skills/qpid/rules.txt line 20 still says 'or run kriya doctor if none is given'. Skill content, changed only with the skill's re-verification (the row's own rule). Not an architecture item; disposition in Phase B."
+  },
+  "GOAL-STATED-JAVA-VERSION-TOOLCHAIN-AUTHORITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (TRACED): workflow/toolchain.py states the goal-stated JDK handed to the toolchain owner is 'Always None today'; platform/toolchain_locator.jdk_home_for_version has no caller (negative control). An ownership gap by owner ruling (no heuristic over goal text). The authority choice (requirement-contract field, plan field or operator configuration) is owner policy; slice A5 owns toolchain and configuration authority and carries the disposition."
+  },
+  "JAVA-DEVELOPER-WRONG-PACKAGE-PATH-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Model behaviour (path hallucination); Kriya failed closed and applied nothing. TRACED: no check of a Java package declaration against its directory exists (no such reason code in kriya/). The candidate improvement (refuse such a CREATE before the compile gate) is a new capability, not a defect of an existing rule."
+  },
+  "LOCALIZATION-DEVELOPER-PATH-OVERLOAD-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "disposition": "-",
+    "notes": "Not characterized in A4: graph_retrieval._code_intelligence_candidates shows no fold by lookup key in its first 30 lines, and the registry itself records no measured Developer-path loss. Missing evidence: a Developer-context trace in which a distinct relevant file is lost to overload flooding, or a read of the whole candidate function. Handed to slice A6 with the retrieval and context-budget rows."
+  },
+  "GUI-SKILLS-BUILD-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed current (TRACED): no operation builds a skill from a document, folder or URL; kriya skills create writes a skeleton; KUP exposes skills.list and skills.describe only. AUTH-A4-09 limitation. A typed, provenance-recording build operation is a new capability."
+  },
+  "GUI-SKILLS-MUTATION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed current (TRACED): creation, approval, promotion and unverify are CLI commands (cli.py skills_create / skills_approve / skills_promote / skills_unverify); skills/service.py is read-only; selection is automatic (AUTH-A4-08). Typed lifecycle actions are a new capability."
+  },
+  "KERNEL-ATTEMPT-CONTEXT-PLACEMENT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "Confirmed: AttemptContext is in workflow/attempt.py. A measured decomposition deviation (OPEN-ITEMS OI-46: moving it joins the all-import cycle), with no authority or result truth involved."
+  },
+  "CLI-RESUME-HINT-DESIGN-STAGE-STOP-TEXT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current at the string level: cli.py still prints 'Checkpoint saved' and '[GENERATION BUDGET EXHAUSTED]' in its failure branches (lines 3699, 3769, 4852, 4880); the branch conditions were not re-read. A Planner-stage deadline is a typed stop on both shapes (FR-A4-11). Message accuracy only; the result fields are truthful. Disposition in Phase B with the other CLI message row (A5)."
+  },
+  "LSP-GROUNDING-CONSUMER-CHAIN-DEAD-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed: tools/lsp.py JdtlsClient.start is the typed refusal, so the consumer chain cannot run. Dormant by owner decision of 2026-10-27 (keep); it owns no current approval, containment, evidence or result decision."
+  },
+  "GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "disposition": "DISPROVED_WITH_EVIDENCE",
+    "notes": "Handed over by A3 and settled in A4. The stated defect no longer exists at the baseline: the row's own reproducer, tests/test_greenfield_runtime_verification_dropped.py, now asserts that the owner goal IS read as requiring runtime behaviour and that the application is executed; re-run, 7 passed (MEASURED, evidence/a4/a4_tests_output.txt). The registry row and OPEN-ITEMS OI-93 still describe the old behaviour (DOC-A4-03). The class remains and is a separate gap: the reading is a pattern match with no UNKNOWN, and a miss removes a correct Planner verifier (GAP-A4-05, AUTH-A4-13, FR-A4-17)."
+  }
+}

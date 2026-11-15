@@ -7,16 +7,16 @@ Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`, t
 
 | Stage ID | Stage | Owning slice | Status |
 |---|---|---|---|
-| STAGE-GOAL-INTAKE | Goal intake | A4 | pending |
+| STAGE-GOAL-INTAKE | Goal intake | A4 | **filled** (`AUTH-A4-01..03`, `GAP-A4-07`) |
 | STAGE-SEMANTIC-CONTRACT | Goal / semantic contract authority | A2 | **filled** (`AUTH-A2-01..05`, `GAP-A2-01`) |
-| STAGE-KNOWLEDGE | Knowledge / Skills | A4 | pending |
-| STAGE-PLANNING | Planning | A4 | pending |
-| STAGE-PLAN-VALIDATION | Plan validation | A4 | pending |
+| STAGE-KNOWLEDGE | Knowledge / Skills | A4 | **filled** (`AUTH-A4-05..09`, `SM-A4-03`, `SM-A4-04`, `GAP-A4-02..04`) |
+| STAGE-PLANNING | Planning | A4 | **filled** (`AUTH-A4-10..12`) |
+| STAGE-PLAN-VALIDATION | Plan validation | A4 | **filled** (`AUTH-A4-10`, `AUTH-A4-11`, `AUTH-A4-13`, `AUTH-A4-16`, `SM-A4-01`, `SM-A4-02`, `GAP-A4-05`) |
 | STAGE-WORKSPACE | Workspace / root authority | A5 | pending |
-| STAGE-SUBTASK-SELECTION | Subtask selection (direct, milestone, enforce) | A4 | A1 part below |
-| STAGE-CONTEXT | Context construction | A4 | pending |
+| STAGE-SUBTASK-SELECTION | Subtask selection (direct, milestone, enforce) | A4 | **filled** (`AUTH-A4-04`, `AUTH-A4-14`, `AUTH-A4-15`, `GAP-A4-01`; A1 part below) |
+| STAGE-CONTEXT | Context construction | A4 (skill, plan and goal context), A6 (the Developer request and its budget) | A4 part **filled** (`AUTH-A4-09`, `AUTH-A4-12`); the request itself is owed by A6 |
 | STAGE-MODEL-RUNTIME | Runtime / model selection and qualification | A6 | pending |
-| STAGE-GENERATION | Generation | A3 (candidate formation), A4 / A6 (the Developer request) | A3 part filled (`AUTH-A3-01`); the request itself is owed |
+| STAGE-GENERATION | Generation | A3 (candidate formation), A6 (the Developer request) | A3 part filled (`AUTH-A3-01`); the request itself is owed by A6 (A4 traced what feeds it, not its assembly) |
 | STAGE-CANDIDATE | Candidate formation | A3 | **filled** (`AUTH-A3-01`, `AUTH-A3-02`, `SM-A3-01`, `GAP-A3-04`) |
 | STAGE-REVIEW | Review / source approval | A3 | **filled** (`AUTH-A3-03..05`, `AUTH-A3-12`, `AUTH-A3-13`, `SM-A3-02`, `GAP-A3-05`, `GAP-A3-06`) |
 | STAGE-GATES | Deterministic gates | A3 | **filled** (`AUTH-A3-06..08`, `GAP-A3-02`) |
@@ -196,3 +196,46 @@ flowchart TD
 
 Not traced in A3 and still owed: STAGE-GENERATION (the Developer request itself: prompt composition, response
 protocol, model dispatch). A3 starts at the parsed answer. Slices A4 (context) and A6 (dispatch) own it.
+
+## STAGE-GOAL-INTAKE, STAGE-KNOWLEDGE, STAGE-PLANNING, STAGE-PLAN-VALIDATION, STAGE-SUBTASK-SELECTION, STAGE-CONTEXT (A4) - AS-IS flow
+
+Every step cites the row that holds the fact; nothing is defined here. The 21-field stage documents and the
+integration contracts (Goal -> Semantic Contract, Semantic Contract -> Planner / Developer / Verifier) are derivative
+views written after slice A6, from these rows.
+
+```mermaid
+flowchart TD
+    G[Goal text from the operator<br/>AUTH-A4-01] --> M{workflow_controller enabled<br/>and mode enforce?<br/>AUTH-A4-04}
+    M -- no: direct --> D0[One-unit ExecutionPlan through execute_plan<br/>AUTH-A4-14]
+    D0 --> D1[Unit: requirement set and contract inside the unit<br/>AUTH-A4-02, AUTH-A4-15]
+    D1 --> D2{Knowledge gate, stage 0<br/>AUTH-A4-05, SM-A4-03}
+    D2 -- gap, unconfirmed --> X1[knowledge_gap<br/>FR-A4-02]
+    D2 -- pass --> D3[Analysis: project view, goal facts, skills selected and rendered,<br/>skill-gap prompt, optional live lookup<br/>AUTH-A4-06..09]
+    D3 --> D4[Planner, prose plan with a structured block<br/>AUTH-A4-11, SM-A4-02]
+    D4 -- not complete --> X2[planner_output_*<br/>FR-A4-06..08]
+    D4 -- complete --> D5[Architect; stage 2A knowledge scan of the design; Developer loop<br/>FR-A4-19, slices A1 to A3]
+    M -- yes: enforce --> E0{Knowledge gate over the user's goal<br/>AUTH-A4-05}
+    E0 -- gap, unconfirmed --> X1
+    E0 -- pass --> E1[Requirement set, contract compiled and sealed, baseline authorities<br/>AUTH-A4-02, AUTH-A4-15]
+    E1 -- refused / unavailable / no mutation required --> X3[typed stop or success without a model call<br/>FR-A4-04, FR-A4-05]
+    E1 --> E2[Authoritative Planner request: goal, candidates, goal facts,<br/>requirements, applicable skills, fenced reference]
+    E2 --> E3[Parse, normalize, validate, at most 2 repairs<br/>AUTH-A4-10, AUTH-A4-13, SM-A4-01]
+    E3 -- exhausted --> X4[needs_review PLANNING_ERROR<br/>FR-A4-09]
+    E3 -- valid --> E4[Plan document 'approved', no person asked; sandbox; skills run shadow<br/>MUT-A4-07]
+    E4 --> E5[Per unit: composed unit goal, semantic context, planned files as write scope<br/>AUTH-A4-12]
+    E5 --> E6[Unit primitive with predetermined plan and empty design:<br/>stage 0 on the unit goal, analysis re-selects skills, Developer loop<br/>BYP-A4-02, BYP-A4-12]
+    E6 --> E7[Terminal gates and one commit<br/>SM-A3-04]
+```
+
+| Stage | Owner today | Decides | Does not decide | Rows |
+|---|---|---|---|---|
+| STAGE-GOAL-INTAKE | The operator's text; `requirements.py`, `requirement_contract.py` | The goal of record, its digest, the closed requirement set | Whether the goal is ambiguous; which statements are context | `AUTH-A4-01..03`, `GAP-A4-07` |
+| STAGE-KNOWLEDGE | `tools/knowledge.py::KnowledgeGuard`; `skills/skill.py::SkillEngine`; `skill_conventions.py`; `live_lookup.py`, `outbound_lookup.py`, `policy/egress.py` | Whether a knowledge gap stops the run; which skills exist and are verified; which apply; what leaves as a search query | Whether a skill covers a library (a folder name does); rule-level applicability | `AUTH-A4-05..09`, `SM-A4-03`, `SM-A4-04`, `GAP-A4-02..04` |
+| STAGE-PLANNING | Direct: `stage_planning.py`. Enforce: the planning loop of `enforce_loop.py` with `planning_request.py` | The Planner request; bounded repair | Plan validity | `AUTH-A4-10`, `AUTH-A4-11`, `AUTH-A4-12` |
+| STAGE-PLAN-VALIDATION | Direct: `file_resolution.py::classify_plan_completeness`. Enforce: normalizers, `plan_validation.py::validate_plan` and five further checks | Whether the plan may proceed | A person's agreement (none is asked); on direct, the plan's structure | `AUTH-A4-10`, `AUTH-A4-11`, `AUTH-A4-13`, `AUTH-A4-16`, `SM-A4-01`, `SM-A4-02`, `GAP-A4-05` |
+| STAGE-SUBTASK-SELECTION | Direct and milestone: `plan_executor.py::execute_plan`. Enforce: `enforce_loop.py` | Unit order, unit status, plan completion | Result truth across shapes | `AUTH-A4-14`, `AUTH-A4-15`, `GAP-A4-01`; A1 part `AUTH-A1-10` |
+| STAGE-CONTEXT | `stage_analysis.py` (convention prompt); `planning_request.py` (unit goal, semantic and constraint context) | What Planner text and skill text a unit's models see, and with what label | The Developer request itself | `AUTH-A4-09`, `AUTH-A4-12`, `BYP-A4-04`, `BYP-A4-06`, `BYP-A4-12` |
+
+Not traced in A4 and still owed: STAGE-GENERATION (the Developer request: `attempt.py`, `retry_prompts.py`,
+`prompt_composition.py`, the context budget) goes to slice A6 with the dispatch and budget rows; the Architect stage
+beyond its stage 2A and 2B blocks; `milestones.py`; `shadow_mode.py`; `plan_revision.py`; `triage.py`.

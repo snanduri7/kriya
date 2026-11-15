@@ -48,14 +48,15 @@ evidence only: runtime code, tests, goldens, the registry and sealed run evidenc
 
 | File | Content | Status |
 |---|---|---|
-| `00-END-TO-END-LIFECYCLE.md` | Stage index and the end-to-end flow | A1, A2, A3 stages filled; others pending |
-| `01-AUTHORITY-MATRIX.md` | Who decides each truth | A1, A2, A3 rows (A3 rows carry the full field set) |
-| `02-STATE-MACHINE.md` | States and transitions | A1, A2, A3 rows |
-| `03-MUTATION-AUTHORITY.md` | Every mutation and its authorization path | A1, A2, A3 rows |
-| `04-FAILURE-RECOVERY-MATRIX.md` | Failure source to terminal outcome | A1, A2, A3 rows |
-| `05-INTEGRATION-BYPASS-MAP.md` | Side routes and bypasses | A1, A2, A3 rows |
-| `GAP-LEDGER.md` | Contradictions and gaps found by each slice | A1, A2, A3 sections |
-| `REGISTRY-COVERAGE.md` | One row per non-closed registry row | 55 of 141 reconciled, 7 need characterization (handed to A4, A5, A6 with the missing evidence named), 79 pending (slices A4 to A6) |
+| `00-END-TO-END-LIFECYCLE.md` | Stage index and the end-to-end flow | A1 to A4 stages filled; A5, A6 pending |
+| `01-AUTHORITY-MATRIX.md` | Who decides each truth | A1 to A4 rows (A3 and A4 rows carry the full field set) |
+| `02-STATE-MACHINE.md` | States and transitions | A1 to A4 rows |
+| `03-MUTATION-AUTHORITY.md` | Every mutation and its authorization path | A1 to A4 rows |
+| `04-FAILURE-RECOVERY-MATRIX.md` | Failure source to terminal outcome | A1 to A4 rows |
+| `05-INTEGRATION-BYPASS-MAP.md` | Side routes and bypasses | A1 to A4 rows |
+| `GAP-LEDGER.md` | Contradictions and gaps found by each slice | A1 to A4 sections |
+| `REGISTRY-COVERAGE.md` | One row per non-closed registry row | 73 of 141 reconciled, 7 need characterization (handed to A5 and A6 with the missing evidence named), 61 pending (slices A5 and A6) |
+| `evidence/a4/` | Probes P1 to P11 and output, 37 committed tests, citation check with 18 negative controls, the A4 coverage entries | complete |
 | `evidence/a3/` | Probes P1 to P8 and output, 2 committed tests, citation and negative-control check, the A3 coverage entries | complete |
 | `evidence/a1/` | Probe scripts and their output for slices A1 and A1b; the coverage generator and the one overrides file it reads | complete |
 | `evidence/a2/` | Probe P1 to P10 and output, 7 committed tests, citation check, the A2 coverage entries and the merge script | complete |
@@ -68,7 +69,7 @@ evidence only: runtime code, tests, goldens, the registry and sealed run evidenc
 | A1 | Retry, blocker identity, allowance, checkpoint/resume | Complete (A1 `82eb96c`, A1b). 21 of 21 registry rows examined: 19 reconciled, 2 `NEEDS_CHARACTERIZATION` with the exact missing evidence and the owning slice (A2, A3), 0 pending. Gaps `GAP-A1-01` to `GAP-A1-09`. Four statements of the A1 checkpoint were corrected (gap ledger, "Corrections") |
 | A2 | Semantic contract, verifier identity/specification/authority, attribution | Complete (2026-11-15). 13 of 13 registry rows examined (12 reconciled, 1 stale bookkeeping) and the row A1 handed over resolved as superseded. Mandatory row `GENERATED-VERIFIER-CONTRACT-AUTHORITY-001`: decision C, the row conflates verifier authority (closed by WS3, residual `GAP-A2-02`) with semantic-contract authority (absent, `GAP-A2-01`). Gaps `GAP-A2-01` to `GAP-A2-03`. Handed on: Planner criteria rendering and direct/enforce divergence (A4); the policy a real launch runs under (A5); `BYP-A2-07` guard condition and requirement closure (A3). Documents reconciled: `DOC-A2-01..05` in the gap ledger |
 | A3 | Candidate, review/approval, apply, replay, terminal gate, final result | Complete (2026-11-15). 28 of 28 registry rows examined (21 reconciled or stale, 7 handed to A4/A5/A6 as `NEEDS_CHARACTERIZATION` with the missing evidence) and the row A1 handed over characterized. Four mandatory rows decided: success is reported with open requirements under the default policies (`GAP-A3-01`, measured); no repair follows an enforce terminal gate failure (`GAP-A3-02`, traced); a refused final review fails an applied unit on the direct and milestone path and is advisory under enforce, without discarding other units' work (`GAP-A3-03`, measured); the approval record carries no candidate digest and no record links an approval to the committed bytes (`GAP-A3-04`, measured). New: under enforce the approval subject is the unit, never the plan candidate (`GAP-A3-05`). Gaps `GAP-A3-01` to `GAP-A3-07`; documents `DOC-A3-01..06`. Not traced: the Developer request itself (STAGE-GENERATION), tool and MCP writers (A5) |
-| A4 | Goal intake, knowledge/Skills, planning, plan validation, direct vs enforce | Not started |
+| A4 | Goal intake, knowledge/Skills, planning, plan validation, direct vs enforce | Complete (2026-11-15). 18 of 18 registry rows examined (17 reconciled, 1 handed to A6 as `NEEDS_CHARACTERIZATION`) and the row A3 handed over settled as stale. Mandatory row `ENFORCE-EXECUTE-PLAN-CONVERGENCE-001`: confirmed, and larger than "orchestration only": the two executors decide seven result-bearing facts differently, among them plan validity (measured), where requirements are verified, and two requirement closers that cannot fire under enforce (`GAP-A4-01`). Project Setup turns the enforce shape on, a folder with no configuration runs direct (measured). Skills: fact authority, relevance, rendering and user experience are separate rows (`AUTH-A4-07..09`); the Planner and a unit can select different skills (`GAP-A4-02`, measured). The knowledge gate takes a folder name as skill coverage and Kriya's own scaffold satisfies it (`GAP-A4-03`, measured). Live-lookup text reaches a model request outside the untrusted fence (`GAP-A4-04`, measured). Goal ambiguity has no representation (`GAP-A4-07`). No aggregate plan-level approval or size measure exists in planning (`GAP-A3-05` update). Gaps `GAP-A4-01` to `GAP-A4-08`; documents `DOC-A4-01..08`. Not traced: the Developer request itself (STAGE-GENERATION, to A6), `milestones.py`, `plan_revision.py`, `triage.py` |
 | A5 | Workspace/root, tools, MCP, mutation authority, configuration authority | Not started |
 | A6 | Runtime/model identity, qualification, fallback, evidence/audit, extensibility seams | Not started |
 

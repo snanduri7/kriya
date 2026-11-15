@@ -280,3 +280,90 @@ Owner: `plan_executor.py::_execute` (`_Lifecycle`). States: PENDING, RUNNING, VE
 A unit that fails after earlier units committed leaves those commits in the real workspace; a multi-unit result says
 so (`committed_work_units`, `committed_changes_retained`) when a RunRecord exists. Probe P3 ran without a RunRecord,
 so that key was absent there: an artifact of the probe harness, not a product statement.
+
+## Slice A4
+
+### SM-A4-01 - The structured plan of an enforce run (`TRACED`; `M` = `MEASURED` by probe or committed test)
+
+Owner: the planning loop and the unit loop of `enforce_loop.py`. The first five states exist only as control flow;
+the later ones are the `lifecycle_state` values written into the approved-plan document.
+
+```mermaid
+stateDiagram-v2
+    [*] --> ADMITTED: contract compiled and sealed (AUTH-A4-15)
+    ADMITTED --> DRAFT: Planner answer
+    DRAFT --> NORMALIZED: parse, canonicalize, four normalizers (AUTH-A4-10)
+    DRAFT --> REPAIR: parse failure
+    NORMALIZED --> VALID: no error from any check
+    NORMALIZED --> REPAIR: any error
+    REPAIR --> DRAFT: repair answer, at most 2
+    REPAIR --> REFUSED: repairs exhausted
+    VALID --> approved: plan document saved, no person asked
+    approved --> in_progress: first unit
+    in_progress --> recovering: owner recovery or reverification (SM-A1-04)
+    recovering --> in_progress
+    in_progress --> REVISED: deterministic plan revision, revalidated
+    REVISED --> in_progress
+    in_progress --> needs_review
+    in_progress --> failed
+    in_progress --> TERMINAL: every unit completed (SM-A3-04)
+    REFUSED --> [*]
+```
+
+| From | Event | To |
+|---|---|---|
+| start | admission refuses under a blocking policy; baseline authority unavailable; no mutation required | run ends before planning (`FR-A4-04`, `FR-A4-05`) |
+| ADMITTED | Planner answer | DRAFT |
+| DRAFT | JSON block parses and yields at least one subtask | NORMALIZED: `canonicalize_planned_file_actions`, `coalesce_same_file_owners`, `redirect_immutable_test_edits`, `derive_verification_contracts`, `scope_verification_to_requirements` (`M`: the last one, committed tests) |
+| DRAFT | no parse, or zero subtasks (`STRUCTURED_PLAN_EMPTY`) | REPAIR |
+| NORMALIZED | `validate_plan`, plan targets, unbounded-subtask, grounded-artifact, edit-feasibility and the two regression checks report nothing (`M` P3 for the failing direction) | VALID |
+| NORMALIZED | any error | REPAIR; the retained baseline is the last non-regressed failure |
+| REPAIR | fewer than 2 repairs used | DRAFT (the repair prompt carries what must be preserved) |
+| REPAIR | 2 repairs used | REFUSED: `STRUCTURED_PLAN_REPAIR_EXHAUSTED`, `needs_review`, `PLANNING_ERROR` |
+| VALID | - | `approved`: plan document saved, `current_plan_hash` = hash of the raw Planner plan (`M` P9: the hash covers `plan_id`); the resume comparison runs here (`AUTH-A1-10`) |
+| `approved` | sandbox created, skills run shadow activated when the skills root is inside the repository | `in_progress` |
+| `in_progress` | planned-prerequisite, runtime-plan-gap or scope-owner revision | REVISED: the plan object changes, `validate_plan` runs again, the document and hash are rewritten (three call sites; bodies not read) |
+| any | terminal | `SM-A3-04` |
+
+No state is an approval by a person: `approved` means "validated" (`AUTH-A4-10`).
+
+### SM-A4-02 - The Planner's answer in a direct or milestone unit (`TRACED`)
+
+Owner: `stage_planning.py::plan_work_unit`.
+
+| From | Event | To |
+|---|---|---|
+| start | a predetermined plan (an enforce unit) or a resumed checkpoint with a plan | CLASSIFY, no Planner call |
+| start | otherwise | Planner call; `plan` checkpoint saved; CLASSIFY |
+| CLASSIFY | `complete` | Architect (stage 2A) |
+| CLASSIFY | `schema_invalid` and fewer than 2 repairs used | repair call; `plan` checkpoint saved; CLASSIFY |
+| CLASSIFY | `schema_invalid` after 2 repairs | unit ends `planner_output_schema_invalid` |
+| CLASSIFY | `unauthorized_path` | unit ends `planner_output_unauthorized_path`, never repaired |
+| CLASSIFY | `incomplete_truncated` | unit ends `planner_output_incomplete`, never repaired |
+
+### SM-A4-03 - The knowledge gate (`TRACED`; `M` P5)
+
+| Shape | From | Event | To |
+|---|---|---|---|
+| direct | stage 0 | no gap, or `knowledge_risk_confirmed`, or a resumed checkpoint | continue; gaps become prompt constraints |
+| direct | stage 0 | a gap, not confirmed | `knowledge_gap`, before any model call |
+| direct | stage 2A | the Architect's design names a library the goal did not, and the callback approves | continue |
+| direct | stage 2A | the same, declined / no decision | `human_rejected` / `approval_required`, before any Developer work |
+| direct | stage 2A | the same, no approval callback | continue with a warning |
+| enforce | controller | a gap in the user's goal, not confirmed | `knowledge_gap`, before planning |
+| enforce | controller | no gap, or confirmed | every gap coordinate becomes "acknowledged" for the run |
+| enforce | unit stage 0 | a gap whose coordinate is not acknowledged (`M`: one named only by the Planner's text) | the unit returns `knowledge_gap`; the loop turns it into the run's result only when no file has been established yet (`enforce_loop.py`, the `knowledge_gap_break` block) |
+
+### SM-A4-04 - A skill and its verification (`TRACED`; `M` P8)
+
+| From | Event | To |
+|---|---|---|
+| absent | `create_skill_skeleton` (live lookup or a human reference during analysis; `kriya skills create`) | unverified skeleton |
+| absent | `KnowledgeGuard.generate_skill_template` (auto-accrual in `stage_apply.py` for a dependency the gates suggested and the applied files contain; the CLI's scaffold prompt after a knowledge gap) | unverified template with no rule (`M` P11); from then on the knowledge gate counts the library as covered |
+| unverified | a rule is extracted and written with a provenance record | unverified, with "Unverified Rules" |
+| unverified, applicable | the person declines to strengthen it | gap acknowledged: durable for a skill outside the workspace, run-local for a workspace skill (`M`: a workspace `skill.yaml` cannot set it) |
+| unverified | a passing runtime verification in a run | held verification (in memory); its rules render as trusted for the rest of that run (`reclassify_held_rules`) |
+| held | the run's candidate is verified and committed | verified, persisted (`persist_run_learning`) |
+| held | the run ends otherwise | discarded (`discard_run_learning`) |
+| any | `kriya skills unverify` | unverified |
+| workspace skill | `verified: true` written by the project | ignored (`M` P8); `verified_claim` is display only |

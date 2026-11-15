@@ -1,0 +1,59 @@
+
+=== P11 the knowledge guard's own scaffold and the next run
+before the scaffold: gaps = ['org.apache.ignite:ignite-core']
+scaffolded folder: org.apache.ignite-ignite-core-2.16.0 | files: ['examples', 'instructions.md', 'rules.txt', 'skill.yaml']
+after the scaffold: gaps = []
+the scaffold as a loaded skill: [('org.apache.ignite-ignite-core', 'rules=0', 'verified=False')]
+
+=== P1 requirement derivation and identity
+same goal, same digest: True ids: ['REQ-1']
+goal_digest equals goal_identity(goal): True
+multi-statement goal: [('REQ-1', 'requirement', 'goal'), ('REQ-2', 'constraint', 'goal'), ('REQ-3', 'requirement', 'goal')]
+clarification changes the digest: True clarification ids: ['REQ-C1']
+an underspecified goal derives: [('REQ-1', 'Make it better.')] | fields on a Requirement: ['id', 'kind', 'ordinal', 'source', 'text']
+
+=== P2 which unit carries the user's requirements
+direct unit: requirement_goal is the goal: True | authoritative_goal is the goal: True
+enforce unit: requirement_goal: None | authoritative_goal: None
+
+=== P3 one structured plan, two plan validators
+direct-path classification of a cyclic, two-owners-of-one-file, invariant-free plan: complete | reason: None
+enforce validate_plan on the same plan: valid = False | reason codes: ['AMBIGUOUS_PLANNED_FILE_OWNERSHIP', 'MUTATION_UNIT_ACCEPTANCE_PATH_MISSING', 'PLAN_GLOBAL_INVARIANTS_MISSING', 'SUBTASK_DEPENDENCY_CYCLE', 'SUBTASK_GLOBAL_INVARIANTS_MISSING', 'SUBTASK_SEMANTIC_CONTRACT_MISSING']
+
+=== P4 skill selection: Planner versus unit
+Planner selection (predicate over the user's goal): ['alpha-skill']
+unit s1 selection (predicate over the composed unit goal): ['alpha-skill']
+unit s2 selection (predicate over the composed unit goal): ['alpha-skill', 'beta-skill']
+
+=== P5 KnowledgeGuard: skill coverage by folder name; unit-level input
+extracted from the goal: [('org.apache.ignite:ignite-core', 'unspecified')]
+no skill folder: gaps = [('org.apache.ignite:ignite-core', 'MEDIUM')]
+an EMPTY folder whose name contains the artifact id: gaps = []
+run-level acknowledged coordinates: ['org.apache.ignite:ignite-core']
+unit-level gaps left after removing them (a coordinate only the Planner's text names): ['org.apache.qpid:qpid-broker-core'] | unit stops with knowledge_gap: True
+
+=== P6 outward lookup term gate
+'ignite': accepted, query='ignite example', known public=True
+'org.apache.ignite:ignite-core': accepted, query='org.apache.ignite:ignite-core example', known public=True
+'AcmeBillingCore': accepted, query='AcmeBillingCore example', known public=False
+'acme internal ledger v2': accepted, query='acme internal ledger v2 example', known public=False
+'src/main/java/App.java': refused (lookup term contains path, code, or diagnostic characters)
+'select * from users': refused (lookup term contains path, code, or diagnostic characters)
+'one two three four five six seven': refused (lookup term contains too much free-form text)
+
+=== P7 live-lookup text in the retry error context
+fetched page text is in the error context: True
+the untrusted-reference fence marker is present: False
+the page text is OUTSIDE any untrusted fence: True
+
+=== P8 workspace skill: verification and rule label
+workspace skill self-attests verified: claim = True | honoured = False | gap acknowledgement honoured = False
+its rule is rendered under the trusted 'Rules:' header: True | under 'Unverified Rules': False
+
+=== P9 plan content hash and plan_id
+identical subtasks, another plan_id: content hashes equal = False
+
+=== P10 configuration of a Project Setup folder
+packaged defaults: workflow_controller = (False, 'shadow') | autonomy.mode = human-in-the-loop | requirement policies = ('record', 'record')
+Project Setup profile: workflow_controller = {'enabled': True, 'mode': 'enforce'} | autonomy = {'mode': 'human-in-the-loop', 'web_lookup_enabled': False, 'web_lookup_auto_approve': False, 'run_verification_enabled': True, 'self_correction_loop_enabled': False, 'generation_time_budget_seconds': 900}
+Project Setup profile sets a requirement policy: False

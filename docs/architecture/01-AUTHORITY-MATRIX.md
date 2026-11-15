@@ -662,3 +662,486 @@ two committed tests are in `evidence/a3/a3_tests_output.txt`.
 | applied / committed | The bytes equal the verified binding and are in the workspace | Verified against the user's requirements |
 | `requirement_truth: ALL_VERIFIED` | Every mandatory requirement closed by deterministic evidence for this candidate | - |
 | `review_included_in_approval: True` | A pre-approval review text exists | That it describes the final candidate's built or tested state (`BYP-A3-14`) |
+
+## Slice A4 - goal, knowledge, Skills, plan, executor convergence (2026-11-15)
+
+AS-IS at the baseline. Rows carry the full field set of the documentation addendum. Probe references (`P1` to `P10`)
+are `evidence/a4/a4_probe.py` with its output in `evidence/a4/a4_probe_output.txt`; "tests" are the two committed test
+files re-run in `evidence/a4/a4_tests_output.txt` (37 passed).
+
+Three execution shapes exist and the rows below say which one each fact holds for:
+
+| Shape | Entered when | Plan object | Executor |
+|---|---|---|---|
+| direct | `workflow_controller.enabled` is false (the packaged default, `MEASURED` P10), or `kriya fix` | `ExecutionPlan(DIRECT)`, one unit (`plan_adapters.py::direct_execution_plan`) | `plan_executor.py::execute_plan` |
+| milestone | a milestone run state | `ExecutionPlan(MILESTONE)` (`plan_adapters.py::milestone_execution_plan`) | `plan_executor.py::execute_plan` |
+| enforce | `workflow_controller.enabled` and `mode: enforce` (what Project Setup writes, `MEASURED` P10) | `plan_schema.py::EngineeringPlan` | `enforce_loop.py::EnforceLoop`, which calls the unit primitive itself |
+
+All three run each unit through the same primitive, `workflow.py::WorkflowEngine.run_generation_workflow`.
+
+### AUTH-A4-01 - What is the user's goal, and what is its identity?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The goal text of the run and the digest other evidence binds to |
+| Owner | The operator's input, carried verbatim. Identity: `requirements.py::goal_identity` (SHA-256 of the goal plus a NUL), and for a direct unit the plain SHA-256 of the goal (`plan_adapters.py::direct_execution_plan`, equal to the run record's goal hash) |
+| Why this owner | Nothing rewrites the goal: the direct unit's goal is "the user's goal, verbatim" (`direct_execution_plan`), and the enforce loop passes it to every unit as `grounding_goal` |
+| Authoritative inputs | The goal string from the CLI or the desktop launch; a goal file (`--file`) is protected from generated writes (`workflow.py::_resolve_protected_relpath`) |
+| Evidence allowed | The goal string only |
+| Evidence forbidden | Planner, Architect, Reviewer or retrieved text. An enforce unit's own `goal` argument is a composed text (below) and is never the requirement source (`AUTH-A4-15`) |
+| Model role | None for the goal. Proposer for everything rendered under "Planned Implementation Strategy" |
+| Human role | Author |
+| Persisted state | Goal hash on the run record; `RequirementSet.goal_digest`; the enforce trace row carries the goal |
+| State transitions | None; fixed at run start |
+| Downstream consumers | Requirement derivation (`AUTH-A4-02`), the KnowledgeGuard (`AUTH-A4-05`), skill selection (`AUTH-A4-08`), both Planners (`AUTH-A4-10`, `AUTH-A4-11`), the runtime-behaviour reading (`AUTH-A4-13`), `derive_stack_contract`, goal facts (`goal_facts.py`) |
+| Mutations authorized | None |
+| Mutations forbidden | Any rewrite of the goal by a model |
+| Failure / UNKNOWN | An empty or meaningless goal derives zero requirements (`derive_requirements`: `_meaningful`); what admission then does is `AUTH-A2` territory |
+| Retry / recovery | None |
+| Checkpoint / resume | A direct resume is judged by the goal fingerprint (`plan_adapters.py::work_unit_record` deliberately stores no definition digest for a direct unit). An explicit requirement contract bound to another goal is refused (`REQUIREMENT_CONTRACT_GOAL_MISMATCH`) |
+| Audit emitted | `requirement.derived` event with the ids |
+| Alternate paths | `BYP-A4-12`: an enforce unit's `goal` argument contains Planner text next to the user's goal; consumers that read `goal` instead of `grounding_goal` read both (`AUTH-A4-05`, `AUTH-A4-08`) |
+| Invariant | The text under the "Authoritative Goal" header of a unit goal is the user's goal, byte for byte (`planning_request.py::build_subtask_goal_text`) |
+| Negative control | `build_subtask_goal_text` has one production caller, `enforce_loop.py::_invoke_bounded_subtask` (search `build_subtask_goal_text(`) |
+| AS-IS evidence | `TRACED`; `MEASURED` P1 (digest stable, equals `goal_identity`), P2 |
+| Required contract | Same. Open: one named "goal of record" field read by every consumer, instead of `goal` versus `grounding_goal` (`GAP-A4-01`) |
+| Limitation | The CLI and desktop intake code (`cli.py::generate`, the launch service) was not read in A4; slice A5 owns the launch |
+
+### AUTH-A4-02 - What are the run's requirements?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The closed set of requirements the run must close, with stable ids |
+| Owner | `requirement_contract.py::requirement_set_for`: the operator's explicit contract when one is bound, else `requirements.py::derive_requirements(goal)` |
+| Why this owner | One function, called by the direct engine and by the enforce loop (three call sites in `enforce_loop.py`, one in `workflow.py`) |
+| Authoritative inputs | The goal; or a `kriya.requirements/1` file outside the workspace |
+| Evidence allowed | Derived: sentences, list items and code blocks of the goal, split deterministically; `kind` is `constraint` when a cue matches. Contract: exactly the `id`/`text`/`kind` entries |
+| Evidence forbidden | A contract file inside the workspace ("a repository can never ship its own requirements"); model text; a merge of contract and derived requirements (the contract is a closed set) |
+| Model role | None. The Planner is shown the set and may only cite ids (`requirements_prompt_block`: "Never drop, merge or reword") |
+| Human role | Authors the goal or the contract |
+| Persisted state | Contract bytes content-addressed under `<state>/requirement-contracts/<sha256>.json`; `RequirementSet.digest` joins the verification contract, verdicts, approvals and the enforce `ControlState.requirement_contract_digest` |
+| State transitions | None; "fixed in memory at run start" |
+| Downstream consumers | The verification contract compiler (`workflow.py::compile_run_contract`, slice A2), the Planner prompts, `validate_plan(known_requirement_ids=...)`, the terminal requirement verifier (`AUTH-A3-09`) |
+| Mutations authorized | The content-addressed contract copy (`MUT-A4-01`) |
+| Mutations forbidden | Adding, removing or rewording a requirement after run start |
+| Failure / UNKNOWN | `REQUIREMENT_CONTRACT_INVALID` before any model call for an unreadable file, another format, an empty set, a bad id, a duplicate id, an empty text or an unknown kind |
+| Retry / recovery | None |
+| Checkpoint / resume | Enforce: a prior state recorded under another contract digest is not reused (`REQUIREMENT_CONTRACT_CHANGED`) |
+| Audit emitted | `requirement.derived`; requirement lineage per stage (`requirements.py::requirement_lineage`) |
+| Alternate paths | `kriya fix` passes `requirements_from_goal=False`: no requirement set at all (`BYP-A4-13`). A milestone unit and an enforce unit have none of their own (`AUTH-A4-15`) |
+| Invariant | A plan may cite only known ids (`PLAN_REQUIREMENT_ID_UNKNOWN`); mapping a requirement never satisfies it and leaving one out never removes it (`plan_schema.py::Subtask.requirement_ids` comment) |
+| Negative control | Callers of `derive_requirements(`: `requirement_contract.py` only. No caller passes `clarifications` (search `clarifications=`: none) |
+| AS-IS evidence | `TRACED`; `MEASURED` P1 |
+| Required contract | Same for identity. Whether a derived sentence is a requirement at all is `GAP-A2-01` and `GAP-A4-07` |
+| Limitation | Derivation is syntactic: every separable statement becomes a requirement or a constraint; nothing classifies a statement as context except the operator's dispositions (slice A2) |
+
+### AUTH-A4-03 - Is the goal ambiguous, and who resolves it?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether the goal needs clarification before work starts |
+| Owner | **None.** No type, state or stage represents an ambiguity |
+| Why this owner | - |
+| Authoritative inputs | - |
+| Evidence allowed | - |
+| Evidence forbidden | - |
+| Model role | The Planner and the Developer resolve an ambiguity implicitly by choosing; the integration-decision seam (`AUTH-A4-12`) records a choice only between alternatives a skill or the Planner names |
+| Human role | None at this point. A person can pre-empt with an explicit requirement contract, dispositions or acceptance evidence (slice A2) |
+| Persisted state | None. `derive_requirements` accepts `clarifications` and would mint `REQ-C<n>` ids, but "no producer supplies yet" (its docstring) |
+| State transitions | None |
+| Downstream consumers | - |
+| Mutations authorized | - |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | An underspecified goal is one ordinary requirement: "Make it better." derives `REQ-1` (`MEASURED` P1). Under the `block` policies admission can refuse a requirement that has no deterministic closer (slice A2); under the default `record` policies the run proceeds |
+| Retry / recovery | None |
+| Checkpoint / resume | None |
+| Audit emitted | None |
+| Alternate paths | The verifier semantic review (`AUTH-A2-07..09`) can catch a wrong reading, after generation |
+| Invariant | None exists |
+| Negative control | Search `clarifications=` and `REQ-C` producers in `kriya/`: none |
+| AS-IS evidence | `TRACED`, `MEASURED` P1 |
+| Required contract | Open, with `GAP-A2-01`: a canonical semantic contract before the Developer and the verifier would be the place an ambiguity is recorded and resolved. `GAP-A4-07` |
+| Limitation | `architectural_choice.py` was not read; it concerns a choice between implementation alternatives, not goal ambiguity (by name and by its use in the integration-decision seam) |
+
+### AUTH-A4-04 - Which execution shape runs this goal?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | direct, shadow-plus-direct, or enforce; and the route (kind, risk, weight) |
+| Owner | `cli.py::_dispatch_generation` reads `workflow_controller.enabled` and `.mode`; `workflow_controller.py::WorkflowController.execute` refuses a mode outside `legacy`, `shadow`, `enforce`. The route is `engineering_triage.classify` |
+| Why this owner | Configuration is operator authority (SEC-009, slice A5); the header of the Project Setup file says the workflow mode needs approval |
+| Authoritative inputs | The resolved `AppConfig` |
+| Evidence allowed | Configuration |
+| Evidence forbidden | The goal text, model output |
+| Model role | None ("never asked of a model", `plan_schema.py::PlannerStructuredOutput` docstring about `kind`) |
+| Human role | Operator configuration; Project Setup (`application/project_init.py`) writes `enabled: true, mode: enforce` and `autonomy.mode: human-in-the-loop` |
+| Persisted state | `kriya.yaml`; `ControlState.engineering_route` |
+| State transitions | None |
+| Downstream consumers | Every other row of this slice |
+| Mutations authorized | None |
+| Mutations forbidden | Enforce never degrades to whole-goal direct execution when planning fails (`_StructuredPlanUnavailable` handler: "authoritative mode will not degrade to legacy execution") |
+| Failure / UNKNOWN | An unknown mode raises `WorkflowControllerConfigurationError`; the schema accepts only `shadow` or `enforce` |
+| Retry / recovery | None |
+| Checkpoint / resume | A resume runs under whatever the configuration says now |
+| Audit emitted | The log line "Run route: kind= risk= weight=" |
+| Alternate paths | A folder with no `kriya.yaml` runs on the packaged defaults, the direct shape (`project_init.py` module docstring; `MEASURED` P10). So the same desktop product runs two shapes depending on whether Setup was used (`GAP-A4-01`) |
+| Invariant | In shadow mode the structured path never affects files or the outcome (`workflow_controller.py::execute`, the `except Exception` around `_run_structured_shadow`) |
+| Negative control | Sources of `migration_mode`: `cli.py:_dispatch_generation` only (search `migration_mode` in `kriya/`) |
+| AS-IS evidence | `TRACED`; `MEASURED` P10 |
+| Required contract | Open: the result truths must be the same whichever shape runs (`GAP-A4-01`) |
+| Limitation | `engineering_triage.classify` and the config authority check were not read in A4 (slice A5). `execute_milestones` was not read |
+
+### AUTH-A4-05 - May the run proceed although the model may not know a named library?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether a "knowledge gap" stops the run before any model call |
+| Owner | `tools/knowledge.py::KnowledgeGuard.check_goal`, called at three sites: `stage_knowledge_guard.py::check_knowledge_guard` (stage 0 of every unit, over the unit's goal), `workflow_controller.py::WorkflowController.execute` (once, before structured planning, over the user's goal) and `stage_architecture.py::design_work_unit` (stage 2A, over the **Architect's design text**, when `knowledge.check_enabled`) |
+| Why this owner | One detector. The enforce run asks once for the whole goal and then lets each unit ask only about coordinates the run did not acknowledge; stage 2A asks again about libraries the design introduced |
+| Authoritative inputs | `extract_library_versions(text)`; the configured cutoff date; the release date from a registry adapter (or the cache; none when `offline_mode`); the names of the folders in the skills directory |
+| Evidence allowed | A gap is: a named library with no skill folder (MEDIUM), or a version released after the cutoff (HIGH without a skill folder, MEDIUM with one) |
+| Evidence forbidden | Nothing is excluded: **skill coverage is a substring test of an alias against a folder NAME** (`check_goal`, the `os.listdir` loop). The folder's `skill.yaml`, its `verified` flag and its rules are not read |
+| Model role | None in the decision. On a unit of an enforce run the scanned text includes the Planner's description (`BYP-A4-12`) |
+| Human role | Confirms the risk: `knowledge_risk_confirmed` (CLI `--yes` or the permissive knowledge policy, `cli.py` lines 3393, 3485, 3535; not read further) |
+| Persisted state | The release-date cache (`MUT-A4-05`); nothing about the confirmation |
+| State transitions | `SM-A4-03` |
+| Downstream consumers | The analysis stage renders every gap as a "KNOWLEDGE GUARD SAFETY CONSTRAINTS" block into the convention prompt (`stage_analysis.py`). Stage 2A: a library the design names and the goal did not is put to the approval callback ("Do you want to proceed with these dependencies?"); a decline ends the unit `human_rejected`, no decision ends it `approval_required`; **with no approval callback the unit proceeds with a warning** (`BYP-A4-18`). An enforce unit has an empty predetermined design, so stage 2A finds nothing there |
+| Mutations authorized | None |
+| Mutations forbidden | Any model call before the gate when a gap is unconfirmed |
+| Failure / UNKNOWN | An unknown release date is not a temporal gap (`if rel_date:`); offline, every temporal check is skipped. An unknown ecosystem is assumed Java. Fail open for the temporal half, by design of the offline mode |
+| Retry / recovery | None. Result `status: knowledge_gap` |
+| Checkpoint / resume | Direct: a resumed unit sets `knowledge_risk_confirmed = True` (`stage_knowledge_guard.py`, "a resumed checkpoint proves this gate was already cleared"). Enforce: the gate is coordinate-scoped (`resolved_knowledge_coordinates`), so the resume flag does not open it |
+| Audit emitted | A `knowledge_gap` traces row with the run's events (`persist_early_exit_trace`) |
+| Alternate paths | `BYP-A4-03` (an empty folder with the right name covers a library, `MEASURED` P5), `BYP-A4-19` (the guard's own scaffold is such a folder, `MEASURED` P11), `BYP-A4-08` (direct resume), `BYP-A4-09` (the controller reads the configured skills path, the unit reads the engine's effective root), `BYP-A4-18` (stage 2A without a callback) |
+| Invariant | Under enforce a coordinate the run-level check did not see remains a gap at the unit (`workflow.py::unresolved_knowledge_report`; `MEASURED` P5: a coordinate named only by the Planner's text stops the unit) |
+| Negative control | Callers of `.check_goal(` in `kriya/`: the three sites above (`evidence/a4/check_citations_a4.py`). The first draft of this row said two; the search found the third and the row was corrected before the checkpoint. `tools/knowledge.py` never imports the skill engine (search `SkillEngine`: none) |
+| AS-IS evidence | `TRACED`; `MEASURED` P5, P11 |
+| Required contract | Skill coverage from the loaded skill's identity and Kriya-owned verification, not a folder name (`GAP-A4-03`, registry `KNOWLEDGEGUARD-SKILL-IDENTITY-001`) |
+| Limitation | The registry adapters and the CLI confirmation flow were not read. Whether a desktop launch can confirm a gap is owed by slice A5. `knowledge.check_enabled` is read by stage 2A only; stage 0 and the controller check do not read it (search `check_enabled` in `kriya/`) |
+
+### AUTH-A4-06 - May a search query leave the machine, and with what text?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether live lookup runs, and the exact query |
+| Owner | Enablement: `policy/egress.py::web_lookup_allowed` (`autonomy.web_lookup_enabled` and a configured `search.base_url`). Per-query authorization: `workflow.py::WorkflowEngine._approve_web_lookup`. Query content: `outbound_lookup.py::OutboundLookupRequest.from_extracted_terms` inside `live_lookup.py::_resolve_via_web_lookup` |
+| Why this owner | One enablement predicate for every consumer (its docstring); one request type "the only value accepted by the outbound search broker" |
+| Authoritative inputs | Terms computed by code: names of unverified applicable skills, goal libraries with no skill (`stage_analysis.py`), library names extracted from the **Architect's design text** that no skill covers (`stage_architecture.py`, stage 2B: the term is bounded by the extractor, its source is model output, `BYP-A4-17`), terms extracted from a repeated gate failure (`retry_strategy.py`: `extract_error_search_terms`, excluding the project's own coordinate) |
+| Evidence allowed | A term of at most 6 words matching `[A-Za-z0-9 ._:+@-]`, not ending in a source suffix; the query is the term plus " example" |
+| Evidence forbidden | Paths, code, diagnostics, free text (`UnsafeLookupTerm`, `MEASURED` P6). Unattended (`web_lookup_auto_approve`): any term outside the public catalogue or `search.public_terms` |
+| Model role | None in the term. A model (SkillGapAgent) later reads the fetched pages |
+| Human role | Approves each query (`web_lookup_query_callback`, shown the terms and the endpoint) unless auto-approve is on and every term is public; then reviews the found references (`web_lookup_callback`) before they are used for skills |
+| Persisted state | None for the decision |
+| State transitions | None |
+| Downstream consumers | Skill extraction (`AUTH-A4-07`, `MUT-A4-03`); the retry error context (`BYP-A4-04`) |
+| Mutations authorized | Skill-store writes after the human reviewed the references (analysis stage); none on the retry path |
+| Mutations forbidden | A query with no authorization: "no callback and no opt-in means the query never fires" |
+| Failure / UNKNOWN | An unsafe term blocks the whole request (returns nothing); a search or fetch error skips that term; a callback error is a refusal. Fail closed |
+| Retry / recovery | One query per term, no variants |
+| Checkpoint / resume | None |
+| Audit emitted | Log lines only (a blocked request is a warning). No run event was found for a query that left |
+| Alternate paths | `BYP-A4-05`: with a per-query human approval a non-public name (for example an internal library named in the goal) is sent (`MEASURED` P6: accepted by the sanitizer, not in the public catalogue). The human-supplied URL path in `stage_analysis.py` is refused under `egress_policy: local_only` |
+| Invariant | The query never contains goal, design, code or error text, only the bounded term |
+| Negative control | Callers of `_resolve_via_web_lookup`: `stage_analysis.py`, `stage_architecture.py`, and `_augment_error_with_live_lookup` (called by `retry_strategy.py` only) |
+| AS-IS evidence | `TRACED`; `MEASURED` P6, P7 |
+| Required contract | Fetched text must enter a model request only inside the untrusted fence (`GAP-A4-04`). An audit event per outbound query (slice A6, evidence) |
+| Limitation | `tools/search.py`, `tools/web.py`, `extract_error_search_terms` and the PRD-012 egress owner were not read (slice A6 owns egress identity). Registry `DESKTOP-LOOKUP-QUERY-APPROVAL-001` was reconciled in A3 |
+
+### AUTH-A4-07 - What does a Skill say, and is it verified? (Skill fact truth)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | A skill's rules, instructions, examples, tags, supported versions, and whether Kriya treats it as verified |
+| Owner | `skills/skill.py::SkillEngine` ("the only store", `skill_conventions.py` docstring): `discover_and_load` reads the folders; `_skill_verification_is_authoritative` decides whose `verified` claim counts |
+| Why this owner | One loader; precedence is install library, then `cwd/skills`, then the configured `paths.skills` (later wins) |
+| Authoritative inputs | `skill.yaml`, `rules.txt`, `instructions.md`, `examples/*` of each folder; the folder's location relative to the workspace and to the Kriya install |
+| Evidence allowed | `verified: true` in `skill.yaml` of a skill in the install library or outside the workspace. For a rule: the per-rule provenance file (`rule_provenance.json`) |
+| Evidence forbidden | A workspace skill's own `verified` or `verification_gap_acknowledged` (`MEASURED` P8: claim true, honoured false) |
+| Model role | Candidate generator for rules: SkillGapAgent extracts rules and examples from a reference; they are written as unverified (`skill_extraction.py::_write_skill_extraction`, `record_rule_provenance`) |
+| Human role | Supplies references; `kriya skills create / approve / promote / unverify` (CLI only) |
+| Persisted state | The skill folder; `rule_provenance.json`; the conflict registry; in memory for the run: held verifications and run-local gap acknowledgements |
+| State transitions | `SM-A4-04` |
+| Downstream consumers | Selection (`AUTH-A4-08`), rendering (`AUTH-A4-09`), the skill-gap prompt, the desktop read-only catalogue (`skills/service.py`, KUP `skills.list` / `skills.describe`) |
+| Mutations authorized | `MUT-A4-02..04` |
+| Mutations forbidden | A new skill in Kriya's shared install directory from another project's run (`new_skill_refusal`); a workspace skill attesting itself |
+| Failure / UNKNOWN | A folder that fails to load is logged and skipped: the skill is silently absent from the run (`discover_and_load`, the `except Exception`). An unreadable provenance file leaves every rule trusted (W3 census in the registry row; not re-read) |
+| Retry / recovery | None |
+| Checkpoint / resume | The canonical `skills_dirs` are part of the resume fingerprint (comment on the run shadow); a workspace skill verified in a run is verified for that run only |
+| Audit emitted | The run records the skills it used (`stage_analysis.py::record_active_skills`) |
+| Alternate paths | `BYP-A4-06`: a rule with no provenance record is rendered under the trusted `Rules:` header, also for a workspace skill (`MEASURED` P8). `BYP-A4-07`: on the direct and milestone shapes skill writes go to the canonical directory and are Git-committed during analysis; only the enforce loop uses the run shadow |
+| Invariant | Kriya's `verified` is never taken from bytes the project controls |
+| Negative control | `activate_run_shadow(` has one caller, `enforce_loop.py` (search in `kriya/`). "The only store" does not mean the only writer: `tools/knowledge.py::KnowledgeGuard.generate_skill_template` writes a skill folder with plain `open()` calls, from `stage_apply.py` (auto-accrual after a run) and from the CLI's scaffold prompt (`MUT-A4-11`) |
+| AS-IS evidence | `TRACED`; `MEASURED` P8, P11 |
+| Required contract | Per-rule trust for workspace skills needs a Kriya-owned attestation (registry `SKILL-WORKSPACE-PERSISTENT-VERIFICATION-ATTESTATION-001`, a future feature by owner decision); until then the label for a workspace skill's rules is the gap (`GAP-A4-06`) |
+| Limitation | `skills/run_shadow.py`, `mark_verified`, `apply_held_verifications` and the CLI skill commands were not read line by line |
+
+### AUTH-A4-08 - Which Skills apply to this request? (Skill relevance)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The set of skills rendered into a model request |
+| Owner | `skill_conventions.py::skill_applies_to_goal`, called per skill by `stage_analysis.py::analyze_work_unit` (every unit) and by `skill_extraction.py::planning_skill_constraints` (the enforce Planner) |
+| Why this owner | One predicate so that "there is no second selection path that could drift" (module docstring, SHARED-DECISION-AUTHORITY-001) |
+| Authoritative inputs | The text passed as `goal`; the repository analysis (`fact_match`: a tag names a dependency or framework found in the repo); the per-repo auto skill name; the skill's `supported_versions` against a version in the text |
+| Evidence allowed | Token-run equality (`mentions_term`), never substring |
+| Evidence forbidden | Embedding or lexical retrieval (owner ruling 2026-11-14, registry `SKILL-RELEVANCE-CONTEXT-SCOPE-001`); none is implemented |
+| Model role | None in the predicate. **But the text is not the same for both callers:** the Planner's call passes the user's goal; a unit's call passes the composed unit goal, which contains the Planner's description, acceptance text, planned files and verification text |
+| Human role | None. "Skills are selected automatically (no manual selection API)" (registry `GUI-SKILLS-MUTATION-001`) |
+| Persisted state | None; the names are recorded on the trace |
+| State transitions | None |
+| Downstream consumers | `AUTH-A4-09`; the skill-gap prompt (unverified applicable skills) |
+| Mutations authorized | None |
+| Mutations forbidden | None |
+| Failure / UNKNOWN | A version outside `supported_versions` removes the skill (logged). No "unknown" state |
+| Retry / recovery | None |
+| Checkpoint / resume | Recomputed |
+| Audit emitted | Log line per loaded skill; active skill names on the trace |
+| Alternate paths | `BYP-A4-02`: a unit can be given a skill the Planner never saw (`MEASURED` P4: Planner `[alpha-skill]`, unit s2 `[alpha-skill, beta-skill]` because the Planner's own description mentions `betalib`), and a version in Planner text can remove one |
+| Invariant | Claimed: the Planner sees the same applicable skills as the Developers. Holds only when the Planner's text adds no skill name, tag or library version |
+| Negative control | Callers of `skill_applies_to_goal(`: the two above |
+| AS-IS evidence | `TRACED`; `MEASURED` P4 |
+| Required contract | Selection keyed on the goal of record (and the repository facts), identical for the Planner and every unit; rule-level and unit-level applicability declared by the skill (`GAP-A4-02`) |
+| Limitation | The measured case uses the selection predicate with real collaborators and synthetic skills, not a full enforce run |
+
+### AUTH-A4-09 - How does Skill text enter a model request? (rendering and injection)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The bytes of the skill block and where it sits |
+| Owner | `skill_conventions.py::render_skill_conventions`; placement by `stage_analysis.py` (into `convention_prompt`) and by the enforce loop (appended to the authoritative Planner request under `PLANNING_SKILL_CONSTRAINTS_HEADER`) |
+| Why this owner | One renderer for both |
+| Authoritative inputs | The whole skill: every rule (split trusted / unverified), the instructions, every example file |
+| Evidence allowed | - |
+| Evidence forbidden | Trimming: "Lossless and never trimmed (a request that cannot hold it is a typed dispatch refusal, not a silent drop)" (`enforce_loop.py` comment); `context_budget` treats it as mandatory text |
+| Model role | Reader. The Planner and Architect prompts add "Your plan must not contradict any Rule listed there" when the block is present outside the untrusted fence (`stage_planning.py`, `stage_architecture.py`) |
+| Human role | None |
+| Persisted state | None |
+| State transitions | None |
+| Downstream consumers | Planner, Architect, Developer requests of every unit |
+| Mutations authorized | None |
+| Mutations forbidden | None |
+| Failure / UNKNOWN | A request that cannot hold the block is refused at dispatch (slice A6 owns the budget rows) |
+| Retry / recovery | None |
+| Checkpoint / resume | Rebuilt |
+| Audit emitted | None beyond the names |
+| Alternate paths | The block is **outside** the untrusted-reference fence although its content can be a workspace file (`BYP-A4-06`) or rules a model extracted from a fetched page (`GAP-A4-04`, labelled "Unverified Rules") |
+| Invariant | Skill text is advisory about how to implement; a plan's integration decision binds over it (`planning_request.py::INTEGRATION_CONTRACT_AUTHORITY`) |
+| Negative control | Callers of `render_skill_conventions(`: `stage_analysis.py`, `skill_extraction.py` |
+| AS-IS evidence | `TRACED`. Size: registry `SKILL-RELEVANCE-CONTEXT-SCOPE-001` (`MEASURED` in run 10, preserved: about 31,000 characters to the Planner and to each of six units) |
+| Required contract | Per-rule applicability, so a unit receives the rules that apply to it (`GAP-A4-02`). No truncation |
+| Limitation | Skills user experience (creating, building from a document, approving in the desktop) is not implemented: `skills/service.py` is read-only; registry `GUI-SKILLS-BUILD-001`, `GUI-SKILLS-MUTATION-001` |
+
+### AUTH-A4-10 - Is the structured plan valid? (enforce)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether an `EngineeringPlan` may execute |
+| Owner | The planning loop of `enforce_loop.py` (the `while True` after "STRUCTURED PLANNING"), which composes: parse (`agents/contracts.py::parse_planner_structured_output`), the deterministic normalizers (`plan_validation.py::canonicalize_planned_file_actions`, then `plan_normalization.py::coalesce_same_file_owners`, `redirect_immutable_test_edits`, `derive_verification_contracts`, `scope_verification_to_requirements`), `plan_validation.py::validate_plan`, `plan_targets` check, the unbounded-model-subtask check, `planning_request.py::find_missing_grounded_production_artifacts`, `evaluate_plan_edit_feasibility`, and the two repair-regression checks |
+| Why this owner | The loop is the only place all the checks meet; `validate_plan` is the largest (37 reason codes in the module) but not the whole decision |
+| Authoritative inputs | The Planner's JSON; the workspace (file existence, manifests); the route; the stack contract (`derive_stack_contract(goal)`); the requirement ids; the sealed verification contract's frozen tests, frozen files and documentation paths; delegating shims; the tool catalogue snapshot (`subtask_executor.py::plannable_tool_names`); the structural edges of the bounded candidate set; `goal_requires_runtime_behavior(goal)` |
+| Evidence allowed | Deterministic checks only |
+| Evidence forbidden | Retrieved reference text: "no authority decision ever reads it" (AUTH-GOAL-CONTAMINATION-001 comment). A tool name outside the plannable snapshot |
+| Model role | Proposer. The Planner authors subtasks, files, criteria, invariants, capabilities, dependencies, integration relationships. Bounded repair: at most `planner_repair.py::STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS` = 2 further answers |
+| Human role | **None.** The plan is called "approved" when it validates (`build_approved_plan_document`, lifecycle `approved`); no person sees it before execution |
+| Persisted state | The approved-plan document (`MUT-A4-07`); decision-ledger records `structured_plan_normalized`, `structured_plan_targets`, `structured_plan_edit_feasibility`; the planning attempt diagnostic; `ControlState.current_plan_hash` = hash of the **raw** Planner plan |
+| State transitions | `SM-A4-01` |
+| Downstream consumers | The unit loop: order, `planned_files` as the write boundary (`allowed_write_relpaths`), verification methods, the semantic context of each unit |
+| Mutations authorized | None in the workspace. After validation: creation of the plan sandbox |
+| Mutations forbidden | Any unit before a valid plan; whole-goal execution on exhaustion |
+| Failure / UNKNOWN | Parse failure and every validation error are repair input. Exhaustion: `STRUCTURED_PLAN_REPAIR_EXHAUSTED`, result `needs_review`, `failure_type: PLANNING_ERROR` (`workflow_controller.py`, the `_UnsafeStructuredPlan` handler). A registry that cannot be listed admits no tool |
+| Retry / recovery | The 2 repairs; a strict regression never becomes the baseline of the next prompt and is not refunded |
+| Checkpoint / resume | Every enforce invocation asks the Planner again ("plan_text above is a FRESH Planner call every time"); prior subtask states are reused only if the new raw plan's hash equals the stored one (`GAP-A4-06`) |
+| Audit emitted | `record_plan_created`; ledger records; Planner outcome in the role metrics |
+| Alternate paths | During execution the plan is revised deterministically and revalidated at three further `validate_plan` call sites (planned prerequisite, runtime plan gap, scope-owner revision; `plan_revision.py`, bounded by `_MAX_PLAN_SCOPE_REVISION_ATTEMPTS` = 3). The direct shape never runs this decision (`AUTH-A4-11`) |
+| Invariant | A MODEL subtask that is not a verification unit owns at least one planned file; one owner per mutable file; the dependency graph is acyclic; every cited id exists |
+| Negative control | Callers of `validate_plan(`: `enforce_loop.py` (four sites) and `shadow_mode.py` (search in `kriya/`). No approval call exists between validation and the first unit (search `approval` in `enforce_loop.py` lines 1129 to 1838: resume digests and the approved-plan document only) |
+| AS-IS evidence | `TRACED`; `MEASURED` P3 (six reason codes on a plan the direct shape accepts) |
+| Required contract | Open: whether a plan needs a human decision under any trigger (`GAP-A3-05`); otherwise the same |
+| Limitation | `validate_plan`'s body (lines 565 to 1418) was read through its signature, docstring and reason-code inventory, not line by line. `plan_revision.py` was not read |
+
+### AUTH-A4-11 - Is the plan acceptable? (direct and milestone units)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether the Planner's answer may go to the Architect |
+| Owner | `file_resolution.py::classify_plan_completeness`, wrapped by `stage_planning.py::_classify_against_project` |
+| Why this owner | The direct unit executes off the prose plan; the structured block is used as evidence that the answer is complete and authorized |
+| Authoritative inputs | The plan text; the tool catalogue snapshot; the Current Project View's paths |
+| Evidence allowed | The structured JSON block parses and passes the schema (`PlannerStructuredOutput`, path authority inside `PlannedFile`); tool names are registered and plannable; a MODIFY or DELETE names a path the project holds (`PLANNED_FILE_ACTION_MISMATCH`) |
+| Evidence forbidden | - |
+| Model role | Proposer of the prose plan. The Architect (a model) then decides the file list (`stage_architecture.py`, not read) |
+| Human role | None at this stage |
+| Persisted state | The `plan` stage checkpoint (`MUT-A4-06`) |
+| State transitions | `SM-A4-02` |
+| Downstream consumers | The Architect |
+| Mutations authorized | None |
+| Mutations forbidden | Reaching the Architect with an empty, truncated, schema-invalid or path-unauthorized answer |
+| Failure / UNKNOWN | `planner_output_incomplete`, `planner_output_schema_invalid` (after at most 2 repairs), `planner_output_unauthorized_path` (never repaired: "repairing it would convert a security rejection into an opportunity to resubmit") |
+| Retry / recovery | Repair only for `schema_invalid` |
+| Checkpoint / resume | A resumed unit reuses the saved plan and skips the Planner; the saved plan is classified again |
+| Audit emitted | `structured_plan_validation`, `structured_plan_repair_requested`, `structured_plan_repair_result` events; the early-exit trace |
+| Alternate paths | The plan's **structure** is not validated: dependency cycles, two owners of one file, missing invariants and missing semantic contracts are `complete` here (`MEASURED` P3). On this shape that structure is not executed, so the divergence is one of truth, not of safety: see `GAP-A4-01`. An enforce unit also passes this check, with the one-line predetermined plan (`build_subtask_plan_text`) |
+| Invariant | Tool membership uses the same validator as enforce (`planner_validation.py::validate_tool_capability_membership`) and the same snapshot that was shown to the Planner |
+| Negative control | Callers of `classify_plan_completeness(`: `stage_planning.py` and the legacy wrapper in `file_resolution.py` |
+| AS-IS evidence | `TRACED`; `MEASURED` P3 |
+| Required contract | State which plan facts are authoritative on each shape (`GAP-A4-01`) |
+| Limitation | The Architect stage and how the write scope of a direct unit is inferred were not read (slice A5 owns the write gate) |
+
+### AUTH-A4-12 - Which Planner statements bind the Developer? (criteria, invariants, decisions)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | What a unit's Developer is told and with what force |
+| Owner | `planning_request.py`: `build_subtask_goal_text` (the unit goal), `build_subtask_semantic_context` (JSON block), `build_subtask_constraint_context` (the overall request as context), `build_subtask_plan_text` ("Implement: <description>"); assembled by `enforce_loop.py::_invoke_bounded_subtask` |
+| Why this owner | One caller, one renderer per part |
+| Authoritative inputs | The validated plan and the user's goal |
+| Evidence allowed | Under "Authoritative Goal": the user's goal. Under "Planned Implementation Strategy": the subtask description, the acceptance criteria mapped to it, its planned files, its verification text. In the semantic context: the unit's relevant global invariants (statements), upstream and downstream capability contracts, verification targets, runtime ownership, and every integration relationship that names it |
+| Evidence forbidden | A plan is "never a source of file content" (`build_subtask_plan_text` docstring) |
+| Model role | Planner: proposer whose text is labelled as "the Planner's own implementation choice, not a new user requirement" and "may be adapted if it conflicts with the authoritative goal". **Exception:** integration contracts are labelled AUTHORITATIVE for the stage and a recorded decision must be implemented "exactly" (`INTEGRATION_CONTRACT_AUTHORITY`) |
+| Human role | None |
+| Persisted state | The plan document |
+| State transitions | None |
+| Downstream consumers | The unit's analysis, the Developer request, the spec-compliance check (`strict_spec_compliance=True`), the verifier semantic review, which lists criteria and invariants (`AUTH-A2-07`) |
+| Mutations authorized | The unit may write only its planned files (`allowed_write_relpaths`); a verification unit is `DENY_ALL` |
+| Mutations forbidden | Files of other units |
+| Failure / UNKNOWN | A criterion id that does not resolve is silently not rendered (`if criterion_id in criteria_by_id`); `validate_plan` is what should have rejected it |
+| Retry / recovery | Recovery contracts travel in their own field (`recovery_contract_block`), not in this context |
+| Checkpoint / resume | Rebuilt from the plan |
+| Audit emitted | None specific |
+| Alternate paths | The direct shape has none of this: the Developer gets the prose plan and the Architect's design. Milestone units get MilestonePlanner text as their goal (`plan_adapters.py::milestone_execution_plan`) |
+| Invariant | Planner-authored criteria and invariants are evidence and context; they close no requirement (`AUTH-A3-09`) |
+| Negative control | `integration_contracts_for` is "the single reader of the relationship seam for Developer context" (its docstring); not searched further |
+| AS-IS evidence | `TRACED` |
+| Required contract | With `GAP-A2-01`: a canonical semantic contract would replace Planner-authored criteria as the thing a verifier is judged against. An integration decision is model-authored authority over other units' code: record who may make it (`GAP-A4-08`) |
+| Limitation | The Developer request assembly itself (STAGE-GENERATION: `attempt.py`, `retry_prompts.py`, `prompt_composition.py`) is still not traced; handed to slice A6 with the context-budget rows |
+
+### AUTH-A4-13 - Does the request require the application to be executed?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | `runtime_verification_required` for the run |
+| Owner | `acceptance.py::goal_requires_runtime_behavior` (regular expressions over the goal's sentences; an explicit negation wins for the whole goal) |
+| Why this owner | "Kriya's own deterministic reading of the user's request" (`plan_normalization.py::scope_verification_to_requirements` docstring); one function for normalization, validation and each unit |
+| Authoritative inputs | The user's goal |
+| Evidence allowed | Sentences that state output, exit, startup, response or an explicit execution requirement about an executable subject |
+| Evidence forbidden | "runnable" alone; documentation framing; a relative clause of a repair sentence |
+| Model role | None in the reading. The Planner may add an `application_runtime` verifier; when the reading is false that verifier is **removed** (`PLAN_VERIFICATION_SCOPE_NORMALIZED`) or, where removal is not obviously safe, the plan is refused (`PLAN_VERIFICATION_SCOPE_UNJUSTIFIED`) |
+| Human role | None |
+| Persisted state | The normalization record in the decision ledger |
+| State transitions | Part of `SM-A4-01` |
+| Downstream consumers | `validate_plan(runtime_verification_required=...)`, the unit's `runtime_verification_required`, the run-verification judge's advisory-only rule |
+| Mutations authorized | Removal of a plan verifier or of a whole verification-only unit |
+| Mutations forbidden | Touching compile or test verifiers |
+| Failure / UNKNOWN | No "unknown": a sentence the patterns miss reads as "not required". Then a correct Planner verifier is removed and the run can succeed without the application ever being executed |
+| Retry / recovery | None |
+| Checkpoint / resume | Recomputed |
+| Audit emitted | `structured_plan_normalized` |
+| Alternate paths | The owner's greenfield goal is now read as requiring runtime behaviour and the application is executed (`MEASURED`: tests `test_the_goal_reading_that_drives_the_scoping`, `test_the_owner_goal_keeps_s4_and_the_application_is_executed`). A build-only wording still succeeds without execution, as designed (`test_a_goal_without_a_runtime_requirement_still_succeeds_without_executing`) |
+| Invariant | A runtime verifier survives only when the user's own text requires execution |
+| Negative control | Not searched beyond the three enforce call sites and the unit parameter |
+| AS-IS evidence | `TRACED`; `MEASURED` by the committed tests (7 in `tests/test_greenfield_runtime_verification_dropped.py`) |
+| Required contract | A false negative must not silently delete evidence: either a typed "not run" in the result or the semantic contract of `GAP-A2-01` (`GAP-A4-05`) |
+| Limitation | The pattern set was not reviewed for coverage; only the measured goals are known |
+
+### AUTH-A4-14 - Who executes the plan: order, unit status, completion? (mandatory row)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Which unit runs next, what state each unit is in, when the plan is complete |
+| Owner | **Two owners.** direct and milestone: `plan_executor.py::execute_plan` with `_Lifecycle` (`WorkUnitStatus`) and a `PlanDriver`. enforce: `enforce_loop.py::EnforceLoop`, with its own `order`, `approved_stage_states` (strings), `ControlState.subtask_states`, recovery sub-machine (`SM-A1-04`) and terminal (`SM-A3-04`) |
+| Why this owner | History: PRD-008A unified direct and milestone; "The structured subtask loop is not yet executed by execute_plan" (comment at the unit call) |
+| Authoritative inputs | direct / milestone: the `ExecutionPlan`, durable completion evidence handed in as `reusable_unit_ids`. enforce: the `EngineeringPlan`, the control state |
+| Evidence allowed | A unit is VERIFIED / completed only from its own result (`quality_gates_passed`) or validated durable completion |
+| Evidence forbidden | A plan result that claims success while a unit is not VERIFIED (`PLAN_TERMINAL_MISMATCH`, direct / milestone) |
+| Model role | None in ordering. The Planner authored the dependency edges the enforce order is computed from |
+| Human role | None |
+| Persisted state | direct / milestone: the run record's `active_work_unit` and commit cycles; stage checkpoints. enforce: `ControlState`, the approved-plan document; a STRUCTURED unit has **no durable unit record** (`plan_adapters.py::work_unit_record` returns None) |
+| State transitions | `SM-A3-05` (direct / milestone unit), `SM-A1-04` and `SM-A3-04` (enforce) |
+| Downstream consumers | The run result (`AUTH-A3-10`, `AUTH-A3-11`) |
+| Mutations authorized | direct / milestone: each unit commits into the real workspace as it passes (incremental; a later failure leaves earlier commits, reported as `committed_work_units`). enforce: units commit into the plan sandbox; one terminal commit to the workspace |
+| Mutations forbidden | Starting a plan inside another plan's unit (`NestedExecutionPlanError`); an enforce unit carries a `WorkUnitInvocation` so the engine does not wrap it in a direct plan |
+| Failure / UNKNOWN | direct / milestone: a failed unit blocks the rest; an exception marks the unit FAILED before propagating. enforce: `FR-A1` and `FR-A3` rows |
+| Retry / recovery | direct / milestone: `driver.retry_failed_unit` (false for direct). enforce: owner recovery, dependent reverification, plan revision |
+| Checkpoint / resume | direct / milestone: `select_work_unit_checkpoint`. enforce: `AUTH-A1-10` |
+| Audit emitted | direct / milestone: `work_unit_states` in the result. enforce: the `.enforce` trace row, the plan document |
+| Alternate paths | The two executors share the unit primitive, `TerminalGateService` and the commit service, and differ in the facts listed in `GAP-A4-01` |
+| Invariant | Each: partial completion is never success |
+| Negative control | Callers of `execute_plan(`: `plan_executor.py::execute_direct_goal` and the milestone runner (search; `milestones.py` not read). `WorkUnitInvocation(` with `PlanSourceKind.STRUCTURED`: `enforce_loop.py` only |
+| AS-IS evidence | `TRACED`; `MEASURED` P2, P3 |
+| Required contract | Phase C: one statement of each result truth that both executors satisfy; whether the executors themselves merge is a design choice, not the requirement (`GAP-A4-01`) |
+| Limitation | `milestones.py` and the milestone driver were not read in A4 |
+
+### AUTH-A4-15 - Which unit answers for the user's requirements? (requirement ownership)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Where the original requirements are compiled into a contract and verified |
+| Owner | direct: the one unit (`WorkUnitInvocation.requirement_goal` = the goal; `workflow.py` compiles the contract inside the unit). milestone: the integration unit only (`plan_executor.py::requirement_goal_of`). enforce: the loop compiles and seals the contract before planning and verifies at the terminal gate; **no unit carries a requirement goal** (`MEASURED` P2: `requirement_goal None`, `authoritative_goal None`) |
+| Why this owner | "a milestone or a subtask verifies something narrower than the whole request" (`WorkUnitInvocation` comment) |
+| Authoritative inputs | `AUTH-A4-02` |
+| Evidence allowed | Slice A2 and `AUTH-A3-09` |
+| Evidence forbidden | A subtask's `requirement_ids` as proof ("lineage only") |
+| Model role | Planner cites ids; cites are lineage |
+| Human role | As in `AUTH-A3-09` |
+| Persisted state | The sealed contract; `ControlState.verification_contract_digest` |
+| State transitions | - |
+| Downstream consumers | The terminal gate (`AUTH-A3-08`, `AUTH-A3-09`) |
+| Mutations authorized | None |
+| Mutations forbidden | None |
+| Failure / UNKNOWN | enforce: admission refusal before any model call when the policy blocks; baseline authorities unavailable is a typed stop; "no mutation required" ends the run as a success without a model call (`NoMutationRequired`) |
+| Retry / recovery | enforce: none after a terminal requirement failure (`GAP-A3-02`). direct: the unit's own retry loop can still act, because the verification happens inside the unit |
+| Checkpoint / resume | enforce: contract digest drift refuses resume |
+| Audit emitted | `requirement.derived`, the sealed contract report |
+| Alternate paths | Because an enforce unit has no requirement set, unit-level closers that need one run only at the terminal; A3 found the enforce terminal calling the `file_creation` and `runtime_stdout` closers without per-unit evidence. The Current Project View "before" context reaches the direct Reviewer and spec check, not the enforce terminal verifier (registry `REQUIREMENT-VERIFIER-ENFORCE-PATH-NO-PROJECT-BEFORE-001`; `terminal_gate_service.py::_verify_original_requirements` judges with per-file baselines; row not re-read in A4) |
+| Invariant | Exactly one place per shape verifies the original requirements |
+| Negative control | `requirement_goal` assignment sites: `plan_executor.py::WorkUnitInvocation.for_unit` only (search `requirement_goal` in `enforce_loop.py`, `terminal_gate_service.py`, `milestones.py`: none) |
+| AS-IS evidence | `TRACED`; `MEASURED` P2 |
+| Required contract | The point of verification differs by shape and decides whether a repair is possible; Phase C must state it once (`GAP-A4-01`, `GAP-A3-02`) |
+| Limitation | The terminal closers were read in A3, not again here |
+
+### AUTH-A4-16 - Brownfield or greenfield: what changes?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Which rules apply because the workspace already holds code |
+| Owner | No single owner. The facts are computed where used: `plan_validation.py::canonicalize_planned_file_actions` (create or modify from file existence), the `extension_points` rule of `validate_plan` (`EXTENSION_POINT_REQUIRED`, exempt for an empty workspace and for a resume of the run's own progress), `REFACTOR_BASELINE_MISSING` for a refactor route, `grounded_owner_candidates` for TASK and ENHANCEMENT routes, the Current Project View (`stage_analysis.py`), `admit_workspace_for_mutation` (a non-empty workspace with no Git repository is refused), the contract baseline run (`contract_baseline.py`, enforce only) |
+| Why this owner | Each rule reads the repository directly |
+| Authoritative inputs | The bound tree and file system; the route kind from triage |
+| Evidence allowed | Repository state |
+| Evidence forbidden | A Planner claim that a file exists or not: the action is canonicalized from disk, and on the direct shape a MODIFY of an absent path is `PLANNED_FILE_ACTION_MISMATCH` |
+| Model role | None |
+| Human role | None |
+| Persisted state | None of its own |
+| State transitions | - |
+| Downstream consumers | Plan validation, the Planner prompt (owner candidates, grounding, project view) |
+| Mutations authorized | None |
+| Mutations forbidden | Converting a mismatched MODIFY into a CREATE ("never converted into a create here or downstream") |
+| Failure / UNKNOWN | The Current Project View can be unavailable: recorded (`project_view.unavailable`), the Planner continues on the aggregate analysis, "never read as no files". Owner candidates and localization unavailable: logged, planning continues |
+| Retry / recovery | - |
+| Checkpoint / resume | The raw plan hash is used for resume precisely because canonicalization flips create to modify after a unit has written (`enforce_loop.py` comment on `raw_plan`) |
+| Audit emitted | `project_view.built` / `project_view.unavailable` |
+| Alternate paths | A bug fix typed as a refactor route demands a refactor baseline (registry `PLAN-FORM-NORMALISATION-001`, 7 of 7 runs; not re-measured) |
+| Invariant | File existence is read from disk, never from the model |
+| Negative control | Not run |
+| AS-IS evidence | `TRACED` at the call sites; the rule bodies inside `validate_plan` were not read |
+| Required contract | Same |
+| Limitation | Triage (`triage.py`) decides the route kind and was not read; brownfield baseline policy is slice A2 / A3 material (`baseline_policy.py`) |
+
+### A4 answers to the slice questions (each cites its row)
+
+1. **Goal intake.** `AUTH-A4-01`. The goal is never rewritten; an enforce unit's `goal` argument is a composition and
+   two consumers read it instead of the goal of record (`BYP-A4-12`).
+2. **Requirement normalization.** `AUTH-A4-02`. One function, syntactic derivation or a closed operator contract.
+3. **Semantic ambiguity.** No owner: `AUTH-A4-03`, `GAP-A4-07`.
+4. **Knowledge guard.** `AUTH-A4-05`, `SM-A4-03`, `GAP-A4-03`.
+5. **Outward lookup.** `AUTH-A4-06`, `GAP-A4-04`.
+6. **Skills.** Fact authority `AUTH-A4-07`; relevance selection `AUTH-A4-08`; rendering and injection `AUTH-A4-09`;
+   user experience: read-only in the desktop, CLI-only mutation, no build operation (`AUTH-A4-09` limitation). No
+   embedding retrieval exists and none is proposed.
+7. **Planner authority and plan validation.** `AUTH-A4-10` (enforce), `AUTH-A4-11` (direct), `SM-A4-01`, `SM-A4-02`.
+8. **Criteria and global invariants.** `AUTH-A4-12`.
+9. **Direct and enforce execution, convergence.** `AUTH-A4-04`, `AUTH-A4-14`, `GAP-A4-01` (mandatory row).
+10. **Brownfield / greenfield.** `AUTH-A4-16`.
+11. **Requirement ownership.** `AUTH-A4-15`.
+12. **Aggregate approval authority (owner question on `GAP-A3-05`).** None in this slice's scope: plan acceptance
+    involves no person (`AUTH-A4-10`), and the size trigger has one reader, per unit (`BYP-A4-10`).
