@@ -77,11 +77,17 @@ def test_a_candidate_caused_test_compile_regression_is_attributed_and_repaired(t
     # 3. An authorized repair route: a later Developer request may write the broken test file.
     assert any(t4.TEST in (r["payload"].get("authorized_write_scope") or []) for r in observed.of("authority.snapshot"))
 
-    # 4. End to end: the repair is applied and the run succeeds on a green full regression.
-    assert observed.result.legacy_result["status"] == "success"
-    assert t4.CAST_CALL in t4.workspace_text(observed, t4.TEST)
-    assert t4.INT_OVERLOAD.strip() in t4.workspace_text(observed, t4.MAIN)
+    # 4. End to end: the repair is made and verified on a green full regression. VERIFIER-SEMANTIC-AUTHORITY-001 (9323129, owner rulings 2026-11-14)
+    # changed how this unattended run ENDS, not the attribution or the repair route: the repaired test file is run-modified test source (a
+    # generated-verifier subject, kriya/workflow/verifier_semantic.py) with nobody to review it, so the run stops for review and applies nothing.
+    import json
+
+    legacy = observed.result.legacy_result
     assert observed.extra["oracle"].calls[-1]["verdict"] == "green"
+    assert legacy["status"] != "success" and "VERIFIER_SEMANTIC_AUTHORITY_REQUIRED: VERIFIER_SEMANTIC_UNATTENDED" in json.dumps(legacy, default=str)
+    assert t4.TEST in json.dumps(legacy, default=str)
+    assert t4.CAST_CALL not in t4.workspace_text(observed, t4.TEST)
+    assert t4.INT_OVERLOAD.strip() not in t4.workspace_text(observed, t4.MAIN)
 
 
 def test_p2_the_attribution_names_the_compiler_locator_and_the_carried_locus_is_revision_bound(

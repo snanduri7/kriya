@@ -388,7 +388,9 @@ def test_at_8k_a_long_gate_error_leaves_the_review_files_out_and_the_review_stil
     (final_review_refused at a828a67, the same scenario)."""
     run = _run(tmp_path, monkeypatch, 8192, report_methods=65, compile_error=COMPILE_ERROR)
     assert run.refused(*REVIEWER) == []  # before the fix: refused, final_review_refused
-    assert run.result.get("failure_category") == "quality_gates_exhausted"
+    # The scripted Developer never answers a repair validly, and since NON-CANDIDATE-FAILURE-SCOPED-RESET-001 (3722d9d) a refused request no longer
+    # opens a new failure family, so the retry-progress invariant ends this run (it used to end quality_gates_exhausted). The review still ran.
+    assert run.result.get("failure_category") == "no_progress"
     [fit] = run.fits("reviewer.final")
     assert fit["truncated_files"] == [REPORT]
     assert run.transport.by(*REVIEWER)
@@ -436,7 +438,11 @@ def test_a_final_review_whose_fixed_text_alone_cannot_fit_ends_typed(tmp_path, m
     run = _run(tmp_path, monkeypatch, 8192, report_methods=120, compile_error=UNFITTABLE_COMPILE_ERROR)
     [fit] = run.fits("reviewer.final")
     assert fit["omitted"] and fit["room_tokens"] == 0
-    assert run.result.get("failure_category") == "final_review_refused"
+    assert run.refused(*REVIEWER), "the dispatch check must refuse the review whose fixed text is over the window"
+    # The run's own typed cause outranks the refused advisory review (kriya/workflow/outcome.py, run 9: "no_progress stays no_progress"); since
+    # NON-CANDIDATE-FAILURE-SCOPED-RESET-001 (3722d9d) this script ends on the retry-progress invariant. The final_review_refused terminal of a run
+    # with no typed cause of its own is proven in tests/test_prompt_budget_fit_001c.py and tests/test_outcome.py.
+    assert run.result.get("failure_category") == "no_progress"
     assert run.result["final_review_refusal"]["reason_code"] == tb.CONTEXT_BUDGET_UNSATISFIABLE
 
 

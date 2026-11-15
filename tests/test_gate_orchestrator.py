@@ -411,6 +411,13 @@ def _jvm_run(tmp_path: Path, *, autonomous: bool, target: str = APP, oracle: Any
             return json.dumps({"verdict": "PASS", "requirements": []})
         developer_calls.append(1)
         if target == "pom.xml":   # the candidate is the pom itself: one answer, which validates and builds
+            import re as _re
+
+            asked = _re.search(r'path="([^"]+)"', system_prompt)
+            if asked is not None and asked.group(1) == APP:
+                # A located compiler diagnostic sends the repair to the file it names. The stand-in used to answer pom.xml for every request and
+                # the run reached a second compile only because a refused answer reset the retry scope (removed by NON-CANDIDATE-FAILURE-SCOPED-RESET-001).
+                return sentinel(APP, analysis="add mul", content=APP_GOOD)
             return sentinel("pom.xml", analysis="name the project", content=POM_NAMED)
         content = APP_BROKEN if len(developer_calls) == 1 else APP_GOOD
         if wants_structured(system_prompt) and '<<<KRIYA:EDIT path=' in system_prompt and len(developer_calls) > 1:

@@ -179,11 +179,15 @@ def test_end_to_end_the_planned_new_test_is_written_at_its_planned_path_and_the_
     observed = enforce_run(tmp_path, monkeypatch, _responder, _files(), GOAL, [_plan] * 4, cfg=cfg)
 
     legacy = observed.result.legacy_result
-    assert legacy.get("quality_gates_passed") is True, (
-        legacy.get("status"), legacy.get("error"), legacy.get("reason_codes"), legacy.get("failure_type"))
-    assert (observed.workspace / PLANNED_NEW_TEST).read_text() == NEW_TEST
+    # VERIFIER-SEMANTIC-AUTHORITY-001 (9323129, owner rulings 2026-11-14) changed how this unattended run ENDS, not the file resolution under test: the
+    # planned new test is a run-authored verifier with nobody to review it, so the run stops for review and applies nothing (it used to succeed).
+    import json
+
+    assert legacy.get("status") != "success" and "VERIFIER_SEMANTIC_AUTHORITY_REQUIRED: VERIFIER_SEMANTIC_UNATTENDED" in json.dumps(legacy, default=str)
+    assert PLANNED_NEW_TEST in json.dumps(legacy, default=str)              # the subject is the planned path, never the other module's test
+    assert not (observed.workspace / PLANNED_NEW_TEST).exists()             # the unreviewed verifier was not applied
     assert (observed.workspace / OTHER_MODULE_TEST).read_text() == _files()[OTHER_MODULE_TEST]
-    assert (observed.workspace / CORE_SOURCE).read_text() == FIXED_SOURCE
+    assert (observed.workspace / CORE_SOURCE).read_text() == _files()[CORE_SOURCE]
     mirrored = [r.get("payload") or {} for r in observed.of("mirror.event")]
     kept = [e for e in mirrored if e.get("kind") == "file_resolution.new_artifact_kept"]
     assert kept and kept[0].get("source") == "workflow.architect_file_resolution", (
