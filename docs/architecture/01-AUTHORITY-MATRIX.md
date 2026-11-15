@@ -1893,7 +1893,7 @@ profile, the production profile seals offline mode, and each query needs an appr
 |---|---|
 | Truth decided | Nothing: these are records. The row states which record holds which fact, who writes it and what a reader may conclude |
 | Owner | Four writers, one per record: see the table below |
-| Why this owner | Each record has its own purpose (control, history, attempt evidence, log); only the RunRecord takes part in decisions |
+| Why this owner | Each record has its own purpose (control, history, attempt evidence, log); only the RunRecord takes part in decisions. The code states this for the stores it lists: `control/run_record.py::STORE_CLASSIFICATION` (RunRecord and commit evidence authoritative; control state, plan, registries, ledger and checkpoints derived; the trace database "independent observability"); the attempt-evidence store and the run logs are not in that table (added in Phase B, contradiction X-10) |
 | Authoritative inputs | The run's own state at the moment of writing |
 | Evidence allowed | A reader may conclude: from the RunRecord, the lifecycle and commit result; from a VERIFIED evidence store, that the file is internally consistent and complete to its seal |
 | Evidence forbidden | Reading a history row or an evidence store as authenticated: neither carries a key or a binding outside itself (`MEASURED` P4, P5) |

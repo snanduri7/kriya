@@ -238,7 +238,7 @@ dispatched model`, exact-bound.
 | Field | Content |
 |---|---|
 | Problem | (B of `GAP-A6-03`) Durable audit integrity: the history row is replaceable and unbound (`MEASURED` A6 P5); a consistently rewritten evidence chain and seal reads VERIFIED (`MEASURED` A6 P4); writes of both are best-effort. Around it: records written before the decision they describe (`GAP-A3-07`), allowance changes with no record (`GAP-A1-03`), labels and counts that do not mean what they say, gate results without a purpose, records with no retention owner, several run identifiers with no binding |
-| What Kriya promises today | The subsystem note calls the recorder "observational"; the history writer's own comment says "no digest binds these rows; every reader is a display or a metric". No document promises tamper evidence. The desktop shows the word "verified" for a chain check. So the architecture contract is implicit, which the owner ruled insufficient |
+| What Kriya promises today | **A store classification exists in code** (`control/run_record.py::STORE_CLASSIFICATION`, pinned by `tests/test_prd007_run_lifecycle.py`): the RunRecord and the commit evidence are authoritative; control state, approved plan, registries, decision ledger and checkpoints are derived and stamped with the RunRecord revision; the trace database is "independent observability ... never consulted for run lifecycle or commit truth". So the contract is explicit for those stores (corrected here: the first version of this row said none exists, contradiction X-10). What it does not cover: the attempt-evidence store and the run logs are not in the table, and nothing says what a surface may present as a run's outcome or what "verified" proves. The subsystem note calls the recorder "observational"; no document promises tamper evidence |
 | Classification | Not closed by "the RunRecord is authoritative" (that is R-02). Two parts: (1) **binding and completeness**, needed for any honest audit: a history row and an evidence store that name the workspace and the RunRecord revision they describe, labels written by the deciding owner, retention owners. FIX_REQUIRED_BEFORE_PRODUCTION, P2. (2) **authenticity against a writer with access to the state directory**: an owner policy choice. If Kriya is to promise tamper-evident evidence, FIX_REQUIRED (P1); if evidence is diagnostic history of a local single-user tool, the contract must say so in the documentation and on screen, and authenticity is a GENUINE_FUTURE_FEATURE. This audit recommends the second, stated explicitly |
 | Affected stages | STAGE-EVIDENCE, STAGE-TERMINAL, STAGE-RETRY |
 | Violated invariant | Evidence binds to exact identity; a record never implies more than was established |
@@ -484,7 +484,7 @@ bypass; do resume and every execution shape use the same contract.
 | 32 | Provider / runtime -> context window | Requested, served, ceiling | The request; observation | `context_window_state`, `plan_dispatch`, the after-call check | Sound (`MEASURED` A6 P3). The default adapter truncates silently at the provider and cannot qualify | `AUTH-A6-04`, `AUTH-A6-05` |
 | 33 | Retry / recovery -> run resource budget | Attempts and re-invocations | The run lease's clock; counts in memory | Every deadline reads the one run clock | Time: one bound per top-level run when configured (`MEASURED` B-P2). Work: no bound; value: repository-settable | `AUTH-A1-08`, `AUTH-A5-12`; R-08 |
 
-## 11. Cross-map contradictions found, and how each is resolved
+## 11. Cross-map and code contradictions found, and how each is resolved
 
 `evidence/b/crossmap_check.py` checks every row reference in the set: 0 references to an undefined row. The
 contradictions below were found by reading rows of different maps that describe the same truth.
@@ -499,6 +499,7 @@ contradictions below were found by reading rows of different maps that describe 
 | X-06 | The six maps define rows that no other document cites: 53 rows (mostly the A1 failure and mutation rows, written before rows carried cross-references) | Not a contradiction of fact: a linkage gap. The Phase-C stage and integration documents cite every one of them; the check is rerun then and must report none |
 | X-07 | `AUTH-A1-01..14` and `AUTH-A2-01..13` appear twice in the authority matrix (the row and its Phase-B completion) | Intended: the completion adds fields and repeats none; the check reports them as double definitions by construction |
 | X-08 | Project instructions: "Learned/retrieved text stays inside the untrusted-context fencing". `AUTH-A6-09`: fetched text is outside it | Code wins (`DOC-A6-07`); R-10 |
+| X-10 | `AUTH-A6-11`, `GAP-A6-03` and the first version of root R-11 here: "no contract states which record a reader may treat as the outcome". `control/run_record.py::STORE_CLASSIFICATION` classifies the RunRecord and commit evidence as authoritative, six stores as derived and the trace database as independent observability | The code is right and the documents overstated (`TRACED`; found while checking diagram D-2 against the lifecycle enum). Narrowed in place: the classification exists for the stores it lists; the attempt-evidence store and run logs are outside it, and the desktop presents the "independent observability" row as the outcome. R-11's disposition is unchanged |
 | X-09 | `AUTH-A4-10`: `current_plan_hash` is the hash of the raw Planner plan. The enforce loop also assigns `current_plan_hash = plan.content_hash()` after a plan revision | Both true at different times (`TRACED`): the first identity is of the raw answer, later ones of the revised plan. Recorded as INT-02 |
 
 After these, no two rows of the set are known to describe one truth differently.
@@ -534,7 +535,7 @@ INT-06 and INT-07 to C-06, INT-08 to C-01, INT-09 to C-03).
 |---|---|
 | A1 to A6 content reconciled across the six maps | Done for the authority rows (fields read), the mutation rows, the UNKNOWN tables and the bypass rows cited above. 53 rows are cited by no other document (X-06): linked in Phase C |
 | Important cross-stage handoffs traced | 33 of 33 (section 10) |
-| Contradictions resolved or classified | X-01 to X-09 |
+| Contradictions resolved or classified | X-01 to X-10 |
 | Unnamed integration gaps searched for | INT-01 to INT-13 |
 | Each root supported by content or code evidence | Yes; R-08 was corrected by this check |
 | Unexplained cross-map contradictions | 0 known |

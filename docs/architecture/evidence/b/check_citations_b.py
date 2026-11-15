@@ -38,6 +38,9 @@ CITED = [
     ("kriya/workflow/enforce_loop.py", ["current_plan_hash", "raw_plan", "content_hash"]),
     ("kriya/workflow/stage_apply.py", ["sensitive_paths", "this pattern is not being enforced"]),
     ("kriya/workflow/stage_knowledge_guard.py", ["knowledge_risk_confirmed"]),
+    ("kriya/control/run_record.py", ["STORE_CLASSIFICATION", "independent observability", "_STAGE_TRANSITIONS", "_COMMIT_SOURCES", "RECOVERED",
+                                     "COMMIT_ELIGIBLE", "COMMITTED", "VERIFYING", "begin_commit", "settle_commit"]),
+    ("tests/test_prd007_run_lifecycle.py", ["STORE_CLASSIFICATION"]),
 ]
 SEARCH_ROOTS = ("kriya", "plugins")
 
