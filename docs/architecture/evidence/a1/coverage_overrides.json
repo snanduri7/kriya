@@ -1,0 +1,45 @@
+{
+  "RETRY-BLOCKER-IDENTITY-AUTHORITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "A1: confirmed, GAP-A1-01 (MEASURED probe P1-P6, TRACED AUTH-A1-02/03/12). Disposition follows the owner ruling of 2026-11-14 (not a future feature, not a contract) and is a Phase-A proposal. Contradiction H-A1-1 must be ruled first."
+  },
+  "RETRY-PROGRESS-SAME-BLOCKER-001": {
+    "reconciliation": "DUPLICATE/SUPERSEDED",
+    "notes": "A1: no independent gap. Its measured part is closed (NON-CANDIDATE-FAILURE-SCOPED-RESET-001, 9 tests pass on this baseline); its remaining question is GAP-A1-01, carried by RETRY-BLOCKER-IDENTITY-AUTHORITY-001."
+  },
+  "RETRY-STATE-RESUME-CONTINUITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "A1: confirmed by trace, GAP-A1-02; not exercised. A1 found two parts (unit, enforce) that may need different dispositions: H-A1-3. The disposition shown follows the owner ruling of 2026-11-14 and is a Phase-A proposal."
+  },
+  "OPEN-FINDINGS-ORDER-RESUME-001": {
+    "reconciliation": "DUPLICATE/SUPERSEDED",
+    "notes": "A1: both halves are covered. 'Replacement is not order-aware' is part of GAP-A1-01 (the open set is replaced wholesale, AUTH-A1-02). 'Not checkpointed' is part of GAP-A1-02. Its planned closing unit (G4 with FindingState, OPEN-ITEMS OI-77) was not built."
+  },
+  "DEMO-TIME-BUDGET-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "A1: the run-wide shared clock is traced (AUTH-A1-08) and matches the row. The registry already classifies the value as an operator choice. Residual question (which value a real launch uses) is GAP-A1-06, NEEDS_CHARACTERIZATION, slice A5."
+  },
+  "GUI-TRACE-ATTEMPTS-SEMANTICS-001": {
+    "reconciliation": "PENDING",
+    "notes": "A1: read, not traced. Related to GAP-A1-03 (attempt accounting in evidence). To be reconciled with the evidence schema in A6."
+  },
+  "METRICS-RETRIES-TRIGGERED-COUNTS-TERMINAL-ATTEMPT-001": {
+    "reconciliation": "PENDING",
+    "notes": "A1: read, not traced. Related to GAP-A1-03. To be reconciled with role metrics in A6."
+  },
+  "HITL-RESUME-DEFERRED-GATES-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "notes": "A1: consistent with SM-A1-03 (the candidate checkpoint is written after approval and the held gates). The row itself says resume plus deferral is untested; a deterministic resume exercise is owed."
+  },
+  "SEMANTIC-SAFETY-REPAIR-CONTINUITY-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "notes": "A1: not checked whether the staging rejection's failure type is now kept as an open finding by replaces_open_finding (AUTH-A1-01). A model-free probe on the real type is owed."
+  },
+  "KERNEL-RESULT-RUNID-DIVERGES-001": {
+    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "notes": "A1: the row is INFERRED in the registry. A1 saw that terminal apply writes retry_state_reference='checkpoint:<run_id>' (MUT-A1-14) but did not compare the ids."
+  }
+}

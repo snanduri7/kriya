@@ -1,0 +1,11 @@
+kriya imported from: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-architecture-closure/kriya
+P1 testCompile vs assertion, same gate type and file -> same signature? False
+P2 assertion at line 75 vs line 76 -> same signature? True
+P3 same assertion text in a DIFFERENT test method of the same file -> same signature? True
+   signature kind: exception | locations: ('AssertEquals.java', 'AssertionFailureBuilder.java', 'Assertions.java', 'DefaultLauncher.java', 'DefaultLauncherSession.java', 'DelegatingMethodAccessorImpl.java', 'EngineExecutionOrchestrator.java', 'ForkedBooter.java', 'InvocationInterceptorChain.java', 'JUnitPlatformProvider.java', 'LauncherAdapter.java', 'Method.java', 'MethodInvocation.java', 'NativeMethodAccessorImpl.java', 'ProtocolParserTest.java', 'ReflectionUtils.java', 'TimeoutExtension.java')
+P4 identical failure recorded at attempts 2 and 5 -> first_attempt: 2 -> 5 | findings equal? False
+P5 line 75 -> 76 -> first_attempt: 8 | same locations? False
+P6 OpenFinding fields: ['evidence', 'failure_type', 'files', 'first_attempt', 'locations', 'reason_code', 'source']
+P7 a context-budget refusal replaces the open finding? False | open set unchanged? True
+P8 genuinely new family after a targeted attempt -> new_family: True | targeted: 0 | fallback_targeted_attempted: False | full-set: 0
+P9 return to a family seen earlier (A -> B -> A) -> new_family: False
