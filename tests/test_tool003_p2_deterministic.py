@@ -75,8 +75,10 @@ def test_workspace_read_only_maps_to_ro_mount():
 
 
 def test_workspace_write_maps_to_rw_mount_and_real_uid(tmp_path):
-    profile = resolve_mcp_capability_profile({"workspace_write": True}, workspace_root=str(tmp_path))
-    cp = map_capability_profile_to_containment(profile, workspace_root=str(tmp_path), resolved_env={}, profile_digest="d")
+    ws = tmp_path / "ws"   # the workspace: never the directory that also holds this module's authority home (SEC-009 refuses that, and so does the grant check)
+    ws.mkdir()
+    profile = resolve_mcp_capability_profile({"workspace_write": True}, workspace_root=str(ws))
+    cp = map_capability_profile_to_containment(profile, workspace_root=str(ws), resolved_env={}, profile_digest="d")
     assert cp.mount_workspace is True
     assert cp.workspace_write is True
     assert cp.run_as_uid == os.getuid()
@@ -84,22 +86,26 @@ def test_workspace_write_maps_to_rw_mount_and_real_uid(tmp_path):
 
 
 def test_no_write_authority_maps_to_fixed_nobody_identity(tmp_path):
-    profile = resolve_mcp_capability_profile({"workspace_read": True}, workspace_root=str(tmp_path))
-    cp = map_capability_profile_to_containment(profile, workspace_root=str(tmp_path), resolved_env={}, profile_digest="d")
+    ws = tmp_path / "ws"   # the workspace: never the directory that also holds this module's authority home (SEC-009 refuses that, and so does the grant check)
+    ws.mkdir()
+    profile = resolve_mcp_capability_profile({"workspace_read": True}, workspace_root=str(ws))
+    cp = map_capability_profile_to_containment(profile, workspace_root=str(ws), resolved_env={}, profile_digest="d")
     assert cp.run_as_uid == 65534
     assert cp.run_as_gid == 65534
 
 
 def test_additional_paths_map_to_mountspecs_with_deterministic_container_paths(tmp_path):
+    ws = tmp_path / "ws"   # the workspace: never the directory that also holds this module's authority home (SEC-009 refuses that, and so does the grant check)
+    ws.mkdir()
     ro_dir = tmp_path / "ro"
     ro_dir.mkdir()
     rw_dir = tmp_path / "rw"
     rw_dir.mkdir()
     profile = resolve_mcp_capability_profile(
         {"additional_read_paths": [str(ro_dir)], "additional_write_paths": [str(rw_dir)]},
-        workspace_root=str(tmp_path),
+        workspace_root=str(ws),
     )
-    cp = map_capability_profile_to_containment(profile, workspace_root=str(tmp_path), resolved_env={}, profile_digest="d")
+    cp = map_capability_profile_to_containment(profile, workspace_root=str(ws), resolved_env={}, profile_digest="d")
     assert MountSpec(host_path=os.path.realpath(str(ro_dir)), container_path="/kriya/mcp/extra/ro/0", writable=False) in cp.additional_mounts
     assert MountSpec(host_path=os.path.realpath(str(rw_dir)), container_path="/kriya/mcp/extra/rw/0", writable=True) in cp.additional_mounts
 

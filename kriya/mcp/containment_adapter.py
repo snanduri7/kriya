@@ -18,6 +18,14 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from kriya.mcp.capability import MCPCapabilityProfile, MCPNetworkAuthority
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.policy.protected_authority_paths import (
+    LABEL_WORKSPACE_CHECKPOINTS,
+    LABEL_WORKSPACE_CONTROL,
+    ProtectedAuthorityPath,
+    ProtectedAuthorityPathsUnresolvable,
+    protected_authority_paths,
+)
 from kriya.tools.containment import (
     ContainmentProfile,
     ContainmentSetupError,
@@ -72,6 +80,75 @@ class MCPContainmentUnsupportedError(ContainmentSetupError):
 # working configuration that quietly does less than declared) or upgraded
 # to UNRESTRICTED (the exact silent-widening the STOP condition exists to
 # prevent).
+
+
+# MCP-PROTECTED-AUTHORITY-GRANT-001 (owner ruling 2026-11-15). A capability grant authorizes files, never Kriya authority state
+# (kriya/policy/protected_authority_paths.py owns the set). The closed reason codes of the refusal below.
+MCP_GRANT_EXPOSES_PROTECTED_AUTHORITY = "MCP_GRANT_EXPOSES_PROTECTED_AUTHORITY"
+MCP_PROTECTED_AUTHORITY_UNRESOLVABLE = "MCP_PROTECTED_AUTHORITY_UNRESOLVABLE"
+MCP_PROTECTED_GRANT_REASON_CODES = frozenset({MCP_GRANT_EXPOSES_PROTECTED_AUTHORITY, MCP_PROTECTED_AUTHORITY_UNRESOLVABLE})
+
+# The two workspace-relative protected directories: the OCI backend hides them inside a WORKSPACE mount (D2 rebuild S1,
+# containment_oci.authority_state_mask_args). Every other protected path has no such mask, wherever it is mounted from.
+_MASKED_IN_A_WORKSPACE_MOUNT = frozenset({LABEL_WORKSPACE_CONTROL, LABEL_WORKSPACE_CHECKPOINTS})
+
+
+class MCPProtectedAuthorityGrantError(ContainmentSetupError):
+    """A filesystem grant of an MCP capability profile cannot become a mount without showing the contained server Kriya authority
+    state, read-only or writable. ``MCP_GRANT_EXPOSES_PROTECTED_AUTHORITY``: the grant is a protected path, lies inside one or
+    contains one. ``MCP_PROTECTED_AUTHORITY_UNRESOLVABLE``: the protected set, or the grant's relation to one of its paths, cannot be
+    established, so nothing is mounted. Nothing is masked here: the mapping is refused as a whole. The message names the grant by
+    its field and position and the protected path by its label only."""
+
+    def __init__(self, reason_code: str, detail: str) -> None:
+        super().__init__(f"{reason_code}: {detail}")
+        self.reason_code = reason_code
+
+
+def _refuse_grant_related_to(grant_path: str, grant_name: str, protected: Tuple[ProtectedAuthorityPath, ...]) -> None:
+    """Refuse ``grant_path`` when it relates to any of ``protected`` by filesystem identity (``path_relation``: case,
+    normalization and symlink spellings of either side are the platform owner's question, never a string prefix here)."""
+    for path in protected:
+        inside = path_relation(path.host_path, grant_path)    # the grant is the protected path, or lies beneath it
+        contains = path_relation(grant_path, path.host_path)  # the protected path lies beneath the grant
+        if PathRelation.WITHIN in (inside, contains):
+            raise MCPProtectedAuthorityGrantError(
+                MCP_GRANT_EXPOSES_PROTECTED_AUTHORITY,
+                f"{grant_name} would expose Kriya authority state ({path.label}) to the MCP server; a capability grant "
+                "authorizes files, never authority state. Grant a directory that neither is, is inside, nor contains it.")
+        if PathRelation.UNKNOWN in (inside, contains):
+            raise MCPProtectedAuthorityGrantError(
+                MCP_PROTECTED_AUTHORITY_UNRESOLVABLE,
+                f"the relation of {grant_name} to Kriya authority state ({path.label}) cannot be established; refusing to mount it.")
+
+
+def refuse_grants_exposing_protected_authority(profile: MCPCapabilityProfile, workspace_root: str) -> None:
+    """Every filesystem grant this adapter turns into a mount, checked against the canonical protected set BEFORE any mount is
+    built: the additional read and write paths against every protected path, and the workspace grant against every protected path
+    the backend does not mask inside a workspace mount (a workspace that is, is inside or contains an authority home or the trust
+    file). One related grant refuses the whole mapping; the order of the grants cannot change the answer."""
+    grants: List[Tuple[str, str]] = [
+        (f"mcp capabilities.{field}[{index}]", resolved.real_path)
+        for field, resolved_paths in (("additional_read_paths", profile.additional_read_paths),
+                                      ("additional_write_paths", profile.additional_write_paths))
+        for index, resolved in enumerate(resolved_paths)
+    ]
+    workspace_granted = profile.workspace_read or profile.workspace_write
+    if not grants and not workspace_granted:
+        return
+    try:
+        protected = protected_authority_paths(workspace_root)
+    except ProtectedAuthorityPathsUnresolvable as error:
+        raise MCPProtectedAuthorityGrantError(
+            MCP_PROTECTED_AUTHORITY_UNRESOLVABLE,
+            "the protected Kriya authority paths cannot be established, so no MCP filesystem grant is mounted "
+            f"({type(error).__name__}).") from error
+    for grant_name, grant_path in grants:
+        _refuse_grant_related_to(grant_path, grant_name, protected)
+    if workspace_granted:
+        _refuse_grant_related_to(
+            workspace_root, "the mcp capabilities workspace grant",
+            tuple(path for path in protected if path.label not in _MASKED_IN_A_WORKSPACE_MOUNT))
 
 
 def resolve_mcp_container_identity(write_targets: List[str]) -> Tuple[int, int]:
@@ -141,6 +218,9 @@ def map_capability_profile_to_containment(
             "(looks like a working configuration doing less than declared) or UNRESTRICTED "
             "(the exact silent authority-widening this failure exists to prevent)."
         )
+
+    # MCP-PROTECTED-AUTHORITY-GRANT-001: before any mount exists. A grant related to Kriya authority state refuses the mapping.
+    refuse_grants_exposing_protected_authority(profile, workspace_root)
 
     # profile.temp_read_write: intentionally NOT mapped to
     # ContainmentProfile.temp_path (a HOST directory mount) - the OCI
