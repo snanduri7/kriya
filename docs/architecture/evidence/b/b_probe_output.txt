@@ -1,0 +1,12 @@
+=== P1 two bindings of one model name
+configuration accepted with two bindings of one model name and different settings: True
+routing_alias_conflicts (the only same-alias check; it covers routing candidates): []
+EXECUTION  LLMClient._binding: context_window 32768 | inference_runtime None | extra_body None | temperature 0.2
+ASSESSMENT role_binding_for_model(reviewer): context_window 65536 | inference_runtime ollama_native | extra_body {'top_p': 0.5} | temperature 0.7
+model_runtime.binding_object (runtime fingerprint lookup) returns the primary: True
+adapter the Reviewer's call would use: ollama | adapter its binding names: ollama_native
+the reviewer identity qualification would assess has settings digest: sha256:1e00924cf | the primary's: sha256:19771a52d
+fields a role call passes explicitly (agents/agent.py _call_with_escalation): model, base_url, api_key, temperature, max_tokens, reasoning, extra_body
+fields it does not pass, taken from LLMClient._binding by model name: context_window, context_policy, inference_runtime
+
+scratch: /var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-b-probe-udgglwg_

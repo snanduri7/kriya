@@ -12,17 +12,17 @@ Routes required by the closure instruction and the slice that maps each:
 | Route | Slice | Status |
 |---|---|---|
 | Ordinary Developer retry | A1 | below |
-| Owner recovery | A1 (accounting), A3 (apply) | A1 part below |
-| Targeted-test self-correction | A1 (accounting), A3 | A1 part below |
-| Generated-test rewrite | A2 | pending |
-| Replay | A1 (accounting), A3 | A1 part below |
+| Owner recovery | A1 (accounting), A3 (apply) | below (`BYP-A1-13`, `BYP-A2-08`, `BYP-A3-09`; bounded in A5: `BYP-A5-13`) |
+| Targeted-test self-correction | A1 (accounting), A3 | below (`BYP-A1-07`, `BYP-A2-06`, `BYP-A2-07`) |
+| Generated-test rewrite | A2 | below (`BYP-A2-01..09`) |
+| Replay | A1 (accounting), A3 | below (`BYP-A2-06..08`; replay truth `AUTH-A3-15`, `AUTH-A2-13`) |
 | MCP / tool writes | A5 | below (`BYP-A5-03`, `BYP-A5-04`) |
 | Checkpoint / resume | A1 | below |
 | Fallback model | A1 (accounting), A6 | below (`BYP-A1-08`; `BYP-A6-03`, `SM-A6-04`) |
-| CLI / Desktop approval | A3 | pending |
-| Direct / non-enforce execution | A1 (retry), A4 | A1 part below |
+| CLI / Desktop approval | A3 | below (`BYP-A3-01..03`, `BYP-A3-11`; closed for the CLI entries in A5: `BYP-A5-10`) |
+| Direct / non-enforce execution | A1 (retry), A4 | below (`BYP-A1-02`, `BYP-A2-09`, the A4 rows; root issue R-02) |
 | Recovery coordinator | A1 | below |
-| Final-result aggregation | A3 | pending |
+| Final-result aggregation | A3 | below (`BYP-A3-12`, `BYP-A3-13`, `BYP-A6-12`; root issue R-02) |
 
 ## Slice A1 - routes around or beside retry accounting
 

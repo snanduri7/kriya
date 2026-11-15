@@ -897,3 +897,51 @@ No live model, qualification, certification or container ran in this slice.
 | DOC-A6-07 | Cross-cutting invariant in the project instructions: "Learned/retrieved text stays inside the untrusted-context fencing" | Fencing | STALE-CONTRADICTED BY CODE for text fetched during a run (`GAP-A4-04`) |
 | DOC-A6-08 | Registry `GUI-KRIYA-LOG-NOT-PERSISTED-001` ("exists in no file afterwards") | Log persistence | CONTRADICTED BY MEASUREMENT (the file exists in the log directory). The registry is not edited here |
 | DOC-A6-09 | `handover/PRODUCT-72H/SPRINT_LOG.md` section 42 | The 65K qualification, the compat disqualification, the doctor's two accepted warnings | CURRENT AND CONSISTENT with the code (preserved measurement; not re-run) |
+
+## Phase B (2026-11-15) - consolidation, and corrections to slice-level severities
+
+The consolidated audit is `06-GAP-AUTHORITY-AUDIT.md`: thirteen root issues (`R-01` to `R-13`), each with its one
+truth, current and required owner, child gaps, bypasses, dependencies and disposition. Every registry row is mapped
+to one class and root in `REGISTRY-ROOT-MAP.md` (141 of 141). The slice gaps above stay the home of their own
+evidence; where this section changes a severity or a reading, this section wins.
+
+### Corrections after the owner's rulings on accepting A6
+
+| Gap | Slice statement | Phase-B statement |
+|---|---|---|
+| `GAP-A6-02` | P3; reachability not established | **P1 runtime identity, reachable in production** (`MEASURED` B-P1, `evidence/b/`). The defect is wider than the unknown-name branch: `LLMClient._binding` resolves a binding by model name, primary first. A valid configuration in which a role binding and the primary name the same model with different settings executes the role's call with the primary's context window, context policy and runtime adapter (and its `extra_body` when the role sets none), while qualification, the doctor and `kriya model status` assess the role's own binding (`role_binding_for_model`). The only same-alias conflict check covers routing candidates. Root `R-09`. FIX_REQUIRED_BEFORE_PRODUCTION |
+| `GAP-A6-01` | P2, owner policy | **P1 runtime authority.** Contract decided in the audit (R-09): every production run verifies its exact active bindings (alternative A). The doctor as an external precondition would need the same check plus a second durable store. FIX_REQUIRED_BEFORE_PRODUCTION |
+| `GAP-A6-03` | One gap | **Split.** Part A, runtime final-result truth, is under `R-02`: the RunRecord is written only by the run coordinator; SUCCESS needs the payload's claim and the record's own proofs; a result is reconciled against the record; the history row is written before that reconciliation and not rewritten (audit 3.5). Part B, durable audit and evidence integrity, is under `R-11` and is not closed by part A: binding and completeness are FIX_REQUIRED_BEFORE_PRODUCTION (P2); authenticity is an explicit owner contract choice (diagnostic history, recommended, or tamper-evident evidence, then P1) |
+| `GAP-A5-04`, `GAP-A1-04`, `GAP-A1-06` | Three gaps | One root, `R-08` RUN-RESOURCE-BUDGET-AUTHORITY, with six levels. `GAP-A1-06` is answered (the effective per-unit value is the configuration value). 2,400 versus 3,600 is disproved as a conflict |
+| `GAP-A5-01` | One gap, four failures | Seven state classes under one principle (`R-05`). Learned knowledge (`web_knowledge.db`) is operator-taught reference knowledge with one writer, `kriya learn`, always fenced: not project-derived; INTENTIONAL_CURRENT_CONTRACT once declared global. The release cache is a public-fact cache keyed by package coordinate: not a gap. The code index, the skills directory and run history remain gaps |
+| `GAP-A3-04` | One gap | Split A (runtime authorization binding) and B (audit binding) under `R-03` |
+| `GAP-A3-05` | P2, owner policy | P1; FIX_REQUIRED_BEFORE_PRODUCTION unless the owner states that per-unit approval is intentionally sufficient; the approval subject is defined in Phase C before any measure |
+| `GAP-A4-03`, `GAP-A4-04`, `GAP-A5-03`, `GAP-A5-05`, `GAP-A4-01` | P2 or candidates | P1; FIX_REQUIRED_BEFORE_PRODUCTION (roots `R-06`, `R-10`, `R-04`, `R-04`, `R-02`) |
+
+### Facts first established in Phase B (homes: audit section 3)
+
+- Learned knowledge has one writer and is not project-derived; the release cache is a public-fact cache (`TRACED`).
+- A resumed enforce run takes a new run id unless the caller passes the old one (`TRACED`).
+- Unit checkpoints of an enforce run survive the sandbox reset only when the repository ignores `.kriya/`, which only
+  the greenfield bootstrap arranges (`TRACED`, not measured). This closes the question of `BYP-A5-14`.
+- The RunRecord's terminal transition and the reconciliation order (`TRACED`).
+- Two bindings of one model name (`MEASURED` B-P1).
+
+### Slice gaps by root
+
+| Root | Slice gaps |
+|---|---|
+| R-01 | `GAP-A2-01`, `GAP-A2-02`, `GAP-A2-03`, `GAP-A4-05`, `GAP-A4-07`, `GAP-A4-08` |
+| R-02 | `GAP-A4-01`, `GAP-A3-01`, `GAP-A3-02`, `GAP-A3-03`, `GAP-A3-06`, `GAP-A6-03` (A) |
+| R-03 | `GAP-A3-04`, `GAP-A3-05`, `GAP-A5-02` (approval half) |
+| R-04 | `GAP-A5-03`, `GAP-A5-05`, `GAP-A5-02` (write half) |
+| R-05 | `GAP-A5-01` |
+| R-06 | `GAP-A4-03`, `GAP-A4-02` |
+| R-07 | `GAP-A1-01`, `GAP-A1-02`, `GAP-A1-03`, `GAP-A1-05`, `GAP-A1-07`, `GAP-A1-08`, `GAP-A1-09`, `GAP-A4-06` |
+| R-08 | `GAP-A1-04`, `GAP-A1-06`, `GAP-A5-04` |
+| R-09 | `GAP-A6-01`, `GAP-A6-02` |
+| R-10 | `GAP-A4-04` |
+| R-11 | `GAP-A6-03` (B), `GAP-A1-03`, `GAP-A3-07` |
+| R-12, R-13 | Registry rows only |
+
+Every one of the 35 slice gaps appears once (`GAP-A5-02`, `GAP-A6-03` twice by their stated halves).

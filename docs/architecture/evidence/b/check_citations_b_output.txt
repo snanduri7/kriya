@@ -1,0 +1,12 @@
+control 'add_learned_knowledge(': found in ['kriya/cli.py', 'kriya/memory/vector.py'] (learned knowledge has one writer: `kriya learn` (R-05 class B))
+control 'set_release_date(': found in ['kriya/tools/knowledge.py'] (the release cache is written only by the registry lookups of its own module (R-05 class D))
+control 'routing_alias_conflicts(': found in ['kriya/config/config.py', 'kriya/core/model_routing.py'] (the same-alias conflict rule is evaluated for routing candidates only, by the configuration validator and the routing planner (R-09))
+control 'wanted_excludes': found in ['kriya/workflow/worktree.py'] (`.kriya/` is added to the local exclude file by the worktree module only (audit 3.4))
+control '_reconcile_result(': found in ['kriya/control/run_coordinator.py'] (a result is reconciled with its RunRecord in one place (audit 3.5))
+control 'role_binding_for_model(': found in ['kriya/core/inference_settings.py', 'kriya/workflow/repair_orchestrator.py'] (listing: who resolves a binding role-first)
+control '._binding(': found in ['kriya/core/llm.py'] (listing: who resolves a binding by model name)
+absent 'workspace_id' in kriya/tools/knowledge.py: True (the release cache has no project key (and needs none))
+absent '_reconcile' in kriya/control/trace.py: True (the history writer does not reconcile a row with the RunRecord)
+absent '_reconcile' in kriya/workflow/run_lifecycle.py: True (nor does the trace persistence)
+absent 'requirement' in kriya/control/run_record.py: True (the RunRecord's own proofs do not include requirement truth)
+files=20 symbols=58 controls=11 problems=0
