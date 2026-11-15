@@ -1,0 +1,13 @@
+R-01: AUTH 15, MUT 1, SM 0, FR 6, BYP 3, GAP 6; of these cited in stage docs 21, integration contracts 12, diagrams 10
+R-02: AUTH 20, MUT 0, SM 2, FR 1, BYP 12, GAP 10; of these cited in stage docs 33, integration contracts 24, diagrams 17
+R-03: AUTH 7, MUT 1, SM 0, FR 0, BYP 7, GAP 3; of these cited in stage docs 11, integration contracts 9, diagrams 9
+R-04: AUTH 4, MUT 2, SM 0, FR 0, BYP 8, GAP 4; of these cited in stage docs 10, integration contracts 6, diagrams 7
+R-05: AUTH 2, MUT 0, SM 0, FR 0, BYP 5, GAP 1; of these cited in stage docs 3, integration contracts 1, diagrams 2
+R-06: AUTH 4, MUT 1, SM 0, FR 1, BYP 8, GAP 2; of these cited in stage docs 14, integration contracts 2, diagrams 2
+R-07: AUTH 11, MUT 7, SM 3, FR 2, BYP 4, GAP 8; of these cited in stage docs 20, integration contracts 16, diagrams 17
+R-08: AUTH 6, MUT 0, SM 0, FR 0, BYP 2, GAP 3; of these cited in stage docs 5, integration contracts 1, diagrams 4
+R-09: AUTH 2, MUT 0, SM 0, FR 2, BYP 3, GAP 2; of these cited in stage docs 3, integration contracts 2, diagrams 2
+R-10: AUTH 2, MUT 0, SM 0, FR 0, BYP 6, GAP 1; of these cited in stage docs 5, integration contracts 1, diagrams 1
+R-11: AUTH 4, MUT 2, SM 1, FR 1, BYP 6, GAP 4; of these cited in stage docs 10, integration contracts 6, diagrams 3
+R-12: AUTH 0, MUT 0, SM 0, FR 0, BYP 0, GAP 0; of these cited in stage docs 0, integration contracts 0, diagrams 0
+R-13: AUTH 1, MUT 0, SM 0, FR 2, BYP 0, GAP 0; of these cited in stage docs 3, integration contracts 1, diagrams 1

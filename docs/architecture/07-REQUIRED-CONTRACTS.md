@@ -1,7 +1,9 @@
 # 07 - Required contracts (Phase C, TO-BE)
 
 Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`. **Everything in this document is
-`PROPOSED`.** Nothing is implemented, nothing is authorized, the implementation freeze holds. AS-IS lives in the six
+`PROPOSED`** in the sense that nothing is implemented. The owner ruled on it on 2026-11-15
+(`12-D0-CLOSURE-HARDENING.md` section 1): the policy choices marked "owner policy" below are ruled, and the slices
+are authorized one at a time, in order, after the D0 pass. Section 7 lists what D0 changed here. AS-IS lives in the six
 maps and in `06-GAP-AUTHORITY-AUDIT.md`; this document never restates it, it cites it.
 
 Reading order per root issue: `AS-IS -> GAP -> REQUIRED CONTRACT -> IMPLEMENTATION DELTA -> ACCEPTANCE PROOF`. The
@@ -37,6 +39,8 @@ Design rules applied to every contract:
 | Acceptance proof | A2 probes P8 and P9 as tests: a general sentence compiles to *GENERAL_UNSPECIFIED* and `test_addition` cannot close it; a goal example compiles to a clause that the example oracle closes; a `src/`-layout run-authored test is held; an ambiguity fixture produces the typed state and, unattended under production, a refusal before the Planner |
 | Negative controls | Removing the semantic state makes the closure test fail; restoring "unmapped = not run-authored" makes the held-unit test fail; a model-supplied clause is refused by the sealing function |
 | Stop conditions | If more than the closed pattern set is needed to classify ambiguity (that is, a model would have to judge), stop: ambiguity stays representable only for the provable cases and the rest is `GENERAL_UNSPECIFIED` |
+| Narrowed in D0 (X-12) | The owner already seals a status per requirement (`CLOSABLE`, `AUTHORITY_REQUIRED`, `AMBIGUOUS`, `NOT_A_CLAIM`, `DISPOSITIONED`), residual claims and an ambiguity reason, and refuses typed under the `block` policies. The semantic state is therefore a derived, sealed value over what exists (five values: the three above plus *STRUCTURAL* and *NOT_APPLICABLE*, so that every entry has one), not a new schema. What is new is its consequence under `record`, the question to an attended person, and its reach to the Planner, the verifier review and closure. Implementation specification: `12` section 6, S5 |
+| Ruled (2026-11-15, ruling 8) | Attended: ask and resolve explicitly. Unattended production: refuse. No silent default: unattended elsewhere the ambiguity is recorded, the requirement cannot close without a person, and the result is a non-success (C-02) |
 
 ### C-02 Result truth and executor convergence (R-02)
 
@@ -57,7 +61,8 @@ Design rules applied to every contract:
 | Acceptance proof | A3 probe P8 inverted: under every profile a run with an open requirement is not SUCCESS. A scripted plan run through both executors yields the same seven verdicts (one table-driven test). A refused final review on a committed, verified unit leaves the unit accepted on all three paths. The history row's status equals the reconciled status in a scripted contradiction |
 | Negative controls | Removing the requirement-truth proof makes the P8 test fail; writing the history row before reconciliation makes the row test fail; a second plan validator makes the convergence test fail |
 | Stop conditions | If making the two enforce-only-missing closers callable needs a change to how the plan sandbox is built, stop and record the closer set per executor as the contract instead |
-| Owner policy inside it | Final review advisory everywhere (recommended) versus deciding everywhere; the name and exit code of *APPLIED_REQUIREMENTS_OPEN* |
+| Ruled (2026-11-15, rulings 2 and 3) | Final review is advisory on every executor. Applied with open requirements is a typed non-success with a non-zero exit; `quality_gates_passed` is never true merely because bytes were applied. Record state, payload and exit table: `12` section 6, S6 (X-15) |
+| Clause added in D0 (X-17) | A guard that exists on one executor only (the false-premise mutation guard, `ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001`) is called by both |
 
 ### C-03 Approval subject authority (R-03)
 
@@ -78,7 +83,8 @@ Design rules applied to every contract:
 | Acceptance proof | A3 probes as tests: the approval record carries the digest; a batch changed after approval is refused at commit; an enforce plan of N small units whose cumulative delta exceeds the threshold asks once at the terminal commit in guardrails mode; a transaction carrying `kriya.yaml` asks in every mode and the record names the file |
 | Negative controls | Removing the digest comparison makes the changed-batch test fail; measuring per unit makes the split test fail |
 | Stop conditions | If the enforce terminal commit cannot present a reviewable cumulative diff in the desktop review channel without a new review kind, stop and return for an owner decision on that kind |
-| Owner policy inside it | Whether per-unit approval is intentionally sufficient (the owner's stated exception); whether CI workflow and Git attribute files join the path class |
+| Ruled (2026-11-15, rulings 4 and 5) | Per-unit approval is not sufficient: the subject is the commit transaction's cumulative bytes and digest; unit approvals are supporting evidence. CI workflow and Git attribute files do not join the path class unless a bypass is measured |
+| Clause added in D0 (X-16) | Which approvals hold execution: only human-in-the-loop mode holds the executing gates until the person answers (AS-IS, `AUTH-A3-05`); in every other mode the chosen mode is the operator's standing consent to contained execution, and the apply approval always precedes the apply. Stated and pinned by a test in S7; widening it is an owner item (`HITL-OTHER-APPROVAL-TRIGGERS-DEFERRAL-001`) |
 
 ### C-04 Mutation transaction authority (R-04)
 
@@ -135,7 +141,8 @@ Design rules applied to every contract:
 | Alternatives rejected | Embedding-based relevance (invented capability; owner: do not invent embedding retrieval). Trusting unverified rules for coverage (the rule that created the false closure) |
 | Acceptance proof | A4 probes P5 and P11 as tests: an empty folder and Kriya's own scaffold leave the gap; a skill with a trusted rule and a matching tag clears it. The Planner and every unit hold the same selected set in a scripted plan whose unit text names another library |
 | Negative controls | Reverting to the directory listing makes P5 fail; selecting per unit makes the same-set test fail |
-| Stop conditions | Scenario 04 relies on the current behaviour with offline mode (owner-accepted for that scenario): stop and re-decide that scenario's knowledge before changing the gate for it |
+| Stop conditions | None. Ruled (2026-11-15, ruling 12): Scenario 04's reliance on the present gate is not authority; the scenario is migrated (its knowledge supplied as a skill with a trusted rule, or the gap accepted by a person for the run) and revalidated in S4, and the defective gate is not preserved for it |
+| Clause added in D0 (X-17) | A rule with no provenance record renders as unverified, inside the fence, whichever root it was loaded from (`SKILL-RULE-PROVENANCE-PROJECT-SUPPLIED-001`, `BYP-A4-06`) |
 
 ### C-07 Retry, blocker and durability authority (R-07)
 
@@ -148,16 +155,16 @@ Design rules applied to every contract:
 | Persisted identity and state | Per unit, written at every failed attempt: the retry budgets, the family history, the open finding, the fallback state, the attempt count. Per plan, in `ControlState`: the enforce recovery state of `AUTH-A1-14` (cycle counters, reopened owners, the verifier semantic ledger, replay handles, human recovery decisions) |
 | Allowance record (`GAP-A1-03`) | Every grant and charge is a typed run event and evidence record with the counters before and after |
 | Where unit state lives under enforce | Under the owner workspace's control state, keyed by plan and unit, not under the plan sandbox: it must not depend on a repository's ignore rules (audit 3.4) |
-| Accepted unit work (`GAP-A1-09`) | Owner policy. Proposed: accepted unit work stays in the candidate (atomic commit kept) and becomes **resumable**: the completion scope `candidate` is reusable by a resume that proves the sandbox bytes equal the recorded batch digests, instead of being discarded |
+| Accepted unit work (`GAP-A1-09`) | Ruled (2026-11-15, ruling 9): accepted unit work stays in the candidate (atomic commit kept) and is **resumable** only when durably bound to the exact plan identity, verification-contract digest and candidate batch digests, and revalidated (re-hashed) before reuse; never because a checkpoint exists |
 | Enforce resume (`GAP-A4-06`, audit 3.3) | A resume carries the earlier run's id as its parent and reuses the approved plan document; it does not ask the Planner for a byte-identical plan |
 | Forbidden bypass | A new invocation of a unit that starts from zero allowance without recording why (a declared reset: a new plan revision, a human decision) |
 | UNKNOWN behaviour | Unreadable persisted retry state: the unit runs with **no** scoped allowance left for families it cannot account for (it may make full-set attempts under the global ceiling) and says so; never a silent full grant |
 | Small corrections | The configured no-progress limit is validated to its effective range (`GAP-A1-05`); the per-requirement cap that cannot fire is removed or made effective with its test (`GAP-A1-08`) |
 | Why minimal and generic | The one grant path, the one checkpoint and the one control state are extended; no new authority object |
 | Alternatives rejected | A blocker registry or typed key (rejected by the owner). Exact-output identity as the allowance authority (a one-line shift would grant a new allowance) |
-| Acceptance proof | The run-10 reproducer as a deterministic scripted loop: the same assertion across attempts and across a re-invocation shares one allowance; an unlisted orchestrator failure does not replenish it; a process killed in attempt N resumes with N-1 charges recorded; a person is not asked twice for one recovery decision |
+| Acceptance proof | A deterministic scripted loop (corrected in D0, X-13: the run-10 mechanism itself is fixed at the baseline and pinned by nine tests; the symptoms still reproducible are `GAP-A1-07`, `BYP-A1-01` and the loss at an interruption): the same assertion across attempts and across a re-invocation shares one allowance; an unlisted orchestrator failure (`no_progress_retry`) does not replenish it; a process killed after N charges resumes with N charges recorded; a person is not asked twice for one recovery decision |
 | Negative controls | The existing nine committed tests; reverting the predicate split makes the unlisted-failure test fail; dropping the ledger from the checkpoint makes the resume test fail |
-| Stop conditions | The original symptom (run 10) must be reproduced pre-fix by the scripted loop before any change; if it cannot, stop |
+| Stop conditions | Each original symptom of `12` section 6 (S8) is reproduced pre-fix before the part that fixes it; a part whose symptom cannot be reproduced stops (corrected in D0, X-13) |
 
 ### C-08 Run resource budget authority (R-08)
 
@@ -166,7 +173,7 @@ Design rules applied to every contract:
 | Truth | The time and the amount of work one run may consume |
 | AS-IS that stays | One generation clock per top-level run on the run lease, read by every unit invocation, retry, role, embedding and validator deadline; human waits excluded; the production seal of at most 3,600 seconds |
 | Required single owner | `config/authority.py` for who may set the value; `control/run_coordinator.py` (the run lease) for a work ledger beside the clock |
-| The levels | (1) Model call: unchanged. (2) Run generation time: the value becomes value-bounded like the containment bounds: a repository may lower it below the trusted value, never raise or remove it; where no trusted layer sets one, the run is declared unbounded in the preflight and in the result, never silently. (3) Attempts per invocation and (4) re-invocations: C-07's ledger. (5) **Work of the run** (new): a ceiling on unit invocations and on Developer attempts for the whole run, held on the run lease, set by the trusted layers, sealed by the production profile. (6) Profile maximum: unchanged for time; added for work |
+| The levels | (1) Model call: unchanged. (2) Run generation time: the value joins the value-bounded class that exists (`config/authority.py::_VALUE_BOUNDED_FIELDS`, a packaged ceiling per field) with ceiling 3,600: a repository value of 1 to 3,600 needs no approval, a larger value or none needs the operator's approval (corrected in D0, X-14: the class bounds against a constant, not against another layer's value); where no layer sets one, the run is declared unbounded in the preflight and in the result, never silently. (3) Attempts per invocation and (4) re-invocations: C-07's ledger. (5) **Work of the run** (new): a ceiling on unit invocations and on Developer attempts for the whole run, held on the run lease, set by the trusted layers, sealed by the production profile. (6) Profile maximum: unchanged for time; added for work |
 | Resume | A resumed run records its parent run and the time and work the parent consumed; whether it continues that ledger or starts a new budget is an explicit operator choice at resume, recorded on the RunRecord |
 | Authoritative inputs | The trusted configuration layers; the monotonic clock; the counts on the lease |
 | Persisted identity and state | The run ledger (time consumed, unit invocations, attempts) as a RunRecord annotation at each unit boundary |
@@ -177,7 +184,7 @@ Design rules applied to every contract:
 | Acceptance proof | A5 probe P6 inverted for the value (a repository raise and a repository removal are violations; a lower value is accepted). B-P2 kept as the pinning test of the clock's scope. A scripted enforce plan whose re-invocations would exceed the work ceiling stops typed at the ceiling |
 | Negative controls | Removing the value bound makes the P6 test fail; not counting re-invocations makes the ceiling test fail |
 | Stop conditions | None beyond the dependency on C-07's ledger |
-| Owner policy inside it | Whether the work ceiling and the resume ledger are needed before production, or only the value's authority class |
+| Ruled (2026-11-15, ruling 10) | The work ceiling and the resume ledger are part of S8 and are done before any production-ready declaration. The ceiling is derived from the enforce loop's own caps, not a new tuning number (`12` section 6, S8) |
 
 ### C-09 Runtime identity and qualification authority (R-09)
 
@@ -187,7 +194,7 @@ Design rules applied to every contract:
 | Required single owner | The caller that chooses the model (the role choke point `agents/agent.py::call_with_escalation`; the Developer choke point) resolves **one binding object** and passes it to `LLMClient`. `LLMClient` no longer looks a binding up by model name |
 | Authoritative inputs | The effective configuration (and the routing plan). The binding is the configuration object itself: the role's own, a chain entry, or the primary |
 | Unknown or ambiguous identity | A model name with no binding is refused, typed, before any provider contact. Two bindings that share a model name with different identity-relevant settings are a configuration error at load (the rule that exists for routing candidates, `routing_alias_conflicts`, applied to every binding) unless the configuration gives them distinct aliases |
-| Production admission (alternative A) | Under `runtime_profile: production`, before the engine is built, every role's active binding (primary and chain) is assessed with the function the doctor uses; anything but QUALIFIED for the role's required capabilities refuses the run with a typed reason naming the role, the model and the record's state. The decision and the digests it used are recorded on the run. Outside production: recorded, never refused (unchanged) |
+| Production admission (alternative A) | Under `runtime_profile: production`, before the engine is built, every role's active binding (primary and chain) is assessed with the function the doctor uses; anything but QUALIFIED for the role's required capabilities refuses the run with a typed reason naming the role, the model and the record's state. The decision and the digests it used are recorded on the run. Outside production: recorded, never refused (unchanged). Ruled (2026-11-15, ruling 7): the run owns admission, the doctor is a preflight only. Added with the ruling: at dispatch under production, a binding that the admission did not record as QUALIFIED (a routing candidate or chain entry resolved later) is assessed before its first use and refused typed when it is not; nothing is dispatched on an unknown binding |
 | Persisted identity and state | A `model.admission` run event and RunRecord annotation: per role the runtime digest, settings digest, policy digest and status |
 | Forbidden bypass | A call whose binding was not resolved by the caller; `KRIYA_MODEL_RUNTIME_PROBE=0` under production (it makes every runtime non-exact: refused by the admission) |
 | UNKNOWN behaviour | A non-exact runtime, a missing or stale record: not admitted under production |
@@ -222,7 +229,7 @@ Design rules applied to every contract:
 | Truth | What each record says, and what a reader may conclude from it |
 | Required single owner | Each record keeps its writer. The classification that already exists in code (`control/run_record.py::STORE_CLASSIFICATION`: RunRecord and commit evidence authoritative, six derived stores, the trace database independent observability) is extended to list the attempt-evidence store and the run logs, and gains the rule for surfaces below; `docs/design.md` then states it |
 | Integrity classes | RunRecord: **authoritative** (revisioned, ownership-bound; the outcome of record). History row: **bound copy**: carries the workspace identity and the RunRecord revision it was written from; written after reconciliation; a reader compares and reports `consistent`, `differs` or `record unavailable`. Attempt evidence: **integrity against damage**: the chain and seal detect corruption and partial edits; the manifest binds it to the workspace and the base revision; `run.closed` binds it to the RunRecord revision; it is not an authenticity proof and the desktop says "intact", not "verified", or defines the word. Run log: **diagnostic**, with a retention owner and private file mode |
-| Authenticity | Owner policy. Recommended: Kriya's evidence is diagnostic history of a local, single-user tool whose state directory is private; an authenticated store (a key outside the state directory) is a GENUINE_FUTURE_FEATURE. If the owner requires tamper-evident evidence for production, it becomes a slice of its own and a blocker |
+| Authenticity | Ruled (2026-11-15, ruling 6), as recommended and stated in the UI and the documentation: Kriya's evidence is diagnostic history of a local, single-user tool whose state directory is private; an authenticated store (a key outside the state directory) is a GENUINE_FUTURE_FEATURE. If the owner requires tamper-evident evidence for production, it becomes a slice of its own and a blocker |
 | Diagnostic truth | A label or count is written by the owner of the decision it describes, at the decision: attribution kind (`unknown` is its own value), `attempts`, retries triggered, gate purpose (the vocabulary covers every orchestrating entry), the role of a model call (knowledge channels scoped), held-gate evidence written after the gates run. One run identity chain: a resumed run records its parent run id |
 | Retention | Every record class has a retention owner (launch records and review sidecars, run logs) |
 | Forbidden bypass | A surface stating an outcome from the history row without the comparison; a record class without a stated integrity class |
@@ -257,7 +264,7 @@ Design rules applied to every contract:
 | C-08 | The run clock's value has no trusted owner; no bound on work or across resumes | The configuration class of the budget | The run lease (clock); any configuration layer (value) | `config/authority.py` (value) + the run lease (work ledger) | C-07 | S8 |
 | C-09 | Binding by name; no production admission | `LLMClient._binding`; `_enter_developer_model` (fallback only) | `LLMClient` | The role and Developer choke points; one admission | - | S1 |
 | C-10 | Fetched text untyped | `_augment_error_with_live_lookup` | `state.error_context` | A typed field + the fence | - | S2 |
-| C-11 | No evidence contract; labels apart from decisions | None | Four writers | The same writers under one contract | C-02 | S6 |
+| C-11 | The store classification omits two record classes and has no rule for surfaces (X-10, X-11); labels apart from decisions | None | Four writers | The same writers under one contract | C-02 | S6 |
 | C-12 | Harness races | The tests | - | The suite contract | - | S0 |
 | C-13 | Environment refusal versus gate verdict not proven at every site | Unknown until characterized | `tools/validate.py` | The same, proven | - | S0 |
 
@@ -280,7 +287,7 @@ the batch boundary where the rules reserve it.
 | S5 Semantic contract | C-01 | Semantic state in the sealed contract; closure rules; unmapped verifier held; ambiguity outcomes | The root of requirement truth; nothing else may define it | Medium to large (schema version, goldens) | A2 P8, P9; the `src/` layout probe |
 | S6 Result contract and evidence | C-02, C-11 | Terminal vocabulary with requirement truth; seven truths through shared functions; history row after reconciliation and bound; evidence contract wording; label and purpose fixes; retention owners | Result words and the records that carry them change together: one golden regeneration | Large (kernel goldens, desktop wording) | A3 P8, P1, P3; A6 P5 |
 | S7 Approval subject | C-03 | Digest in the approval record, checked at commit; apply approval on the commit transaction; cumulative measure; path-class approval | Needs S6's commit truth and S4's path class | Medium | The A3 approval probes; the split-plan scenario |
-| S8 Retry, durability and budget | C-07, C-08 | Predicate split; allowance ledger and its record; unit and plan state persisted outside the sandbox; resumable candidate completions; value-bounded run time budget, work ceiling and resume ledger | One accounting model for attempts and time; the run-10 symptom is its gate | Large (state machine, checkpoints) | The run-10 scripted reproducer; A5 P6 |
+| S8 Retry, durability and budget | C-07, C-08 | Predicate split; allowance ledger and its record; unit and plan state persisted outside the sandbox; resumable candidate completions; value-bounded run time budget, work ceiling and resume ledger | One accounting model for attempts and time; the run-10 symptom is its gate | Large (state machine, checkpoints) | The scripted loop for `GAP-A1-07`, `BYP-A1-01` and the interruption (X-13: run 10 itself is fixed and pinned); A5 P6 |
 
 ## 4. Dependency order (derived, not assumed)
 
@@ -348,3 +355,22 @@ Each finding is closed by a clause in an existing contract; none needs a contrac
 | INT-11 enforce unit checkpoints depend on an ignore rule | C-07 | In the contract already (unit state lives under the owner workspace's control state) | The resume test passes in a repository that does not ignore `.kriya/` |
 | INT-12 an internal Kriya error is charged to the candidate | C-07, C-11 | An internal error charges nothing and is labelled as internal | The existing internal-error fixture leaves the budgets unchanged |
 | INT-13 lesson extraction reads the mixed error context, unattributed | C-10, C-11 | In C-10 (the field no longer contains fetched text); the call runs under a role scope | A6 probe P1 and the role-metrics test |
+
+## 7. Changes made by the D0 pass (2026-11-15)
+
+Made in place above, each marked "D0" or "Ruled"; listed here so a reader of an earlier checkpoint can find them.
+Reasons and evidence: `12-D0-CLOSURE-HARDENING.md`.
+
+| Contract | Change | Source |
+|---|---|---|
+| C-01 | The semantic state is a derived, sealed value over the statuses the compiler already seals; five values; ambiguity outcome ruled | X-12, ruling 8 |
+| C-02 | Final review and the applied-open state ruled; the record state under the word; the one-executor guard clause | Rulings 2, 3; X-15; X-17 |
+| C-03 | Subject ruled; path class limited to Kriya's inputs; the execution-hold clause | Rulings 4, 5; X-16 |
+| C-04 | Operator-only for planned write-granted MCP tools ruled | Ruling 11 |
+| C-05 | Clause: the code-index file discovery and the analyzer's walk take membership from the bound tree (`AUTH-A5-02`); a site that cannot is listed in the registry row's census and feeds retrieval only (`DIRECTORY-NAME-PRUNING-P3-SIBLING-SITES-001`, `BYP-A5-08`) | X-17 |
+| C-06 | Scenario 04 migrated, not preserved; the no-provenance rule clause | Ruling 12; X-17 |
+| C-07 | Resumable unit work ruled with its binding; the acceptance proof and stop condition no longer name a fixed symptom | Ruling 9; X-13 |
+| C-08 | The budget joins the existing packaged-ceiling class; the work ceiling and resume ledger are in S8 | X-14; ruling 10 |
+| C-09 | Admission by the run ruled; dispatch-time clause | Ruling 7 |
+| C-11 | Diagnostic history ruled; the section 2 row narrowed | Ruling 6; X-11 |
+| S5, S6, S8 | Implementation specifications | `12` section 6 |

@@ -9,6 +9,14 @@ MCP server or full suite ran. The implementation freeze is in force and this rep
 This is the one routine stop of the closure program. It asks the owner for the decisions of section O and for the
 ruling of section S.
 
+**Status after the owner's ruling (2026-11-15).** The owner ruled on all fourteen decisions of section O and on
+section S: `12-D0-CLOSURE-HARDENING.md` section 1 is the record. The ruling ordered one bounded documentation pass
+(D0) before any implementation; it is done, and its results are in `12`: every bypass row has a disposition, slices
+S5, S6 and S8 are specified for implementation, and a cross-map sweep by concept found and resolved eight further
+inconsistencies (X-11 to X-18), none of which creates a root or changes a severity or the slice order. The freeze is
+lifted per slice, in order, starting with S0. The sections below are the report as it was put to the owner; where D0
+changed a statement the sentence says so.
+
 ## Summary
 
 **Is Kriya architecture-coherent now? No, and the report says exactly where.** The core that protects the user's
@@ -81,7 +89,8 @@ places where UNKNOWN does not fail safely are listed in audit section 4 and each
 
 `05-INTEGRATION-BYPASS-MAP.md`: 93 rows, the route table (all routes mapped), the MCP transaction comparison and the
 two extensibility seams. Each row states what bounds the route. Rows that are gaps are attached to a root in the
-audit; the rest are bounded as their row says. A per-row disposition column was not added (quality gate, item 6).
+audit; the rest are bounded as their row says. A disposition for every row was added in D0 (the last section of that file): 56 root gaps, 19 closed or covered,
+17 intentional, 1 future, 0 blockers.
 
 ## G. Registry coverage and dispositions
 
@@ -99,7 +108,9 @@ audit; the rest are bounded as their row says. A per-row disposition column was 
 | Phase-D blocker | 1 |
 | Phase-D item, non-blocking | 2 |
 
-No registry row was edited. The 11 stale and 2 disproved rows can be closed in the registry on the owner's word.
+No registry row was edited. Ruled (2026-11-15, ruling 13): the 11 stale, 2 disproved and 5 duplicate rows are closed
+with evidence-preserving dispositions; the edit is the first step of S0, on the implementation branch, because the
+registry is outside this documentation set.
 
 ## H. Stale and contradictory documents, and corrections
 
@@ -187,9 +198,11 @@ first post-fix gate.
 | 8 | S8 Retry, durability and budget | C-07, C-08 | Needs S6 and S0; changes the state machine last |
 
 Readiness: S0 to S4 and S7 are specified to the level of owner, inputs, state, forbidden path, acceptance test and
-negative control and can start from the documents alone. S5, S6 and S8 are specified at contract level with stop
-conditions; each needs a design step at its start (the schema of the semantic state; the terminal vocabulary and
-golden regeneration; the scripted run-10 reproducer), which the contracts name.
+negative control and can start from the documents alone. S5, S6 and S8 were at contract level when this report was
+written; D0 did their design step against the code and they are now specified for implementation in `12` section 6
+(the semantic state turned out to be a derived value over statuses the compiler already seals; the applied-open state
+is a typed terminal status, not a new lifecycle state; S8's first gates are the three symptoms that still reproduce,
+not run 10, which is fixed at the baseline).
 
 ## N. Security and authority production blockers
 
@@ -222,6 +235,11 @@ golden regeneration; the scripted run-10 reproducer), which the contracts name.
 | 12 | Scenario 04's reliance on the current knowledge gate with offline mode | Re-decide before C-06 changes the gate for it |
 | 13 | Close in the registry the 11 stale, 2 disproved and 5 duplicate rows | Yes |
 | 14 | The three Phase-D characterization items (section "Blocker and characterization items") | Accept two as non-blocking; authorize S0 for the blocker |
+
+**Ruled on 2026-11-15:** every recommendation above was accepted, decision 10 with a change (the work ceiling and
+the resume ledger are done in S8, before any production-ready declaration, not later) and decision 12 with a
+direction (Scenario 04 is migrated and revalidated when the knowledge authority is corrected). The rulings in the
+owner's words, the readings they needed and the two owner items that remain: `12` section 1.
 
 ## P. vLLM seam
 
@@ -282,16 +300,16 @@ certification on that tree, not before.
 | 3 | Every global map complete | Yes, with the limits each slice states |
 | 4 | Every truth one owner or an explicit blocker | Yes (`06` section 5) |
 | 5 | Every mutation an authority path | Documented for all 80; three exceptions are R-04 |
-| 6 | Every bypass a disposition | **Partly**: each of the 93 rows states what bounds it and the gap rows are attached to roots; no per-row disposition column exists |
+| 6 | Every bypass a disposition | Yes since D0: 93 of 93, closed vocabulary, checked by `evidence/d0/d0_check.py` |
 | 7 | All registry rows reconciled | Yes |
 | 8 | Stale and historical documents classified | Yes: 41 rows; section H |
 | 9 | AS-IS and TO-BE separated | Yes: `07` is the only TO-BE home; field 20 of each stage |
-| 10 | Every FIX_REQUIRED implementation-ready | **Partly**: S0 to S4 and S7 yes; S5, S6, S8 at contract level with a named design step |
+| 10 | Every FIX_REQUIRED implementation-ready | Yes since D0: S5, S6 and S8 are specified in `12` section 6 |
 | 11 | Nothing depends on chat history | Yes with the appendix below (the owner's rulings are restated there) |
 | 12 | Citations resolve at the baseline | Yes: per-slice citation scripts and the Phase-B script, 0 problems; row references checked by `crossmap_check.py`, 0 dangling |
 | 13 | Diagrams and tables agree | Built from the rows; D-2 was checked against the code and corrected; the others were not mechanically checked beyond row existence |
 | 14 | No placeholder or unexplained unknown | Yes: three declared characterization items, one blocker |
-| 15 | Sufficient to implement without another discovery round | For S0 to S4 and S7; S5, S6 and S8 need the design step named in item 10 |
+| 15 | Sufficient to implement without another discovery round | Yes since D0, with the limit `12` section 7 states: each slice's reproduce step is also the check that the call sites the maps name are as described |
 
 ## What this closure did not establish
 
@@ -301,7 +319,9 @@ context budget; `plan_revision.py`; RunRecord storage; the release scripts and t
 code beyond locating consumers; anything needing a live model, a container or an MCP server. The state-machine
 tables and the A1 to A4 failure rows were cross-read where an integration boundary cites them, not line by line.
 The audit found two errors in this closure's own earlier text; others of the same kind may remain where no boundary
-forced a comparison.
+forced a comparison. D0 searched for that kind by concept over every document (`12` section 2) and found eight more
+inconsistencies, all resolved; what can still remain is a contradiction phrased with none of the twelve concept
+lexicons the search used.
 
 ## Appendix: owner rulings in force (restated so the set stands without chat history)
 

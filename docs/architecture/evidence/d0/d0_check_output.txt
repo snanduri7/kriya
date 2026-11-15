@@ -1,0 +1,4 @@
+bypass rows defined: 93; dispositions: {'root-gap': 56, 'intentional': 17, 'closed/covered': 19, 'future': 1}
+slice specifications checked: S5, S6, S8
+registry rows mapped: 141; class counts sum: 141
+failures: 0

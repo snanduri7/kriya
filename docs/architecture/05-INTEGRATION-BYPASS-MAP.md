@@ -272,3 +272,117 @@ for non-production use; production use is an identity and qualification question
 Conclusion at `TRACED` confidence: the read side fits today. Every mutating Skills or Tools feature lands on a gap
 that is already recorded (`GAP-A4-02`, `GAP-A4-03`, `GAP-A5-01`, `GAP-A5-03`, `GAP-A5-05`). Building the UX first
 would give those gaps a button; the contracts have to exist first.
+
+## Dispositions of every row (D0, 2026-11-15)
+
+One disposition per row, from a closed vocabulary. The slice rows above are unchanged; where a slice row still carries
+an open question that a later slice or the audit answered, the note names the answer (it wins over the slice text).
+Checked by `evidence/d0/d0_check.py`: 93 rows, each with exactly one disposition, every `root-gap` naming a root and
+a contract that exist.
+
+| Disposition | Meaning |
+|---|---|
+| `closed/covered` | The route was looked for and is refused by the code, or it passes an existing sound owner (named) |
+| `intentional` | The route exists by a stated contract or owner ruling; nothing is to be changed |
+| `future` | The route is closed today by a refusal; opening it is a feature outside the closure program |
+| `root-gap` | The route is a defect; the root and the contract that closes it are named, with the slice |
+| `blocker` | The route's behaviour is not established and can change a production-readiness statement |
+
+| ID | Disposition | Root, contract, slice or basis | Note |
+|---|---|---|---|
+| BYP-A1-01 | `root-gap` | R-07 / C-07 (allowance ledger carried across invocations of a unit), R-08 / C-08 (work ceiling); S8 | - |
+| BYP-A1-02 | `root-gap` | R-07 / C-07; S8 | The three executors stay (no merge, C-02); only the number of fresh allowances is the gap |
+| BYP-A1-03 | `root-gap` | R-07 / C-07 (persisted retry state), R-08 / C-08 (resume ledger); S8 | The row's `UNKNOWN` is answered: `resume_decision` is a RunRecord annotation holding one run's resume decision (written by `enforce_loop.py` and `workflow.py`, read by `metrics/evidence.py` only); it is not a counter of resumes (`TRACED`, D0) |
+| BYP-A1-04 | `intentional` | Bounded: first attempt only, `best_of_n_first_attempt` default 1, each discarded candidate counted in the ceiling | Under C-07 its reset is a declared reset and is recorded as an allowance event (S8) |
+| BYP-A1-05 | `closed/covered` | Same recorder, charge and no-progress stop as a Developer attempt (`AUTH-A1-06`) | - |
+| BYP-A1-06 | `intentional` | A verified phase advance is progress, not a failure; bounded by 3 and by the ceiling | Its counter is part of the retry state C-07 persists (S8) |
+| BYP-A1-07 | `intentional` | Operator opt-in (`self_correction_loop_enabled`, value-gated `SECURITY_AUTHORITY`, default off, off in Project Setup); bounded by `self_correction_loop_max_turns` per attempt and by the run clock | Write side: `BYP-A5-13` |
+| BYP-A1-08 | `closed/covered` | Inside the retry accounting (`AUTH-A1-05`) | Qualification of a non-Developer chain: `BYP-A6-03` |
+| BYP-A1-09 | `closed/covered` | A stop; no accounting effect | - |
+| BYP-A1-10 | `closed/covered` | Fail-closed stops that are not candidate failures: nothing continues, nothing is charged | The typed reason of such a stop is INT-01 (C-11, S6) |
+| BYP-A1-11 | `root-gap` | R-07 / C-07 (the verifier semantic ledger is persisted in `ControlState`); S8 | - |
+| BYP-A1-12 | `root-gap` | R-07 / C-07 (unit state under the owner workspace's control state); INT-11; S8 | The row's `NEEDS_CHARACTERIZATION` is answered: a unit of a plan sandbox finds the checkpoints under `<sandbox>/.kriya/` (`AUTH-A5-01`, audit 3.4); a refused checkpoint returns `status: resume_refused` with `UNCERTAIN_COMMIT_STATE` (`workflow.py`, the resume block), which is a unit stop that is not a scope conflict, so the stage fails and the plan does not commit (`BYP-A1-14`) (`TRACED`, D0) |
+| BYP-A1-13 | `closed/covered` | `BYP-A5-13`: off unless the operator enabled it; every write passes the write gate at the candidate root (`MUT-A5-05`) | The row's "not read" is answered by `BYP-A5-13`. Accounting: bounded by the recovery cycle (3 per stage) and the turn limit |
+| BYP-A1-14 | `intentional` | Fail closed: a unit stop with no recovery route fails the stage and nothing commits (`FR-A1-22`) | The route from a terminal requirement gap to a unit is a different question: `GAP-A3-02`, C-02 |
+| BYP-A2-01 | `root-gap` | R-01 / C-01 (an unmapped executed identity is held, never "not run-authored"); S5 | - |
+| BYP-A2-02 | `root-gap` | R-01 / C-01 (same clause); S5 | - |
+| BYP-A2-03 | `intentional` | Owner correction recorded as `DOC-A2-02`; bounded by the unit ceiling; the test becomes a subject at the first gate that executes it | - |
+| BYP-A2-04 | `root-gap` | R-01 / C-01 (the entry's semantic state), R-02 / C-02 (never SUCCESS with an open requirement); S5, S6 | - |
+| BYP-A2-05 | `root-gap` | R-01 / C-01 (a structural closer closes only its own claim); S5 | - |
+| BYP-A2-06 | `root-gap` | R-01 / C-01; S5 | Closed for mapped subjects; the open part is the unmapped case of `BYP-A2-01` and `BYP-A2-02` |
+| BYP-A2-07 | `closed/covered` | Settled for attempts that wrote source (`AUTH-A3-05`); the residue is `BYP-A3-09` | The row's `INFERRED` is answered by slice A3 |
+| BYP-A2-08 | `closed/covered` | `BYP-A5-13` | - |
+| BYP-A2-09 | `intentional` | A stricter path, not a bypass | What an unattended or direct run may do once a test is written: C-01 (S5) |
+| BYP-A3-01 | `root-gap` | R-03 / C-03 (the apply subject is the commit transaction); S7 | Owner ruling 4 of 2026-11-15 |
+| BYP-A3-02 | `root-gap` | R-03 / C-03 (the measure is taken on the apply subject); S7 | - |
+| BYP-A3-03 | `intentional` | The operator's own flag; refused inside a desktop launch | - |
+| BYP-A3-04 | `closed/covered` | `FR-A3-07` | - |
+| BYP-A3-05 | `intentional` | No change, so no apply subject; runtime commands have their own subject | - |
+| BYP-A3-06 | `root-gap` | R-03 / C-03 (which triggers hold execution is stated by the contract); S7 | See `12-D0-CLOSURE-HARDENING.md` section 5: the contract states the AS-IS rule explicitly; widening it is an owner item for S7 |
+| BYP-A3-07 | `closed/covered` | `BYP-A5-12`: closed at the producer (`create_git_worktree`) | The row's `INFERRED` is answered by slice A5 |
+| BYP-A3-08 | `root-gap` | R-02 / C-02 (the RunRecord annotation is the value every surface reads), R-11 / C-11; INT-04; S6 | - |
+| BYP-A3-09 | `closed/covered` | `BYP-A5-13`: the loop is operator opt-in and value-gated; its writes pass the write gate | Residual stated: that the loop writes and executes before a review was not traced (`INFERRED`); it is reachable only with the operator's opt-in |
+| BYP-A3-10 | `closed/covered` | The mutations precede the binding, so they are inside what is bound, shown and verified | - |
+| BYP-A3-11 | `intentional` | Fail closed: a decision the desktop cannot ask is unavailable or declined, and recorded | A typed knowledge-gap decision is added by C-06 (S4); a lookup review kind is `future` (`DESKTOP-LOOKUP-QUERY-APPROVAL-001`) |
+| BYP-A3-12 | `root-gap` | R-02 / C-02 truth (5); S6 | Owner ruling 2: advisory on every executor |
+| BYP-A3-13 | `intentional` | Declared `CommitStrategy.INCREMENTAL_WORK_UNIT`; the result names the retained commits | Under C-02 a later failure ends `APPLIED_REQUIREMENTS_OPEN` or `FAILED` with the commits named (S6) |
+| BYP-A3-14 | `root-gap` | R-02 / C-02 truth (5) (`GAP-A3-06`); S6 | - |
+| BYP-A3-15 | `root-gap` | R-03 / C-03 (the approved digest is compared with the batch at commit); S7 | - |
+| BYP-A3-16 | `root-gap` | R-03 / C-03 (a diff that omits a mode or binary change is a forbidden bypass); S7 | - |
+| BYP-A3-17 | `future` | `MANAGED-SERVICE-APPROVAL-001`; human-in-the-loop fails closed today | - |
+| BYP-A4-01 | `root-gap` | R-02 / C-02 truth (1); S6 | - |
+| BYP-A4-02 | `root-gap` | R-06 / C-06 (relevance decided once per run); S4 | - |
+| BYP-A4-03 | `root-gap` | R-06 / C-06 (coverage rule); S4 | - |
+| BYP-A4-04 | `root-gap` | R-10 / C-10; S2 | Narrowed by `BYP-A6-10` for the Planner block (X-02) |
+| BYP-A4-05 | `intentional` | The per-query approval shows the exact terms; unattended mode refuses non-public terms | - |
+| BYP-A4-06 | `root-gap` | R-06 / C-06 (a rule with no provenance record renders as unverified: clause added in D0); S4 | `SKILL-RULE-PROVENANCE-PROJECT-SUPPLIED-001` |
+| BYP-A4-07 | `root-gap` | R-04 / C-04 (one skill writer; no Git commit during a run); S4 | - |
+| BYP-A4-08 | `root-gap` | R-06 / C-06 clause INT-06; S4 | - |
+| BYP-A4-09 | `root-gap` | R-06 / C-06 (the guard asks the engine); S4 | - |
+| BYP-A4-10 | `root-gap` | R-03 / C-03; S7 | - |
+| BYP-A4-11 | `closed/covered` | Revalidated by `validate_plan` at each revision site; bounded by 3 | The identity of the executed plan is INT-02 (C-07, C-03) |
+| BYP-A4-12 | `root-gap` | R-06 / C-06 (a unit's composed text never selects skills or closes the gate); S4 | - |
+| BYP-A4-13 | `root-gap` | R-02 / C-02 clause INT-05; S6 | - |
+| BYP-A4-14 | `root-gap` | R-02 / C-02 (one result contract for both shapes); S6 | - |
+| BYP-A4-15 | `intentional` | Observational: files and outcome are the direct run's | - |
+| BYP-A4-16 | `intentional` | Owner ruling (SHARED-DECISION-AUTHORITY-001) | C-01 adds the validator's check against a specified clause (S5) |
+| BYP-A4-17 | `intentional` | The term passes the sanitizer and the per-query authorization | - |
+| BYP-A4-18 | `closed/covered` | `BYP-A5-10`: every CLI entry wires a callback | The row's "not established" is answered by slice A5 |
+| BYP-A4-19 | `root-gap` | R-06 / C-06 (a scaffold never covers), R-04 / C-04; S4 | - |
+| BYP-A5-01 | `root-gap` | R-04 / C-04 (project-authority path class), R-03 / C-03 (path-class approval); S4, S7 | - |
+| BYP-A5-02 | `root-gap` | R-04 / C-04, R-03 / C-03, R-06 / C-06; S4, S7 | - |
+| BYP-A5-03 | `root-gap` | R-04 / C-04 (planned write-granted MCP tools are operator-only); S4 | Owner ruling 11 |
+| BYP-A5-04 | `closed/covered` | `AUTH-A5-06` | - |
+| BYP-A5-05 | `root-gap` | R-05 / C-05 class A; S3 | - |
+| BYP-A5-06 | `root-gap` | R-05 / C-05 class C; S3 | - |
+| BYP-A5-07 | `root-gap` | R-04 / C-04; S4 | - |
+| BYP-A5-08 | `root-gap` | R-05 / C-05 (index and discovery sites take membership from the bound tree: clause added in D0); S3 | `DIRECTORY-NAME-PRUNING-P3-SIBLING-SITES-001` |
+| BYP-A5-09 | `root-gap` | R-08 / C-08 level 2; S8 | - |
+| BYP-A5-10 | `closed/covered` | Every CLI call passes a callback | - |
+| BYP-A5-11 | `closed/covered` | The desktop policy is strict | A typed confirmation is added by C-06 (S4) |
+| BYP-A5-12 | `closed/covered` | The producer returns a sandbox path or raises | - |
+| BYP-A5-13 | `closed/covered` | SEC-009 value gate and the write gate (`MUT-A5-05`) | - |
+| BYP-A5-14 | `root-gap` | R-07 / C-07; INT-11; S8 | The row's "not established" is answered by audit 3.4 |
+| BYP-A5-15 | `closed/covered` | Classified as an untrusted source | - |
+| BYP-A5-16 | `intentional` | A process rule (`PROCESS-DIAGNOSTIC-PROBE-REAL-AUTHORITY-HOME-001`); the suite isolates the homes | - |
+| BYP-A6-01 | `root-gap` | R-09 / C-09 (production admission by the run); S1 | Owner ruling 7 |
+| BYP-A6-02 | `root-gap` | R-09 / C-09 (an unknown name is refused; the caller passes the binding); S1 | The row's "reachability inferred absent" is superseded by X-03: the same lookup is reachable with a valid configuration (`MEASURED` B-P1) |
+| BYP-A6-03 | `root-gap` | R-09 / C-09 (the admission covers every role's chain); S1 | Closed for the Developer today |
+| BYP-A6-04 | `root-gap` | R-09 / C-09 (a non-exact runtime is not admitted under production); S1 | - |
+| BYP-A6-05 | `root-gap` | R-10 / C-10; S2 | - |
+| BYP-A6-06 | `root-gap` | R-10 / C-10; S2 | - |
+| BYP-A6-07 | `root-gap` | R-10 / C-10; S2 | - |
+| BYP-A6-08 | `root-gap` | R-10 / C-10; S2 | - |
+| BYP-A6-09 | `root-gap` | R-10 / C-10; INT-13; S2 | - |
+| BYP-A6-10 | `root-gap` | R-10 / C-10; S2 | Not reached in the stage order read; the re-planning routes were not read. C-10 removes fetched text from `state.error_context`, which closes those routes by construction |
+| BYP-A6-11 | `root-gap` | R-06 / C-06; S4 | - |
+| BYP-A6-12 | `root-gap` | R-11 / C-11 (bound copy, written after reconciliation), R-02 / C-02; S6 | - |
+| BYP-A6-13 | `intentional` | Owner ruling 6: evidence is diagnostic history, not tamper-evident; C-11 states it in the documentation and on screen (S6) | A tamper-evident store is `future` |
+| BYP-A6-14 | `intentional` | By design: the recorder is observational | - |
+| BYP-A6-15 | `root-gap` | R-11 / C-11 (gate purpose vocabulary covers every orchestrating entry); S6 | - |
+| BYP-A6-16 | `root-gap` | R-11 / C-11 (the role of a model call); S6 | - |
+| BYP-A6-17 | `root-gap` | R-03 / C-03; S7 | A negative finding (no aggregate authority exists), kept as a row |
+| BYP-A6-18 | `root-gap` | R-04 / C-04; S4 | - |
+
+Totals: `root-gap` 56, `closed/covered` 19, `intentional` 17, `future` 1, `blocker` 0. The one Phase-D blocker (R-13)
+is a failure-matrix question (`FR-A5-18`, `FR-A5-19`), not a bypass row.
