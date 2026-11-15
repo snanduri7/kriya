@@ -25,7 +25,9 @@ from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools import test_execution
 from kriya.tools.containment import (
     BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST,
+    BACKEND_TARGET_NOT_STARTED,
     DEPENDENCY_CACHE_SCOPE_REQUIRED,
+    INFRASTRUCTURE_DIAGNOSTIC_CODES,
     PROJECT_VENV_NOT_DISCARDED,
     PROJECT_VENV_SOURCE_NOT_SCOPE_OWNED,
     ContainmentBackend,
@@ -1059,6 +1061,14 @@ class PolymorphicValidator:
             "python", f"pip install {' '.join(install_args)}",
             returncode=install_res["returncode"], timed_out=install_res.get("timeout", False),
         )
+        if install_res.get("target_started") is False:
+            # R-13: the install container never started, so pip judged nothing: this is the environment's failure (PYTHON_ENVIRONMENT_UNAVAILABLE through the resolver's
+            # typed outcome), never an ``install_error`` - that value means pip itself rejected the declared dependencies, a possibly code-fixable candidate fact.
+            self._venv_creation_error = (f"`pip install {' '.join(install_args)}` did not start in its container ({BACKEND_TARGET_NOT_STARTED}): "
+                                         f"{install_res.get('stderr', '')}").rstrip()
+            if view_backed:
+                self._venv_source = None
+            return None, None
         if install_res["returncode"] != 0:
             return None, (
                 f"'pip install {' '.join(install_args)}' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
@@ -1631,14 +1641,19 @@ class PolymorphicValidator:
             if command_result.get("acquisition_incomplete") is True:
                 result["acquisition_incomplete"] = True  # JVM-TEST-PHASE-001: typed transport of the acquisition-incomplete marker
             diagnostic = command_result.get("infrastructure_diagnostic")
-            if (result.get("environment_reason_code") is None and command_result.get("target_started") is False and isinstance(diagnostic, dict)
-                    and diagnostic.get("reason_code") == BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST):
-                # BIND-SOURCE-RELAUNCH-001: the verification tool never started because the backend refused a bind source that exists on the host (still so after the
-                # one relaunch, or with the scope's relaunch already used). The typed code makes every gate that consumes ``environment_reason_code`` stop as the
-                # existing verification_infrastructure_failure: never a compile / test failure of the candidate, never offered to the Developer for repair.
+            if result.get("environment_reason_code") is None and command_result.get("target_started") is False:
+                # R-13 (VERIFICATION-ENVIRONMENT-VERDICT): the verification tool NEVER STARTED - the containment owner's typed fact, not an exit status and not text. Nothing
+                # about the candidate was observed, whatever the backend's reason, so this is an environment verdict for EVERY gate that builds its result here: the typed
+                # code makes each consumer of ``environment_reason_code`` stop as the existing verification_infrastructure_failure - never a compile / test failure of the
+                # candidate, never charged to it, never offered to the Developer for repair. The code is the backend's own diagnostic when it has one (BIND-SOURCE-RELAUNCH-001:
+                # still refused after the one relaunch, or a source absent on the host), else the generic never-started code. Before this, only the host-present bind-source
+                # refusal was typed and every other refusal was returned as an ordinary failed gate (MEASURED: the Python compile gate reported COMPILATION FAILURE).
+                known = isinstance(diagnostic, dict) and diagnostic.get("reason_code") in INFRASTRUCTURE_DIAGNOSTIC_CODES
                 result["success"] = False
-                result["environment_reason_code"] = BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST
-                result["output"] = f"{infrastructure_diagnostic_line(diagnostic)}\n{output}"
+                result["environment_reason_code"] = diagnostic["reason_code"] if known else BACKEND_TARGET_NOT_STARTED
+                note = (infrastructure_diagnostic_line(diagnostic) if known else
+                        f"{BACKEND_TARGET_NOT_STARTED}: the contained verification tool did not start; nothing about the candidate was observed")
+                result["output"] = f"{note}\n{output}"
         return result
 
     _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
@@ -2230,6 +2245,8 @@ class PolymorphicValidator:
                     if os.path.exists(full):
                         try:
                             res = self._run_cmd_with_timeout(["ruby", "-c", full], cwd=self.workspace_path)
+                            if res.get("target_started") is False:  # R-13: nothing was checked
+                                return self._validation_result(False, res.get("stderr", ""), res)
                             if res["returncode"] != 0:
                                 errors.append(f"Ruby syntax error in {f}:\n{res['stderr']}")
                         except ContainmentSetupError:
@@ -2292,6 +2309,8 @@ class PolymorphicValidator:
             raise
         binding.observe(res)
         result = self._validation_result(res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res)
+        if result.get("environment_reason_code"):
+            result["acceptance_environment_error"] = True  # R-13: the runner never started - the same typed "no verdict" as an unavailable interpreter above
         result["test_execution"] = test_execution.collect(binding).to_dict()
         return result
 
@@ -2446,6 +2465,8 @@ class PolymorphicValidator:
                     install_res = self._run_cmd_with_timeout(
                         ["bundle", "install", "--path", "vendor/bundle"], cwd=self.workspace_path
                     )
+                    if install_res.get("target_started") is False:  # R-13: bundler never ran
+                        return self._validation_result(False, install_res.get("stderr", ""), install_res)
                     if install_res["returncode"] != 0:
                         return {
                             "success": False,
@@ -2475,7 +2496,7 @@ class PolymorphicValidator:
                     if target_test_list:
                         cmd.extend(target_test_list)
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
-                return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
+                return self._validation_result(res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res)  # R-13: a never-started rspec is typed there
 
             # "unknown" stack - same reasoning as run_compile_check: succeed so
             # the retry loop doesn't fail forever on a gate that can never run,

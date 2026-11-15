@@ -50,6 +50,7 @@ from kriya.workflow.diagnosis_codes import NO_AUTHORIZED_REPAIR_TARGET, REGRESSI
 from kriya.workflow.edit_capability import ANCHOR_CONTEXT_NOT_ESCALATED
 from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.failure import (
+    ENVIRONMENT_VERDICT_FAILURE_TYPES,
     Failure,
     FailureAttributionKind,
     classify_failure_attribution,
@@ -1694,6 +1695,7 @@ async def _record_attempt_failure(
         plan_scope_conflict=state.plan_scope_conflict is not None,
         failure_family_changed=failure_family_changed,
         terminal_policy_denial=state.unrecoverable_scope_denial_count > 0,
+        environment_verdict=failure.type in ENVIRONMENT_VERDICT_FAILURE_TYPES,  # R-13: nothing about the candidate was observed
     )
     if state.api_contract_recovery and not api_contract_recovery_handed_back(state):
         # Later compiler/test failures remain diagnostic history; they cannot

@@ -45,7 +45,7 @@ def main() -> int:
     dangling = sorted(i for i in referenced if i not in defined)
     twice = sorted(i for i, where in defined.items() if len(where) > 1)
     orphans = sorted(i for i in defined if referenced[i] <= {HOMES[i.split("-")[0]]})
-    print(f"defined: " + ", ".join(f"{k} {sum(1 for i in defined if i.startswith(k + '-'))}" for k in HOMES))
+    print("defined: " + ", ".join(f"{k} {sum(1 for i in defined if i.startswith(k + '-'))}" for k in HOMES))
     print(f"dangling references (cited, defined nowhere): {len(dangling)}")
     for i in dangling:
         print(f"  {i} cited in {sorted(referenced[i])}")

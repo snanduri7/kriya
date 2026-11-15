@@ -24,6 +24,7 @@ from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 
+from kriya.workflow.failure import ENVIRONMENT_VERDICT_FAILURE_TYPES
 from kriya.workflow.failure_grounding import error_source_location_matches
 from kriya.workflow.failure_reporting import FailureCategory, categorize_failure
 
@@ -43,7 +44,9 @@ DELIVERY_FAILURE_TYPES = frozenset({
 # authoritative and not a delivery failure is a statement about the candidate and is KEPT - a validator type the category table does not
 # know yet must default to remembered, not forgotten (review of D1: candidate_runtime_entrypoint_invalid, prose_contamination, ...).
 _NON_CANDIDATE_CATEGORIES = frozenset({FailureCategory.RESOURCE, FailureCategory.INTERNAL})
-_NON_CANDIDATE_TYPES = frozenset({"general_error", "containment_setup_failed", "plan_scope_conflict"})
+# R-13: the environment-verdict types are non-candidate by definition. Before, ``verification_infrastructure_failure`` fell through to "a statement about the candidate"
+# (MEASURED: it replaced the open finding and could open a new failure family, replenishing the scoped budgets, on its way to the environment stop).
+_NON_CANDIDATE_TYPES = frozenset({"general_error", "containment_setup_failed", "plan_scope_conflict"}) | ENVIRONMENT_VERDICT_FAILURE_TYPES
 
 MAX_OPEN_FINDINGS = 3
 MAX_EVIDENCE_CHARS = 2000

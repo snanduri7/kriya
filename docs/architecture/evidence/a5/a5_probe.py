@@ -133,6 +133,7 @@ def _shared_cfg(root: str, shared: str):
 
 def p2_shared_index() -> None:
     from _fake_embedding import StaticEmbedder  # tests/_fake_embedding.py (deterministic, no model)
+
     from kriya.analyzer.analyzer import RepositoryAnalyzer
     from kriya.analyzer.graph import DependencyGraph
     from kriya.memory.vector import LocalVectorStore

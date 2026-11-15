@@ -46,7 +46,12 @@ from enum import Enum
 from socket import create_connection
 from typing import Callable, Dict, List, Optional, Tuple
 
-from kriya.tools.containment import ContainmentBackend, ContainmentProfile, ContainmentSetupError
+from kriya.tools.containment import (
+    BACKEND_TARGET_NOT_STARTED,
+    ContainmentBackend,
+    ContainmentProfile,
+    ContainmentSetupError,
+)
 from kriya.tools.process import ManagedProcess, ProcessController, ProcessResult
 
 
@@ -620,6 +625,7 @@ def _process_result(result: Dict[str, object]) -> ProcessResult:
     return ProcessResult(
         returncode=int(result["returncode"]), stdout=str(result["stdout"]), stderr=str(result["stderr"]), timeout=bool(result["timeout"]),
         toolchain_identity=result.get("toolchain_identity"),  # type: ignore[arg-type]
+        target_started=result.get("target_started") is not False,  # R-13: the never-started fact must survive this conversion (it was dropped)
     )
 
 
@@ -709,6 +715,15 @@ def _prepare_required_artifact(
         return _PreparationOutcome(
             ServiceVerificationOutcomeKind.PREPARATION_FAILED,
             f"failed to invoke preparation command {build_command!r}: {e}", command=build_command,
+        )
+    if result.target_started is False:
+        # R-13 (VERIFICATION-ENVIRONMENT-VERDICT): the build's container never started, so nothing about the project was built or judged. This is the "never got that far"
+        # shape of this function's contract - a command and NO return code - which the caller reports as Kriya's own verification_infrastructure_failure. Returning the
+        # launcher's exit status (MEASURED: 125) made it "the build ran and failed", a compile failure of the candidate offered to the Developer.
+        return _PreparationOutcome(
+            ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+            f"{BACKEND_TARGET_NOT_STARTED}: preparation command {' '.join(build_command)} did not start in its container; nothing about the project was observed",
+            stdout=result.stdout, stderr=result.stderr, command=build_command,
         )
     if result.returncode != 0 or result.timeout:
         incomplete = (

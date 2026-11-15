@@ -196,7 +196,12 @@ def p6() -> None:
 
 # ---------------------------------------------------------------- P7: which approval answers approve
 def p7() -> None:
-    from kriya.policy.approval import ApprovalOutcome, classify_approval_answer, defer_execution_until_source_review, stale
+    from kriya.policy.approval import (
+        ApprovalOutcome,
+        classify_approval_answer,
+        defer_execution_until_source_review,
+        stale,
+    )
 
     for answer in (True, False, None, "yes", 1, ApprovalOutcome.approve()):
         outcome = classify_approval_answer(answer)

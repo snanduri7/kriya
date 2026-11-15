@@ -68,6 +68,30 @@ def _attr_of(node: ast.AST, names: FrozenSet[str]) -> bool:
     return isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in names
 
 
+def _module_names(tree: ast.Module, module: str) -> FrozenSet[str]:
+    """Every name ``module`` is reachable by in this file: the plain name and each ``import module as alias`` (FINDER-ALIAS-BLIND-001:
+    ``import os as _o; _o.getcwd()`` evaded every finder that matched the plain name only)."""
+    names = {module}
+    for node in _index(tree).of(ast.Import):
+        names |= {alias.asname for alias in node.names if alias.name == module and alias.asname}
+    return frozenset(names)
+
+
+def _imported_names(tree: ast.Module, module: str, name: str) -> FrozenSet[str]:
+    """Every name ``module.name`` is bound to in this file: the plain name and each ``from module import name as alias``."""
+    names = {name}
+    for node in _index(tree).of(ast.ImportFrom):
+        if node.level == 0 and node.module == module:
+            names |= {alias.asname for alias in node.names if alias.name == name and alias.asname}
+    return frozenset(names)
+
+
+def _is_class(node: ast.AST, tree: ast.Module, module: str, name: str) -> bool:
+    """``node`` denotes ``module.name``: a bound name (aliased or not) or the attribute chain ``<module or its alias>.name``."""
+    return (isinstance(node, ast.Name) and node.id in _imported_names(tree, module, name)) or (
+        isinstance(node, ast.Attribute) and node.attr == name and _attr_of(node, _module_names(tree, module)))
+
+
 def subprocess_import_sites(tree: ast.Module) -> Set[int]:
     """``import subprocess`` / ``from subprocess import``."""
     return {node.lineno for node in _index(tree).of(ast.Import, ast.ImportFrom)
@@ -81,7 +105,7 @@ def subprocess_sites(tree: ast.Module) -> Set[int]:
     ``asyncio.create_subprocess_*``."""
     lines = set()
     for node in _index(tree).of(ast.Attribute, ast.Name, ast.ImportFrom):
-        if _attr_of(node, frozenset({"subprocess"})) \
+        if _attr_of(node, _module_names(tree, "subprocess")) \
                 or (isinstance(node, ast.Attribute) and node.attr.startswith("create_subprocess_")) \
                 or (isinstance(node, ast.Name) and node.id == "Popen") \
                 or (isinstance(node, ast.ImportFrom) and node.level == 0
@@ -116,8 +140,9 @@ def git_argv_sites(tree: ast.Module) -> Set[int]:
 
 def _attr_or_import(tree: ast.Module, module: str, attrs: FrozenSet[str]) -> Set[int]:
     lines = set()
+    modules = _module_names(tree, module)
     for node in _index(tree).of(ast.Attribute, ast.ImportFrom):
-        if _attr_of(node, frozenset({module})) and node.attr in attrs:
+        if _attr_of(node, modules) and node.attr in attrs:
             lines.add(node.lineno)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == module \
                 and any(alias.name in attrs for alias in node.names):
@@ -135,8 +160,7 @@ def home_sites(tree: ast.Module) -> Set[int]:
     lines = set()
     for node in _index(tree).of(ast.Attribute):
         if isinstance(node, ast.Attribute) and (
-                node.attr == "expanduser" or (node.attr == "home" and isinstance(node.value, ast.Name)
-                                              and node.value.id == "Path")):
+                node.attr == "expanduser" or (node.attr == "home" and _is_class(node.value, tree, "pathlib", "Path"))):
             lines.add(node.lineno)
     return lines
 
@@ -145,8 +169,7 @@ def cwd_sites(tree: ast.Module) -> Set[int]:
     """``os.getcwd()`` / ``os.getcwdb()`` / ``Path.cwd()``."""
     lines = _attr_or_import(tree, "os", frozenset({"getcwd", "getcwdb"}))
     for node in _index(tree).of(ast.Attribute):
-        if isinstance(node, ast.Attribute) and node.attr == "cwd" and isinstance(node.value, ast.Name) \
-                and node.value.id == "Path":
+        if isinstance(node, ast.Attribute) and node.attr == "cwd" and _is_class(node.value, tree, "pathlib", "Path"):
             lines.add(node.lineno)
     return lines
 
@@ -155,7 +178,7 @@ def sqlite_sites(tree: ast.Module) -> Set[int]:
     """``sqlite3.<x>`` and ``from sqlite3 import``."""
     lines = set()
     for node in _index(tree).of(ast.Attribute, ast.ImportFrom):
-        if _attr_of(node, frozenset({"sqlite3"})) or (
+        if _attr_of(node, _module_names(tree, "sqlite3")) or (
                 isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "sqlite3"):
             lines.add(node.lineno)
     return lines
@@ -174,7 +197,7 @@ def http_sites(tree: ast.Module) -> Set[int]:
     lines = set()
     for node in _index(tree).of(ast.Attribute, ast.ImportFrom, ast.Import):
         if (_attr_of(node, frozenset(imported))
-                or (isinstance(node, ast.Attribute) and node.attr == "request" and _attr_of(node, frozenset({"urllib"})))
+                or (isinstance(node, ast.Attribute) and node.attr == "request" and _attr_of(node, _module_names(tree, "urllib")))
                 or (isinstance(node, ast.ImportFrom) and node.level == 0
                     and ((node.module or "").split(".")[0] in _HTTP_MODULES or node.module == "urllib.request"
                          or (node.module == "urllib" and any(a.name == "request" for a in node.names))))

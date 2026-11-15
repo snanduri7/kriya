@@ -66,6 +66,12 @@ INFRASTRUCTURE_STOP_FAILURE_TYPES = frozenset({"containment_setup_failed"})
 # (refused at dispatch by the same exhausted deadline) and the diagnosis named a source owner nobody had observed. Owner ruling 2026-11-13: a
 # budget stop is NOT infrastructure and NOT a source defect. internal_framework_error stays out of both tables until characterized on its own.
 RESOURCE_LIMIT_FAILURE_TYPES = frozenset({"time_budget_exhausted"})
+# R-13 (VERIFICATION-ENVIRONMENT-VERDICT): failures that say the verification ENVIRONMENT could not produce a verdict (a tool that never started, an unavailable
+# containment backend). Nothing about the candidate was observed, so such a failure never opens or replaces the open finding, never opens a failure family and charges no
+# retry budget (kriya/workflow/open_findings.py, retry_policy.charge_failed_attempt). Closed set; a type added here must be one whose producers observed nothing.
+ENVIRONMENT_VERDICT_FAILURE_TYPES = frozenset({
+    "verification_infrastructure_failure", "test_verification_infrastructure_failure", "containment_setup_failed",
+})
 # kriya/workflow/verifier_repair.py VERIFIER_REPAIR_REFUSED_TYPE (not imported: this module is a leaf).
 VERIFIER_REPAIR_REFUSAL_FAILURE_TYPES = frozenset({"verifier_repair_refused"})
 

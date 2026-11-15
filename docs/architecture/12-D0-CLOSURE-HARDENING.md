@@ -206,11 +206,11 @@ root-gap row and the clause that closes it. A row is closed in the registry only
 | R-05 | `DIRECTORY-NAME-PRUNING-P3-SIBLING-SITES-001` | C-05 clause added in D0 (S3) for the two traced sites; the other sites of the registry's census stay with the row |
 | R-06 | `SKILL-RULE-PROVENANCE-PROJECT-SUPPLIED-001` | C-06 clause added in D0 (S4) |
 | R-07 | `RETRY-BLOCKER-IDENTITY-AUTHORITY-001`, `SEMANTIC-SAFETY-REPAIR-CONTINUITY-001`, `TRIAGE-ON-ORCHESTRATOR-NOTICE-001` | C-07 continuity rule, the predicate split (S8) |
-| R-07 | `RETRY-STATE-RESUME-CONTINUITY-001`, `OPEN-FINDINGS-ORDER-RESUME-001` | C-07 persisted ledger (S8) |
+| R-07 | `RETRY-STATE-RESUME-CONTINUITY-001` | C-07 persisted ledger (S8) |
 | R-07 | `ENFORCE-UPSTREAM-WORK-PRESERVATION-001` | C-07 resumable candidate completions (ruling 9, S8) |
 | R-07 | `HITL-RESUME-DEFERRED-GATES-001` | C-07: a resume never reuses a candidate whose held gates did not run (AS-IS `FR-A3-20`, pinned by a scripted crash during the review in S8); preserving an unreviewed candidate is not required |
-| R-07 | `RECOVERY-MAY-CHANGE-ANSWERED-NO-CHANGE-REFUSED-IN-UNIT-001`, `RECOVERY-UPSTREAM-OWNER-ROUTING-001` | C-07 persisted recovery state with one typed vocabulary for a recovery unit's outcome (S8); each row's own reproducer is the first gate |
-| R-07 | `RETRY-PROGRESS-SAME-BLOCKER-001` | Duplicate; closed in S0 by ruling 13 |
+| R-07 | `RECOVERY-MAY-CHANGE-ANSWERED-NO-CHANGE-REFUSED-IN-UNIT-001` | C-07 persisted recovery state with one typed vocabulary for a recovery unit's outcome (S8); the row's own reproducer is the first gate |
+| R-07 | `RETRY-PROGRESS-SAME-BLOCKER-001`, `OPEN-FINDINGS-ORDER-RESUME-001`, `RECOVERY-UPSTREAM-OWNER-ROUTING-001` | Duplicate or superseded (`REGISTRY-ROOT-MAP.md`); closed in S0 by ruling 13. Corrected on the implementation branch: the D0 checkpoint listed the last two as S8 work, against the root map |
 | R-11 | The sixteen rows of `REGISTRY-ROOT-MAP.md` under R-11 | C-11 "diagnostic truth" and "retention": each label or count fix carries its own regression (S6); `TECHNICAL-VERIFICATION-BARE-ROWS-001` closes on the owner's observation |
 
 Not rechecked row by row in D0: the rows under R-04 (one), R-12 (fifteen) and R-13 (seven), whose slices `11` already
@@ -302,3 +302,58 @@ the finding predicate, the authority table, the admission sites, the exit sites)
 each slice (reproduce the original symptom) is also the check that the named call sites are as the maps say. That is
 the reproduce step of the engineering rules, not a new discovery round; if it shows a named owner is wrong, it is a
 stop.
+
+## 8. Owner rulings given with the S0 authorization (2026-11-15, after D0 was accepted)
+
+Recorded on the implementation branch (`implementation/closure-s0`, cut from the closure head `ef89dcd`; the closure
+branch stays frozen and documentation-only). They settle the two owner items of section 1 and correct the S0 sequence.
+
+| # | Ruling | Carried into |
+|---|---|---|
+| 15 | **Implementation base.** The implementation branch and worktree are cut from the closure head `ef89dcd`, not from `main`; the invariant "`main` and `ef89dcd` differ only under `docs/architecture/`" is re-checked before branching (checked: empty diff). The architecture documents are not copied by hand | Done |
+| 16 | **Execution hold.** Only human-in-the-loop mode creates a blocking human review or approval wait by default. Invariant: *if policy says a human approval is REQUIRED for this mutation, execution MUST hold, however the request was surfaced.* In guardrails and every other non-HITL mode no pseudo-pending human approval is created while execution continues; a non-blocking review or event is explicitly typed ADVISORY; no event is labelled or treated as a required approval if execution proceeds without it | S7 (C-03 encodes the distinction: required approvals hold, advisory events are typed advisory). Supersedes the proposal of section 1 and the D0 clause X-16 where they differ |
+| 17 | **Model-inferred optional runtime check.** It may not independently make a run fail. It may give diagnostic evidence, advise further verification, and become mandatory only when an authoritative requirement, semantic-contract or technical-gate owner promotes it. It may not create a required product semantic, close or open a requirement, or turn an otherwise valid run into a terminal failure. Rule: *only authoritative requirement and semantic-contract checks and mandatory technical and safety gates may determine terminal verification failure* | S5 (C-01: a model-inferred check is never a clause) and S6 (C-02: the result contract reads requirement truth and mandatory gates only). Closes the owner item on `OPTIONAL-RUNTIME-GRADED-FAILURE-POLICY-001` |
+| 18 | **S0 certifies an immutable snapshot.** Reproduce and classify, implement, focused tests with negative controls, mutants and static checks, an exact S0 checkpoint commit, then the one authorized full suite on a separate clean worktree pinned to that commit. S1 and S2 may proceed in the implementation worktree once the certification has started. S0 is not VERIFIED or CLOSED until the certification passes; a material S0 defect found by it stops reliance on S0; no rerun for luck | S0 |
+| 19 | **R-12.** Each of the fifteen harness rows is reproduced first and classified CONFIRMED, STALE, DISPROVED or INTENTIONAL before any edit; only a confirmed defect is fixed, at its root owner; harness behaviour is not changed to satisfy old registry wording | S0 |
+| 20 | **Probes become tests sparingly.** For each materially relied-on behaviour: the smallest durable owner-level characterization or acceptance test, a negative control and a regression; equivalent probes are merged; no duplicate suite | S0 and every later slice |
+| 21 | **R-13 invariant.** At every container launch and admission site: *container or environment unavailable -> a typed ENVIRONMENT verdict -> zero candidate and retry charge -> never a gate or product failure.* Proven with a deterministic scripted refusal; a path that cannot be proven without a real daemon is reported with the exact missing proof, the invariant is not weakened | S0 |
+
+## 9. Slice S0: what was reproduced, fixed and proven (2026-11-15, implementation branch)
+
+State: S0 is **implemented but not certified and not closed**. One R-13 launch site is open (below), so the one authorized
+full suite has not been started: a fix there would change the snapshot being certified.
+
+**Registry (ruling 13).** The 11 stale, 2 disproved and 5 duplicate rows are closed with their disposition and their earlier
+text kept. Ten more rows were closed by S0 itself and three rows were added (below).
+
+**R-13, the Phase-D blocker: a confirmed product defect, fixed where a typed fact exists.**
+
+| Launch site | Before (`MEASURED` with a scripted backend refusal, no daemon) | After | Proof |
+|---|---|---|---|
+| Python compile, pytest, acceptance runner, Ruby compile / tests / bundle install (`tools/validate.py::_validation_result`) | A refusal other than the host-present bind-source case returned an ordinary failed gate with no `environment_reason_code`: a compile or test failure of the candidate | Any never-started tool is a typed environment verdict (`BACKEND_TARGET_NOT_STARTED`, or the backend's own diagnostic code) | `tests/test_r13_environment_verdict.py`, 7 gate cases; mutants M1, M2, M3, M5, M6, M7 |
+| `pip install` of the project environment | Reported as `install_error`, a dependency problem of the candidate | `PYTHON_ENVIRONMENT_UNAVAILABLE` | Same file; mutant M4 |
+| Artifact build before a runtime or service check (`tools/service_runtime.py::_prepare_required_artifact`) | Return code 125 kept, so the caller raised a `compile` failure of the candidate; the validator-result conversion dropped the never-started fact | No return code: the caller's `verification_infrastructure_failure` | Same file, both routes; mutants M12, M13 |
+| The retry machine (`open_findings.py`, `retry_policy.py`, `retry_strategy.py`) | The environment stop replaced the open finding, could open a failure family (replenishing scoped budgets) and was charged | `ENVIRONMENT_VERDICT_FAILURE_TYPES` (`workflow/failure.py`): no finding, no family, no charge | Same file, incl. the real recorder over run 10's attempts; mutants M8 to M11 |
+| Java adapters, POM validation, venv creation, the application run | Already typed | Unchanged | Pinned by the gate cases |
+| Static-analysis scanner | A scan with no output and exit 125 is `MALFORMED_OUTPUT`, never clean, no finding (`MEASURED`) | Unchanged | One test |
+| Baseline, terminal gate, requirement closers | They call the validator's gates and stop on any `environment_reason_code` (`TRACED`: `validation_baseline.py`, `verification_coordinator.py`, `acceptance_jvm.py`) | Covered by the seam fix | Their existing tests |
+| **Managed (long-running) service launch** | **Open.** A managed launch has no typed never-started fact (`tools/process.py`: only a finite launch gets a `FiniteLaunchStage`), so a refused service container is reported as `SERVICE_EXITED_BEFORE_READY`, a verdict about the candidate (`TRACED`) | Not fixed | Registry `R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001`: the invariant cannot be asserted at this site because the fact does not exist |
+
+Sixteen targeted mutants, sixteen killed. Adjacent tiers green: state-machine tier and never-started suites (892), gate
+orchestrator and runtime verification (420), architecture tier (200). `pylint` and `ruff` clean.
+
+**R-12, the fifteen harness rows, reproduced first (ruling 19).**
+
+| Class | Rows |
+|---|---|
+| CONFIRMED and fixed | `FINDER-ALIAS-BLIND-001` (10 planted aliases evaded the finders; fixed in `tests/architecture/access_sites.py`, 3 mutants killed), `WAVE8-TRACKED-BYTECODE-001` (untracked, tripwire test), `TEST-SLICE-A-OCI-STALE-NESTED-COMMAND-STRING-001` (text) |
+| STALE: already fixed or not reproducible at the baseline, closed with the measurement | `TEST-DEADLINE-TIMING-001`, `TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001`, `KERNEL-GOLDEN-RUNID-PATH-NORMALIZATION-001`, `KERNEL-RUNTIME-TRACE-PATH-LENGTH-DEPENDENT-001`, `DEMO-V2-FIXED-STUB-PORT-PARALLEL-001`, `CERT-DEMO-V2-IDLE-STUB-XDIST-001`, `TEST-KERNEL-GOLDEN-ORDER-DEPENDENCE-IN-AD-HOC-MIX-001` (the last three on one run each) |
+| CONFIRMED, root owner is R-05: closes with S3 | `KERNEL-TESTS-CHECKOUT-MEMORY-MORE-FILES-001` (reproduced: a fresh worktree gained `./memory/dependency_graph.db`), part (a) of `KERNEL-GOLDEN-HARNESS-VOLATILITY-001` |
+| Not reproducible here, unchanged | `CERT-CI-PLAIN-JOBS-LOCKFILE-GROUP-001` (hosted CI), `DEMO-RESET-RM-WORKSPACE-RACES-DOCKER-RELEASE-001` (needs a real daemon), `TEST-RESOURCEWARNING-HYGIENE-001` (not a certification hazard: the suite does not make that warning an error) |
+
+**New rows found by S0:** `R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001` (P2), `REGISTRY-CSV-ROW-WIDTH-001` (P3: ten registry rows
+do not have the header's width), `ACCEPTANCE-ENVIRONMENT-ERROR-FLAG-NO-READER-001` (P3: a result field with a writer and no reader).
+
+**A finding for S8, measured here:** `is_candidate_finding` is a deny-list, and before this slice it classed the environment stop
+as a statement about the candidate. S0 fixed the environment types only; the general fail-closed allow-list stays S8's predicate
+split.

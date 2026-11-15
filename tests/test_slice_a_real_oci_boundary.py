@@ -1,6 +1,6 @@
 """Wave 2 Slice A: the operator control plane is inaccessible from project/model-controlled containment - on REAL Docker (the packaged default backend), not the test stand-in.
 
-`kriya runs tool abandon|retry` edits `.kriya/control/state.json` and appends to `.kriya/control/decisions.jsonl` on the host. A contained child (the shape every project-controlled
+`kriya runs tool-abandon | tool-retry` edits `.kriya/control/state.json` and appends to `.kriya/control/decisions.jsonl` on the host. A contained child (the shape every project-controlled
 execution takes) must be unable to (a) read, write, replace, rename, truncate or unlink those files, (b) rename/replace `.kriya` itself to plant a forged copy at the host-visible
 name, or (c) run the operator command at all (no `kriya` in the container). The negative control removes the structural anchor and shows the SAME attack then forges the state the
 disposition command would trust - so a pass of the positive test is evidence about the boundary, not about the attack script."""
@@ -46,7 +46,7 @@ out["state_visible_to_the_child"] = os.path.exists(C + "/state.json") and os.pat
 out["kriya_command_on_path"] = shutil.which("kriya") is not None
 r = subprocess.run([sys.executable, "-c", "import kriya"], capture_output=True, text=True)
 out["kriya_importable"] = r.returncode == 0
-r = subprocess.run(["sh", "-c", "kriya runs tool retry t1 --attempt 1 --confirm"], capture_output=True, text=True)
+r = subprocess.run(["sh", "-c", "kriya runs tool-retry t1 --attempt 1 --confirm"], capture_output=True, text=True)
 out["operator_command_ran"] = r.returncode == 0
 print(json.dumps(out))
 '''

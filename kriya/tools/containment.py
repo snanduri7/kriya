@@ -776,6 +776,12 @@ def decide_external_execution(autonomy: object, *, subject: str) -> ExternalExec
 BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST = "BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST"
 BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST = "BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST"
 INFRASTRUCTURE_DIAGNOSTIC_CODES = frozenset({BACKEND_BIND_SOURCE_MISSING_BUT_PRESENT_ON_HOST, BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST})
+# R-13 (VERIFICATION-ENVIRONMENT-VERDICT, WAVE8-DOCKER-REFUSAL-BECOMES-FALSE-VERDICT-001): the verdict code of a verification tool whose contained target never started for a
+# reason no diagnostic above names (any other backend refusal, a launcher that could not exec the tool). Not a diagnostic: nothing is parsed from the backend's text for it. The
+# typed never-started FACT (ProcessResult.target_started is False) is the whole condition; the validator's result seam (kriya/tools/validate.py::_validation_result) turns it into
+# an environment verdict for every gate, so a launch Kriya's backend did not perform is never a compile / test failure of the candidate.
+BACKEND_TARGET_NOT_STARTED = "BACKEND_TARGET_NOT_STARTED"
+ENVIRONMENT_NOT_STARTED_CODES = INFRASTRUCTURE_DIAGNOSTIC_CODES | {BACKEND_TARGET_NOT_STARTED}
 _BIND_SOURCE_MISSING = re.compile(r"bind source path does not exist: (\S+?)\.?(?=\s|$)")
 _VM_HOST_PREFIX = "/host_mnt"  # the spelling a VM-based runtime gives a host path it reports; the host spelling is tried as well
 
