@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import dataclasses
 import sys
+import time
 from pathlib import Path
 
 import pytest
 import test_non_candidate_failure_scoped_reset_001 as reset_harness
+import test_service_runtime as service_harness
 from test_bind_source_diagnostic_001 import _LAUNCHER, _REFUSAL, _profile
 from test_bind_source_relaunch_001 import (
     OTHER_DOCKER_ERROR,
@@ -31,6 +33,7 @@ from test_bind_source_relaunch_001 import (
     _validator,
     _workspace,
 )
+from test_finite_launch_target_start import _SIMULATED_LAUNCHER
 
 from kriya.tools import service_runtime
 from kriya.tools.containment import (
@@ -305,3 +308,176 @@ async def test_the_real_recorder_charges_and_replenishes_nothing_for_an_environm
         assert run.state.budgets == recorded, "... and charges no budget"
     else:
         assert after.findings != before.findings and run.state.budgets != budgets_before
+
+
+# ---- the managed (long-running) service launch: R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001 ----------------------------------------
+#
+# MEASURED on ec2bec1 (2026-11-15, the scripted refusal below, no daemon): ``run_managed_service_verification`` answered a launch the backend
+# refused with ``SERVICE_EXITED_BEFORE_READY``, return code 125 and "Service process exited with code 125 before becoming ready" - a statement
+# that the candidate's service ran and exited. A managed launch had no launch stage, so the fact did not exist. It now goes through the SAME
+# stage a finite command gets; kriya/tools/process.py::ManagedProcess reads it, service_runtime only consumes the typed fact.
+
+_NONCE = "n1"
+
+
+class _ServiceBackend:
+    """A scripted container backend with the production launcher contract (the launcher execs the service and writes its not-started record only
+    when that exec fails). ``refuse_with``: the backend refuses before any launcher runs, printing exactly that text and exiting 125."""
+    name = "scripted-oci"
+
+    def __init__(self, refuse_with: str = ""):
+        self.refuse_with, self.teardowns = refuse_with, 0
+
+    def _teardown(self) -> None:
+        self.teardowns += 1
+
+    def prepare(self, profile, command):  # noqa: ARG002 - the Protocol's signature
+        stage = FiniteLaunchStage(prefix=(sys.executable, "-c", _SIMULATED_LAUNCHER, _NONCE), marker=f"{TARGET_NOT_STARTED_MARKER}{_NONCE}",
+                                  reached=f"{LAUNCHER_REACHED_MARKER}{_NONCE}")
+        prefix = (sys.executable, "-c", _REFUSAL, self.refuse_with) if self.refuse_with else None
+        return PreparedContainment(env=None, preexec_fn=None, backend_name=self.name, finite_launch=stage, command_prefix=prefix, cleanup=self._teardown)
+
+
+def _verify_service(tmp_path: Path, backend: _ServiceBackend, command=None, *, script: str = "", port: int = 0):
+    port = port or service_harness._free_port()
+    spec = service_harness._spec(port, script or service_harness._http_service_script(), startup_timeout=10.0)
+    spec = dataclasses.replace(spec, cwd=str(tmp_path), **({"service_command": list(command)} if command else {}))
+    return service_runtime.run_managed_service_verification(spec, controller=ProcessController(), containment_profile=_profile(tmp_path), containment_backend=backend)
+
+
+def _no_launch_record(*texts: str) -> bool:
+    return not any(LAUNCHER_REACHED_MARKER in text or TARGET_NOT_STARTED_MARKER in text for text in texts)
+
+
+@pytest.mark.parametrize("refusal", ["other", "bind_source_absent"])
+def test_a_managed_launch_the_backend_refused_is_a_typed_environment_fact_never_a_service_verdict(tmp_path, refusal):
+    """ORIGINAL SYMPTOM, the measured scenario: the backend refuses before the service's launcher runs."""
+    text = OTHER_DOCKER_ERROR if refusal == "other" else _bind_source(tmp_path, present=False)
+    code = BACKEND_TARGET_NOT_STARTED if refusal == "other" else BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST
+    backend = _ServiceBackend(text)
+
+    result = _verify_service(tmp_path, backend)
+
+    kinds = service_runtime.ServiceVerificationOutcomeKind
+    assert result.outcome is kinds.SERVICE_START_FAILED and result.outcome is not kinds.SERVICE_EXITED_BEFORE_READY
+    assert result.passed is False and result.returncode is None, "the launcher's exit status (125) is not the service's and is not reported as one"
+    assert result.environment_reason_code == code and code in ENVIRONMENT_NOT_STARTED_CODES
+    assert result.to_dict()["environment_reason_code"] == code
+    assert text.splitlines()[0] in result.stderr, "the backend's own text is kept as evidence"
+    assert backend.teardowns == 1, "the containment teardown still runs exactly once"
+
+
+def test_a_service_the_launcher_could_not_exec_never_started_and_its_launch_records_are_not_evidence(tmp_path):
+    """The other never-started shape: the launcher ran and its exec of the service failed (its own not-started record)."""
+    result = _verify_service(tmp_path, _ServiceBackend(), command=["kriya-no-such-service-binary-xyz", "--serve"])
+
+    assert result.outcome is service_runtime.ServiceVerificationOutcomeKind.SERVICE_START_FAILED and result.returncode is None
+    assert result.environment_reason_code == BACKEND_TARGET_NOT_STARTED
+    assert _no_launch_record(result.stdout, result.stderr, result.reasoning), "a launcher record is a typed fact, never recorded service output"
+
+
+def test_negative_control_a_service_that_started_and_then_crashed_is_still_exited_before_ready(tmp_path):
+    """Same exit status as the backend's refusal (125): the status decides nothing. A service that RAN and exited is a statement about it."""
+    crash = "import sys; sys.stderr.write('boom\\n'); sys.exit(125)"
+    backend = _ServiceBackend()
+
+    result = _verify_service(tmp_path, backend, command=[sys.executable, "-c", crash])
+
+    assert result.outcome is service_runtime.ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY and result.returncode == 125
+    assert result.environment_reason_code is None and "environment_reason_code" not in result.to_dict()
+    assert result.stderr == "boom\n", "exactly the service's own stderr: the launcher's reached record is not in it"
+    assert backend.teardowns == 1
+
+
+def test_negative_control_a_healthy_managed_service_passes_unchanged_through_the_launch_stage(tmp_path):
+    backend = _ServiceBackend()
+
+    result = _verify_service(tmp_path, backend)
+
+    assert result.outcome is service_runtime.ServiceVerificationOutcomeKind.PROBE_PASSED and result.passed is True and result.probe_status == 200
+    assert result.environment_reason_code is None and "environment_reason_code" not in result.to_dict()
+    assert _no_launch_record(result.stdout, result.stderr) and backend.teardowns == 1
+
+
+def _exited(managed, timeout: float = 10.0):
+    deadline = time.monotonic() + timeout
+    while managed.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return managed.poll()
+
+
+def test_the_managed_process_owns_the_start_fact_and_a_noisy_service_cannot_push_it_out_of_the_bounded_buffer(tmp_path):
+    """The fact is the process layer's. The ``reached`` record is the FIRST thing on stderr and the buffer keeps only a tail, so it is consumed as it
+    arrives: a service that started and then wrote more than the buffer holds is still a started service."""
+    controller = ProcessController(max_output_chars=200)
+    noisy = "import sys\nfor _ in range(200):\n    sys.stderr.write('x' * 50 + '\\n')\nsys.exit(3)\n"
+    managed = controller.start_managed([sys.executable, "-c", noisy], cwd=str(tmp_path), containment_profile=_profile(tmp_path), containment_backend=_ServiceBackend())
+    try:
+        assert _exited(managed) == 3
+        assert managed.target_started() is True and managed.launch_refusal_diagnostic() is None
+        stderr = managed.captured_output()[1]
+        assert "x" * 50 in stderr and _no_launch_record(stderr)
+    finally:
+        managed.terminate(reap_timeout=5)
+
+    running = controller.start_managed([sys.executable, "-c", "import time; time.sleep(30)"], cwd=str(tmp_path), containment_profile=_profile(tmp_path),
+                                       containment_backend=_ServiceBackend())
+    try:
+        assert running.target_started() is None, "nothing is decided about a process that is still running"
+    finally:
+        running.terminate(reap_timeout=5)
+
+    # the production buffer size here: the diagnostic reads the backend's whole refusal text, which the 200-character buffer above would cut
+    refused = ProcessController().start_managed([sys.executable, "-c", "pass"], cwd=str(tmp_path), containment_profile=_profile(tmp_path),
+                                                containment_backend=_ServiceBackend(_bind_source(tmp_path, present=False)))
+    try:
+        assert _exited(refused) == 125 and refused.target_started() is False
+        assert refused.launch_refusal_diagnostic()["reason_code"] == BACKEND_BIND_SOURCE_MISSING_AND_ABSENT_ON_HOST
+    finally:
+        refused.terminate(reap_timeout=5)
+
+
+def test_a_backend_without_a_launch_stage_reports_a_managed_process_started(tmp_path):
+    """No stage, no fact: as for a finite ProcessResult, such a process is started whatever it exited with (the pre-stage behaviour, never a guess)."""
+    class _NoStage:
+        name = "scripted-oci"
+
+        def prepare(self, profile, command):  # noqa: ARG002 - the Protocol's signature
+            return PreparedContainment(env=None, preexec_fn=None, backend_name=self.name)
+
+    managed = ProcessController().start_managed([sys.executable, "-c", "import sys; sys.exit(125)"], cwd=str(tmp_path), containment_profile=_profile(tmp_path),
+                                                containment_backend=_NoStage())
+    try:
+        assert _exited(managed) == 125 and managed.target_started() is True
+    finally:
+        managed.terminate(reap_timeout=5)
+
+
+def _managed_refusal_stop(tmp_path: Path):
+    """The stop the workflow raises for a refused managed launch (kriya/workflow/runtime_verification.py::_execute_managed_service_verification hands the
+    tool result's typed code to this same function; tests/test_runtime_verification.py pins that hand-off), built from the REAL tool result."""
+    workspace = tmp_path / "refused-service"
+    workspace.mkdir()
+    result = _verify_service(workspace, _ServiceBackend(OTHER_DOCKER_ERROR))
+    with pytest.raises(QualityGateFailure) as stop:
+        _stop_on_environment_gate_result(_State(), {"environment_reason_code": result.environment_reason_code, "output": result.stderr}, "managed_service")
+    return stop.value
+
+
+@pytest.mark.asyncio
+async def test_a_refused_managed_service_launch_charges_nothing_and_neither_replaces_nor_opens_a_finding(tmp_path):
+    stop = _managed_refusal_stop(tmp_path)
+    assert stop.failure.type in ENVIRONMENT_VERDICT_FAILURE_TYPES and is_candidate_finding(stop.failure.type) is False
+    assert stop.failure.diagnostics["reason_code"] == BACKEND_TARGET_NOT_STARTED and stop.failure.diagnostics["gate"] == "managed_service"
+
+    run = await reset_harness._Run(tmp_path).play(reset_harness.RUN10_TO_ATTEMPT_5)
+    before = run.rows[-1]
+    budgets_before = dataclasses.replace(run.state.budgets, seen_failure_signatures=set(run.state.budgets.seen_failure_signatures))
+
+    await run.play([(lambda: stop, None)])
+    after = run.rows[-1]
+
+    assert after.findings == before.findings, "the refusal never replaces the open finding"
+    assert after.family == before.family and run.resets == [2], "... never opens a failure family or replenishes a scoped budget"
+    recorded = dataclasses.replace(budgets_before, fallback_attempts_used=run.state.budgets.fallback_attempts_used)   # dispatch accounting only, as above
+    assert run.state.budgets == recorded, "... and charges no budget"

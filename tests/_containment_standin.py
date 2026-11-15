@@ -154,7 +154,10 @@ class MountAwareStandIn:
         self.prepared_commands.append(list(command))
         site, installable = _offline_site()
         config = {"mapping": path_mapping(profile), "site": site, "installable": installable}
-        prefix = [sys.executable, "-c", _LAUNCHER, json.dumps(config)]
+        # -P: the launcher's own imports never resolve from the command's working directory. Without it a candidate file named like a stdlib module (math.py) is
+        # imported BY THE LAUNCHER, which then dies before its `reached` record: a never-started tool that an untyped gate used to misread as a compile failure of
+        # the candidate (MEASURED 2026-11-15: five workflow tests relied on that accident). The command the launcher execs is unaffected.
+        prefix = [sys.executable, "-P", "-c", _LAUNCHER, json.dumps(config)]
         nonce = secrets.token_hex(16)
         stage = FiniteLaunchStage(
             prefix=("--kriya-finite-launch", f"{TARGET_NOT_STARTED_MARKER}{nonce}", f"{LAUNCHER_REACHED_MARKER}{nonce}"),

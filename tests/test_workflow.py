@@ -14433,7 +14433,9 @@ async def test_handle_attempt_failure_classifies_containment_setup_error_determi
     assert state.environment_failure.startswith("CONTAINMENT_SETUP_FAILED:")
     assert "simulated backend unavailable" in state.environment_failure
     assert state.last_failure.type == "containment_setup_failed"
-    assert state.budgets.retry_count == 1
+    # R-13 (owner ruling 21, 2026-11-15): an environment verdict observed nothing about the candidate and charges no retry budget. This line pinned the
+    # earlier accounting (one full-set retry charged on the way to the stop).
+    assert state.budgets.retry_count == 0
 
 
 @pytest.mark.asyncio

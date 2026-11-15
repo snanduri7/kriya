@@ -19,7 +19,6 @@ import dataclasses
 import os
 import shutil
 import socket
-import subprocess
 import sys
 import types
 from pathlib import Path
@@ -314,8 +313,8 @@ def test_real_oci_an_ignored_module_cannot_make_a_broken_contained_service_pass_
     root = _worktree(tmp_path, {"server.py": IMPORTS_UNTRACKED}, ignored={"helper_generated.py": "VALUE = 1\n"})
     run = _Run(root, cfg=_contained(), command=["python3", "server.py", str(port)], port=port)
     assert _outcome(run.go()) == ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY.value
-    leftovers = subprocess.run(["docker", "ps", "-a", "--filter", "name=kriya-oci-", "--format", "{{.Names}}"], capture_output=True, text=True, check=True).stdout
-    assert leftovers.strip() == "", "no container outlives the run"
+    from _oci_leftovers import leftover_containers
+    assert leftover_containers("kriya-oci-") == [], "no container outlives the run"   # a running one fails at once; a removal in progress is waited for at the daemon
     assert_views_released(_views())  # the owner contract for a view's end: released and sweepable, not physically gone at once (GATE-VIEW-REMOVAL-NOT-IMMEDIATE-ON-DOCKER-DESKTOP-001)
 
 

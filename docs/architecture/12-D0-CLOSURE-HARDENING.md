@@ -320,8 +320,9 @@ branch stays frozen and documentation-only). They settle the two owner items of 
 
 ## 9. Slice S0: what was reproduced, fixed and proven (2026-11-15, implementation branch)
 
-State: S0 is **implemented but not certified and not closed**. One R-13 launch site is open (below), so the one authorized
-full suite has not been started: a fix there would change the snapshot being certified.
+State: S0 is **implemented but not certified and not closed** until the one authorized full suite passes on a clean
+worktree pinned to the S0 snapshot commit. The last R-13 launch site (the managed service launch) was fixed in a second
+part under the owner's ruling of the same day (below); the snapshot is the commit that contains it.
 
 **Registry (ruling 13).** The 11 stale, 2 disproved and 5 duplicate rows are closed with their disposition and their earlier
 text kept. Ten more rows were closed by S0 itself and three rows were added (below).
@@ -337,10 +338,48 @@ text kept. Ten more rows were closed by S0 itself and three rows were added (bel
 | Java adapters, POM validation, venv creation, the application run | Already typed | Unchanged | Pinned by the gate cases |
 | Static-analysis scanner | A scan with no output and exit 125 is `MALFORMED_OUTPUT`, never clean, no finding (`MEASURED`) | Unchanged | One test |
 | Baseline, terminal gate, requirement closers | They call the validator's gates and stop on any `environment_reason_code` (`TRACED`: `validation_baseline.py`, `verification_coordinator.py`, `acceptance_jvm.py`) | Covered by the seam fix | Their existing tests |
-| **Managed (long-running) service launch** | **Open.** A managed launch has no typed never-started fact (`tools/process.py`: only a finite launch gets a `FiniteLaunchStage`), so a refused service container is reported as `SERVICE_EXITED_BEFORE_READY`, a verdict about the candidate (`TRACED`) | Not fixed | Registry `R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001`: the invariant cannot be asserted at this site because the fact does not exist |
+| **Managed (long-running) service launch** (second part, owner ruling "S0 MANAGED-SERVICE R13 RULING") | A managed launch had no launch stage, so the fact did not exist. `MEASURED` with the scripted refusal: `SERVICE_EXITED_BEFORE_READY`, return code 125, "Service process exited with code 125 before becoming ready"; the backend's text was then offered to the classifiers of application output | The managed launch goes through the same launch stage as a finite command (`ProcessController.start_managed`); `ManagedProcess` reads the two records (`target_started`, `launch_refusal_diagnostic`) and never returns them as output; `service_runtime` consumes the fact: `SERVICE_START_FAILED`, no return code, `environment_reason_code`; `runtime_verification` hands the code to the existing environment stop before any text is classified. Started-then-exited stays `SERVICE_EXITED_BEFORE_READY` | `tests/test_r13_environment_verdict.py` (9 managed cases, incl. the real recorder), `tests/test_runtime_verification.py` (3 workflow cases); 13 mutants killed; registry row closed |
 
-Sixteen targeted mutants, sixteen killed. Adjacent tiers green: state-machine tier and never-started suites (892), gate
-orchestrator and runtime verification (420), architecture tier (200). `pylint` and `ruff` clean.
+First part: sixteen targeted mutants, sixteen killed; adjacent tiers green: state-machine tier and never-started suites (892), gate
+orchestrator and runtime verification (420), architecture tier (200); `pylint` and `ruff` clean. Second part: thirteen targeted
+mutants, thirteen killed; the affected suites and static checks were re-run before the snapshot commit (results in the commit message).
+
+**Owner ruling on the managed-service site (2026-11-15, "S0 MANAGED-SERVICE R13 RULING"), as implemented.** Reuse the existing
+launcher stage and its two records; no daemon-text matching, no container-existence polling, no second launch protocol, no
+backend-specific heuristic. The process layer (`kriya/tools/process.py`) owns the observation; `service_runtime.py` consumes the
+typed fact and never reads raw stderr for it. Mapping: never started -> the existing environment path; started then exited before
+ready -> `SERVICE_EXITED_BEFORE_READY`; ready -> unchanged. Readings, mine, standing until the owner corrects them:
+
+- *A service whose binary the launcher could not exec is "never started"* (the launcher's own not-started record), exactly as
+  for a finite command since REPLAY-CONTAINED-NOT-STARTED-001. Before, it was `SERVICE_EXITED_BEFORE_READY` with status 127.
+- *The launch-stage execution semantics now cover a managed service*, including the intentional contract FINITE-LAUNCH-ENOEXEC-001
+  (an executable text script without a shebang is run by the launch-stage shell). The earlier note "deliberately unwrapped:
+  managed services" is superseded by the ruling; MCP persistent stdio and pinned `image_reference` profiles stay unwrapped.
+- *The outcome kind is the existing `SERVICE_START_FAILED`*; no new kind. The environment verdict is keyed on the new typed
+  field `environment_reason_code`, never on the kind or on text.
+- *No relaunch.* The validator's one relaunch for the host-present bind-source code (BIND-SOURCE-RELAUNCH-001) is not extended
+  to a managed launch: the ruling asks for the typed verdict, not for new recovery behaviour.
+
+Limits, stated plainly: a real daemon *refusal* of a managed launch is proven with the scripted backend only (the launcher
+contract is the production one; the real-OCI managed-service tests prove the stage on a real daemon for a service that starts).
+A service Kriya terminates at its readiness timeout while the backend is still creating the container is `READINESS_TIMEOUT`
+as before: the fact is read only for a process that exited on its own, as a finite command's is not read after a timeout.
+
+**The pre-commit gate of the second part, and a gap in the first part's proof (reported, not folded in).** The state-machine
+tier (1,786) and the affected and architecture suites (1,650), run once on the working tree before the snapshot commit, were
+both red: nine failures, none in the managed-service change, each classified and fixed at its owner.
+
+| Failures | Class | Disposition |
+|---|---|---|
+| Five workflow tests (`test_workflow.py` x4, `test_prd017_fallback_transition.py` x1) | Harness defect exposed by the first part: the test stand-in's launcher imported the candidate's `math.py` in place of the stdlib module and died before its reached record; the untyped compile gate used to misread that as a compile failure, and the tests passed on the accident | Stand-in launcher runs with `-P`. Registry `STANDIN-LAUNCHER-CWD-IMPORT-SHADOW-001` (closed) |
+| `test_handle_attempt_failure_classifies_containment_setup_error_deterministically` | Stale expectation of the first part's own rule (it pinned one retry charged for `containment_setup_failed`) | Expectation is zero, ruling 21 cited |
+| `test_inventory_counts_the_design_relies_on` | Stale pin at the baseline (99 sites on `main` too; `9323129` added one) | Pin corrected. Registry `LR-R1-M1-INVENTORY-PIN-STALE-001` (closed) |
+| Two real-daemon leak checks (`test_s4_1_managed_service_view.py`, `test_finite_launch_target_start.py`) | Containers listed right after the run, gone seconds later, only under parallel load; their state was not captured (`UNKNOWN`), daemon removal in progress is `INFERRED` | The checks read the daemon's own removal completion and fail at once on a running container (`tests/_oci_leftovers.py`). Registry `OCI-LEAK-CHECK-READS-DAEMON-REMOVAL-IN-PROGRESS-001` (open: the certification log classifies it) |
+
+The first six were already failing at `ec2bec1`: the first part's "adjacent tiers green" covered a subset that did not include
+`tests/test_workflow.py` or the whole state-machine tier. That statement was too strong; this gate is the correction. After the
+fixes the nine tests pass (`MEASURED`, targeted run); the two tiers were **not** re-run as a whole, because the one full suite on
+the pinned snapshot is the certification.
 
 **R-12, the fifteen harness rows, reproduced first (ruling 19).**
 
@@ -351,7 +390,7 @@ orchestrator and runtime verification (420), architecture tier (200). `pylint` a
 | CONFIRMED, root owner is R-05: closes with S3 | `KERNEL-TESTS-CHECKOUT-MEMORY-MORE-FILES-001` (reproduced: a fresh worktree gained `./memory/dependency_graph.db`), part (a) of `KERNEL-GOLDEN-HARNESS-VOLATILITY-001` |
 | Not reproducible here, unchanged | `CERT-CI-PLAIN-JOBS-LOCKFILE-GROUP-001` (hosted CI), `DEMO-RESET-RM-WORKSPACE-RACES-DOCKER-RELEASE-001` (needs a real daemon), `TEST-RESOURCEWARNING-HYGIENE-001` (not a certification hazard: the suite does not make that warning an error) |
 
-**New rows found by S0:** `R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001` (P2), `REGISTRY-CSV-ROW-WIDTH-001` (P3: ten registry rows
+**New rows found by S0:** `R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001` (P2, closed by the second part), `REGISTRY-CSV-ROW-WIDTH-001` (P3: ten registry rows
 do not have the header's width), `ACCEPTANCE-ENVIRONMENT-ERROR-FLAG-NO-READER-001` (P3: a result field with a writer and no reader).
 
 **A finding for S8, measured here:** `is_candidate_finding` is a deny-list, and before this slice it classed the environment stop

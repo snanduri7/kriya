@@ -1316,6 +1316,14 @@ async def _execute_managed_service_verification(
     if result.probe_status is not None:
         output += f"\n\nprobe_status: {result.probe_status}\nprobe_body: {result.probe_body}"
 
+    # R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001: the service process never started (the tool layer's typed launch fact), so the captured text is the containment
+    # backend's, not the application's. It is the environment stop every other gate takes for a never-started tool, taken BEFORE the classifiers below read that text
+    # as application output (which could turn a backend refusal into a plan gap or any other statement about the candidate).
+    if result.environment_reason_code:
+        deps._stop_on_environment_gate_result(
+            state, {"environment_reason_code": result.environment_reason_code, "output": output}, "managed_service",
+        )
+
     if result.outcome in deps._MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES:
         # Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): before
         # unconditionally treating this as environment-only (as every one

@@ -206,6 +206,10 @@ def _attach_refused(error: Exception, detail: str) -> ContainmentSetupError:
     return refusal
 
 
+# Bound on waiting for the stderr drain of an EXITED managed process before its launch records are read (ManagedProcess.target_started).
+LAUNCH_RECORD_SETTLE_SECONDS = 5.0
+
+
 class ManagedProcess:
     """A started-but-not-yet-awaited child process (Managed Runtime
     Verification, 2026-09-03). Unlike `ProcessController.run()`'s single
@@ -222,10 +226,18 @@ class ManagedProcess:
     def __init__(
         self, popen: subprocess.Popen, *, max_output_chars: int, cleanup: Optional[Callable[[], None]] = None,
         exec_target: Optional[List[str]] = None, toolchain_identity: Optional[Dict[str, object]] = None,
+        launch_stage: Optional[FiniteLaunchStage] = None, backend_name: Optional[str] = None,
     ) -> None:
         self._popen = popen
         self._max_output_chars = max_output_chars
         self._cleanup = cleanup
+        # R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001: the backend's launch stage this process was started through (the SAME stage a finite command gets, see
+        # kriya.tools.containment.FiniteLaunchStage). The stderr drain consumes the launcher's ``reached`` record as it arrives - a long-lived service can push it out of
+        # the bounded buffer, so it cannot be looked for at read time - and the stage's own ``read`` separates the ``marker`` record. Neither record is ever returned by
+        # ``captured_output``. None for a host process and a backend without a stage: such a process is started by definition, as for a finite ProcessResult.
+        self._launch_stage = launch_stage
+        self._launcher_reached = False
+        self._backend_name = backend_name
         # SEC-001-P6: a container backend's `["docker", "exec", "<name>"]`
         # prefix - lets a caller run a follow-up command INSIDE this still-
         # running process (a readiness/probe check executed in the
@@ -240,12 +252,13 @@ class ManagedProcess:
             target=self._drain, args=(popen.stdout, self._stdout_chunks), daemon=True,
         )
         self._stderr_thread = threading.Thread(
-            target=self._drain, args=(popen.stderr, self._stderr_chunks), daemon=True,
+            target=self._drain, args=(popen.stderr, self._stderr_chunks),
+            kwargs={"reached_record": None if launch_stage is None else f"{launch_stage.reached}\n"}, daemon=True,
         )
         self._stdout_thread.start()
         self._stderr_thread.start()
 
-    def _drain(self, stream, buf: List[str]) -> None:
+    def _drain(self, stream, buf: List[str], reached_record: Optional[str] = None) -> None:
         # Bounded WHILE writing (external review, 2026-09-03), not just at
         # captured_output() read time - a noisy long-lived service can
         # otherwise grow this buffer without limit for the entire duration
@@ -259,6 +272,13 @@ class ManagedProcess:
         try:
             for line in iter(stream.readline, ""):
                 with self._lock:
+                    if reached_record is not None and not self._launcher_reached and line == reached_record:
+                        # The launcher's one ``reached`` record (written on a line of its own, with a leading newline, before its exec). It is the typed fact, not output:
+                        # it is taken out here, with the newline that introduced it, exactly as FiniteLaunchStage.read removes it from a finite command's stderr.
+                        self._launcher_reached = True
+                        if buf and buf[-1] == "\n":
+                            total_chars -= len(buf.pop())
+                        continue
                     buf.append(line)
                     total_chars += len(line)
                     while total_chars > self._max_output_chars and len(buf) > 1:
@@ -283,13 +303,47 @@ class ManagedProcess:
         here already reasons in those terms."""
         return self._popen.poll()
 
-    def captured_output(self) -> Tuple[str, str]:
+    def _read_launch(self) -> Tuple[str, str, bool]:
+        """(stdout, stderr without the launcher's records, whether the launch stage says the target started) from what has been drained so far."""
         with self._lock:
             stdout = "".join(self._stdout_chunks)
             stderr = "".join(self._stderr_chunks)
+            reached = self._launcher_reached
+        stage = self._launch_stage
+        if stage is None:
+            return stdout, stderr, True
+        if not reached:
+            return stdout, stderr, False
+        # The drain already took the ``reached`` record out; the stage's own reader decides the rest (a ``marker`` record as the last line = the exec failed) and strips it.
+        stderr, started = stage.read(f"\n{stage.reached}\n{stderr}")
+        return stdout, stderr, started
+
+    def captured_output(self) -> Tuple[str, str]:
+        stdout, stderr, _started = self._read_launch()
         stdout, _ = _bounded_tail(stdout, self._max_output_chars)
         stderr, _ = _bounded_tail(stderr, self._max_output_chars)
         return stdout, stderr
+
+    def target_started(self) -> Optional[bool]:
+        """R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001: the backend-owned fact "did the requested service process actually start?", the managed counterpart of
+        ``ProcessResult.target_started``. None while the process is still running (nothing is decided: a launcher that fails its exec exits at once). Once the process
+        has exited ON ITS OWN: False only when the launch stage reports that the target never started (no ``reached`` record: the backend refused before any launcher ran;
+        or the launcher's own not-started record: its exec failed); True otherwise, and always True without a stage. The exit status and the stderr text are never
+        consulted. Not meaningful for a process Kriya terminated before its launcher ran (the caller knows it did that)."""
+        if self._popen.poll() is None:
+            return None
+        if self._launch_stage is None:
+            return True
+        # The records are on a pipe that closes with the process; the drain reaches its end at once unless a surviving descendant holds the pipe open.
+        self._stderr_thread.join(timeout=LAUNCH_RECORD_SETTLE_SECONDS)
+        return self._read_launch()[2]
+
+    def launch_refusal_diagnostic(self) -> Optional[Dict[str, object]]:
+        """The typed, observation-only diagnostic of a never-started launch (kriya.tools.containment.infrastructure_diagnostic_for, the same one a finite ProcessResult
+        carries); None for a started or still-running process and for a refusal no diagnostic names. Call it BEFORE the teardown: it records host facts."""
+        if self.target_started() is not False:
+            return None
+        return infrastructure_diagnostic_for(self._read_launch()[1], target_started=False, timed_out=False, backend=self._backend_name)
 
     def terminate(self, *, reap_timeout: float) -> bool:
         """Sends the SAME process-group kill `run()`'s own timeout path
@@ -354,8 +408,8 @@ def _prepare_env_and_preexec(
     one place every caller's actual spawned argv is decided, and a
     `cleanup` hook the caller must run in `finally` regardless of outcome.
 
-    ``finite`` (``run()``/``run_async()`` only, never ``start_managed()``): a backend's FiniteLaunchStage wraps the target argv, so a target that could not be executed is a
-    backend-reported fact (REPLAY-CONTAINED-NOT-STARTED-001) and not an exit status."""
+    ``finite`` (``run()``/``run_async()``, and ``start_managed()`` since R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001; never an MCP server): a backend's FiniteLaunchStage
+    wraps the target argv, so a target that could not be executed is a backend-reported fact (REPLAY-CONTAINED-NOT-STARTED-001) and not an exit status."""
     if containment_profile is None and containment_backend is None:
         return _ResolvedExecution(env=env, preexec_fn=preexec_fn, command=command)
     if containment_profile is None or containment_backend is None:
@@ -641,7 +695,7 @@ class ProcessController:
         command's last step can be, so there's nothing to close after."""
         resolved = _prepare_env_and_preexec(
             command=command, containment_profile=containment_profile, containment_backend=containment_backend,
-            env=env, preexec_fn=preexec_fn,
+            env=env, preexec_fn=preexec_fn, finite=True,   # the same launch stage a finite command gets: "did the service process start?" is the backend's fact, read by ManagedProcess
         )
         # Unlike run()/run_async(), a managed process is still running when
         # this method returns - cleanup can't fire in a finally here. It's
@@ -655,4 +709,5 @@ class ProcessController:
         return ManagedProcess(
             process, max_output_chars=self.max_output_chars, cleanup=resolved.cleanup,
             exec_target=resolved.exec_target, toolchain_identity=resolved.toolchain_identity,
+            launch_stage=resolved.finite_launch, backend_name=resolved.backend_name,
         )

@@ -151,6 +151,9 @@ class ManagedServiceVerificationResult:
     probe_body: Optional[str] = None
     cleanup_error: Optional[str] = None
     toolchain_identity: Optional[Dict[str, object]] = None
+    # R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001: set only when the service process never started (the managed process's typed launch fact): one of
+    # kriya.tools.containment.ENVIRONMENT_NOT_STARTED_CODES. The caller keys the environment verdict on THIS field, never on the outcome kind or the captured text.
+    environment_reason_code: Optional[str] = None
 
     def to_dict(self) -> Dict[str, object]:
         result = {
@@ -166,6 +169,8 @@ class ManagedServiceVerificationResult:
         }
         if self.toolchain_identity is not None:
             result["toolchain_identity"] = self.toolchain_identity
+        if self.environment_reason_code is not None:
+            result["environment_reason_code"] = self.environment_reason_code
         return result
 
 
@@ -450,8 +455,8 @@ def _wait_for_ready_or_exit(
 
 def _run_lifecycle(
     managed: ManagedProcess, spec: ManagedServiceVerificationSpec, *, controller: Optional[ProcessController] = None,
-) -> Tuple[ServiceVerificationOutcomeKind, bool, str, Optional[int], Optional[int], Optional[str]]:
-    """(outcome, passed, reasoning, returncode, probe_status, probe_body) -
+) -> Tuple[ServiceVerificationOutcomeKind, bool, str, Optional[int], Optional[int], Optional[str], Optional[str]]:
+    """(outcome, passed, reasoning, returncode, probe_status, probe_body, environment_reason_code) -
     everything BEFORE cleanup, which the caller always runs afterward
     regardless of what this returns or raises."""
     controller = controller or ProcessController()
@@ -459,16 +464,28 @@ def _run_lifecycle(
         managed, spec.readiness, startup_timeout_seconds=spec.startup_timeout_seconds, controller=controller,
     )
     if exited_before_ready:
+        if managed.target_started() is False:
+            # R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001: the process that exited was the backend's launcher, not the service (the backend refused before the
+            # launcher ran, or the launcher could not exec the service). The fact is the managed process's own (kriya/tools/process.py); nothing is read from the
+            # stderr text or the exit status here. No return code: the launcher's status is not the service's. MEASURED before: SERVICE_EXITED_BEFORE_READY with
+            # the launcher's 125, a statement that the candidate's service ran and exited.
+            diagnostic = managed.launch_refusal_diagnostic()   # before the teardown: it records host facts
+            code = str(diagnostic["reason_code"]) if diagnostic else BACKEND_TARGET_NOT_STARTED
+            return (
+                ServiceVerificationOutcomeKind.SERVICE_START_FAILED, False,
+                f"{code}: the service process never started (the containment backend's launch ended before the service ran); nothing about the service was observed.",
+                None, None, None, code,
+            )
         return (
             ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY, False,
             f"Service process exited with code {returncode} before becoming ready.",
-            returncode, None, None,
+            returncode, None, None, None,
         )
     if not ready:
         return (
             ServiceVerificationOutcomeKind.READINESS_TIMEOUT, False,
             f"Service did not become ready within {spec.startup_timeout_seconds}s.",
-            None, None, None,
+            None, None, None, None,
         )
     try:
         probe_status, probe_body, probe_passed, reasoning = (
@@ -486,7 +503,7 @@ def _run_lifecycle(
         # eligible for normal Developer repair, same as an HTTP 500.
         return (
             ServiceVerificationOutcomeKind.PROBE_FAILED, False,
-            f"Probe execution raised: {e}", None, None, None,
+            f"Probe execution raised: {e}", None, None, None, None,
         )
     except Exception as e:
         # Anything else is a genuinely unexpected internal/orchestration
@@ -495,13 +512,13 @@ def _run_lifecycle(
         # Developer repair.
         return (
             ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR, False,
-            f"Unexpected internal error during probe execution: {e}", None, None, None,
+            f"Unexpected internal error during probe execution: {e}", None, None, None, None,
         )
     outcome = (
         ServiceVerificationOutcomeKind.PROBE_PASSED if probe_passed
         else ServiceVerificationOutcomeKind.PROBE_FAILED
     )
-    return outcome, probe_passed, reasoning, None, probe_status, probe_body
+    return outcome, probe_passed, reasoning, None, probe_status, probe_body, None
 
 
 def _cleanup(managed: ManagedProcess, *, shutdown_timeout_seconds: float) -> Optional[str]:
@@ -806,7 +823,7 @@ def run_managed_service_verification(
         )
 
     try:
-        outcome, passed, reasoning, returncode, probe_status, probe_body = _run_lifecycle(
+        outcome, passed, reasoning, returncode, probe_status, probe_body, environment_reason_code = _run_lifecycle(
             managed, spec, controller=controller,
         )
     except Exception as e:
@@ -824,6 +841,7 @@ def run_managed_service_verification(
         returncode = None
         probe_status = None
         probe_body = None
+        environment_reason_code = None
     finally:
         cleanup_error = _cleanup(managed, shutdown_timeout_seconds=spec.shutdown_timeout_seconds)
 
@@ -835,11 +853,11 @@ def run_managed_service_verification(
             reasoning=f"{reasoning} | cleanup also failed: {cleanup_error}",
             stdout=stdout, stderr=stderr, returncode=returncode,
             probe_status=probe_status, probe_body=probe_body, cleanup_error=cleanup_error,
-            toolchain_identity=managed.toolchain_identity,
+            toolchain_identity=managed.toolchain_identity, environment_reason_code=environment_reason_code,
         )
     return ManagedServiceVerificationResult(
         outcome=outcome, passed=passed, reasoning=reasoning,
         stdout=stdout, stderr=stderr, returncode=returncode,
         probe_status=probe_status, probe_body=probe_body,
-        toolchain_identity=managed.toolchain_identity,
+        toolchain_identity=managed.toolchain_identity, environment_reason_code=environment_reason_code,
     )

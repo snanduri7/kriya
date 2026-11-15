@@ -222,6 +222,10 @@ class _FakeService:
     def captured_output(self):
         return "service listening on 127.0.0.1:8765\n", self.stderr
 
+    def target_started(self):
+        """ManagedProcess.target_started: this double is a service that DID start (None while it runs)."""
+        return None if self.alive else True
+
 
 def _app(argv: List[str]) -> bool:
     return any(os.path.basename(token) == "main.py" for token in argv)
@@ -1523,6 +1527,52 @@ def test_an_inadmissible_managed_service_starts_nothing(name, tmp_path):
     assert "start_managed" not in steps and not any("readiness" in row or "probe" in row for row in run.trace)
     assert steps[-1] == "outcome:verification_infrastructure_failure"
     assert run.failure.message.startswith("MANAGED_SERVICE_CONTRACT_INVALID: "), run.failure.message
+
+
+# ---- R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001: a managed launch the containment backend refused
+_REAL_START_MANAGED = ProcessController.start_managed          # the harness replaces the attribute; this is the production method
+DAEMON_REFUSAL = "docker: Error response from daemon: Minimum memory limit allowed is 6MB.\nSee 'docker run --help'."
+# backend text SHAPED like application output: read as the service's own output it is the project-local missing-module shape (the m_runtime_plan_gap case)
+PLAN_GAP_SHAPED_REFUSAL = "Traceback (most recent call last):\nModuleNotFoundError: No module named 'calc.settings'\n"
+
+
+def _backend_refuses(text: str, cwd: Path) -> Callable[[], Any]:
+    """The REAL managed process of a launch the backend refused before the service's launcher ran: the production ``start_managed`` and launch-record reading,
+    only the backend's ``prepare`` scripted (tests/test_bind_source_diagnostic_001.py::_Backend, exit 125, no daemon)."""
+    from test_bind_source_diagnostic_001 import _Backend, _profile
+
+    def start() -> Any:
+        managed = _REAL_START_MANAGED(ProcessController(), list(SERVICE["service_command"]), cwd=str(cwd), containment_profile=_profile(cwd),
+                                      containment_backend=_Backend(text))
+        # the harness answers readiness "ready" at once; a refused launch is never ready, so the refusal (immediate in production too) is let finish first
+        managed._popen.wait(timeout=30)  # noqa: SLF001 - the double's own process
+        return managed
+    return start
+
+
+@pytest.mark.parametrize("refusal", [DAEMON_REFUSAL, PLAN_GAP_SHAPED_REFUSAL], ids=["daemon-text", "application-shaped-text"])
+def test_a_managed_launch_the_backend_refused_is_the_environment_stop_never_a_service_or_plan_verdict(refusal, tmp_path):
+    """MEASURED before the fix (tool layer): SERVICE_EXITED_BEFORE_READY with the launcher's status 125, and the backend's text handed to the classifiers of
+    APPLICATION output. The typed never-started fact is now the whole condition: the environment stop every other gate takes, before any text is classified."""
+    from kriya.tools.containment import BACKEND_TARGET_NOT_STARTED
+
+    run = _AttemptRun(tmp_path, service=_backend_refuses(refusal, tmp_path)).call(_managed(JUDGE_SERVICE))
+
+    steps = _steps(run.trace)
+    assert "start_managed" in steps and not any("readiness" in row or "probe" in row for row in run.trace), steps
+    assert run.failure is not None and run.failure.type == "verification_infrastructure_failure", run.failure
+    assert run.failure.diagnostics["reason_code"] == BACKEND_TARGET_NOT_STARTED and run.failure.diagnostics["gate"] == "managed_service"
+    assert BACKEND_TARGET_NOT_STARTED in run.failure.message and refusal.splitlines()[0] in run.failure.raw_output
+    assert [outcome["type"] for outcome in run.state.gate_outcomes] == ["verification_infrastructure_failure"]
+    assert "managed_service_outcome" not in run.state.gate_outcomes[0], "no service outcome is recorded for a service that never ran"
+    assert run.state.plan_scope_conflict is None
+
+
+def test_negative_control_the_same_text_from_a_service_that_started_is_still_read_as_application_output(tmp_path):
+    """The control for the test above: only the typed fact changed the verdict. A service that DID start and wrote the missing-module text is the plan gap."""
+    run = _AttemptRun(tmp_path, service=lambda: _FakeService(exit_code=1, stderr=PLAN_GAP_SHAPED_REFUSAL)).call(_managed(JUDGE_SERVICE))
+    assert run.failure.type == "managed_service_runtime_plan_gap"
+    assert run.state.gate_outcomes[0]["managed_service_outcome"] == "SERVICE_EXITED_BEFORE_READY"
 
 
 # ============================================================================= the patched names reach the runtime code

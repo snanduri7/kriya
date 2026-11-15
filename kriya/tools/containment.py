@@ -348,7 +348,11 @@ class FiniteLaunchStage:
     FINITE-START-PRECONTAINER-REFUSAL-001: the launcher also writes ONE ``reached`` record before its ``exec``. A target started only if that record is present and no
     ``marker`` record follows it: a run whose stderr carries no ``reached`` record never reached the launcher at all (the container runtime refused before any container existed,
     the image has no ``/bin/sh``, ...), which is NOT a started target whatever exit status the runtime answered. The ``reached`` record needs the same nonce, so a target
-    cannot forge one; and a forged ``reached`` could only make a never-started run look started, which is the pre-stage behaviour, never a start that did not happen."""
+    cannot forge one; and a forged ``reached`` could only make a never-started run look started, which is the pre-stage behaviour, never a start that did not happen.
+
+    R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001: a MANAGED (long-running) service is launched through this same stage, with the same two records and the same
+    meaning; only the reader differs (kriya/tools/process.py::ManagedProcess consumes the ``reached`` record in its stderr drain and calls ``read`` for the rest). The name
+    is historical: there is one launch protocol."""
 
     prefix: Tuple[str, ...]
     marker: str
@@ -441,8 +445,8 @@ class PreparedContainment:
     # enforced (kriya/tools/sandbox.py::ResourcePlan.evidence). None when no
     # limit applies or a container enforces them.
     resources: Optional[Dict[str, object]] = None
-    # REPLAY-CONTAINED-NOT-STARTED-001: the finite-command launch stage (see FiniteLaunchStage). None for a host process, a managed service and an MCP server: only
-    # ProcessController.run()/run_async() apply it.
+    # REPLAY-CONTAINED-NOT-STARTED-001: the launch stage (see FiniteLaunchStage). None for a host process and an MCP server. ProcessController.run()/run_async() apply it
+    # and read it into ProcessResult.target_started; start_managed() applies the same stage and ManagedProcess reads it (R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001).
     finite_launch: Optional[FiniteLaunchStage] = None
     # W3-8 (PROCESS-ORPHAN-CHILD-OUTLIVES-PARENT-SIGKILL-001): argv lists the owner-death watchdog (ProcessControlPort.guard_owner_death) runs after it kills the spawned tree
     # when the OWNER dies without running ``cleanup`` (SIGKILL). A container belongs to the Docker daemon, not to the process group of the CLI that started it: MEASURED, a

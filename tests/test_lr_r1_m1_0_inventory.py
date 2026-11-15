@@ -180,5 +180,7 @@ def test_inventory_counts_the_design_relies_on():
     # VERIFIER_REPLAY_BYTES_MISMATCH, a verifier_replay_refused failure before any gate, nothing executed).
     # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001 (2026-11-13) adds NO site: its pre-apply refusal (verifier_repair_refused) is recorded by the retry
     # strategy's existing fallback for a failure its raise site did not record; a site of its own was proven redundant and removed.
-    assert records == 98, records
+    # VERIFIER-SEMANTIC-AUTHORITY-001 (9323129, WS3-C slice 2): one more typed stop (development_loop.settle_generated_verifiers: the pass seams' needs-review stop
+    # or the failure that starts a verifier's one regeneration). That commit did not update this pin; MEASURED 2026-11-15: 99 on main (3eded93) as well.
+    assert records == 99, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

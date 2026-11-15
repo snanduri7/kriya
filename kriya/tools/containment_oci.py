@@ -1716,7 +1716,7 @@ class OCIContainmentBackend:
             # W3-8: the owner-death watchdog removes this container if the owner is killed (``_cleanup`` above never runs then; the container is the Docker daemon's, not the CLI's)
             owner_death_cleanup=((docker_path, "rm", "-f", container_name),),
             # A pinned tool image (`image_reference`: Kriya's own static-analysis tool image) runs a fixed Kriya-chosen executable, not a project one, and its busybox shell would add PWD/SHLVL to the
-            # environment; a persistent-stdio profile is an MCP server (not a finite command). Neither gets the stage.
+            # environment; a persistent-stdio profile is an MCP server (its stdio is the protocol). Neither gets the stage. A managed service does (ProcessController.start_managed).
             finite_launch=_finite_launch_stage() if profile.image_reference is None and not profile.persistent_stdio else None,
             # SEC-001-P6 (managed-service containment): lets a caller
             # (service_runtime.py, for a long-lived container started via

@@ -167,12 +167,14 @@ def test_run_async_reads_the_same_fact(tmp_path):
     assert missing.target_started is False and started.target_started is True and missing.returncode == started.returncode == 127
 
 
-def test_only_finite_runs_get_the_stage_a_managed_start_is_unwrapped(tmp_path):
+def test_the_stage_is_applied_only_where_the_controller_asks_for_it(tmp_path):
+    """The stage is opt-in at the resolution seam. run()/run_async() ask for it, and so does start_managed() since R13-MANAGED-SERVICE-LAUNCH-REFUSAL-NOT-TYPED-001 (a managed
+    service used to be launched unwrapped; tests/test_r13_environment_verdict.py pins the managed launch). A caller that does not ask (an MCP server) is unwrapped."""
     backend = _ScriptedBackend()
     finite = _prepare_env_and_preexec(command=["svc", "--serve"], containment_profile=_profile(tmp_path), containment_backend=backend, env=None, preexec_fn=None, finite=True)
-    managed = _prepare_env_and_preexec(command=["svc", "--serve"], containment_profile=_profile(tmp_path), containment_backend=backend, env=None, preexec_fn=None)
+    unasked = _prepare_env_and_preexec(command=["svc", "--serve"], containment_profile=_profile(tmp_path), containment_backend=backend, env=None, preexec_fn=None)
     assert finite.command[-3:] == ["n1", "svc", "--serve"] and finite.finite_launch is not None
-    assert managed.command == ["svc", "--serve"] and managed.finite_launch is None
+    assert unasked.command == ["svc", "--serve"] and unasked.finite_launch is None
 
 
 def test_a_timeout_never_reads_the_record(tmp_path):
@@ -569,8 +571,8 @@ def test_real_docker_the_registry_scoped_acquisition_path_reports_the_same_fact(
     finalize_registry_acquisition_result(started)
     assert missing.target_started is False and started.target_started is True and missing.returncode == started.returncode == 127
     assert TARGET_NOT_STARTED_MARKER not in missing.stderr
-    leftovers = subprocess.run(["docker", "ps", "-a", "--filter", "name=kriya-acq", "--format", "{{.Names}}"], capture_output=True, text=True, check=True).stdout.split()
-    assert leftovers == [], leftovers
+    from _oci_leftovers import leftover_containers
+    assert leftover_containers("kriya-acq") == []   # a running one fails at once; a removal in progress is waited for at the daemon
 
 
 def test_a_maven_that_never_started_triggers_no_dependency_acquisition(tmp_path):
