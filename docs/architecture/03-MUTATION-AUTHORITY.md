@@ -50,3 +50,17 @@ A3 to A6. Every A1 mutation below changes in-memory run state or Kriya's own con
   (`GenerationState.generation_metrics`, `retry_progress_summary`). The counter values and the resets between
   attempts are not recorded, so run 10's budget trajectory had to be reconstructed by a model-free reproducer
   (sprint log 46). `GAP-A1-03`.
+
+## Slice A2 - semantic contract and verifier state (`TRACED`)
+
+| ID | Mutation | Caller | Authority | Mutation owner | Transaction | Rollback | Audit | Label |
+|---|---|---|---|---|---|---|---|---|
+| MUT-A2-01 | Write of the sealed verification contract under `<state>/verification-contracts/` | `workflow.py::run_generation_workflow` and the enforce loop, before the first model call | The compiler's output (`AUTH-A2-02`) | `contract_compilation.py::seal_verification_contract` (private store, atomic write, content-addressed) | One file per digest | None needed (content-addressed) | `verification_contract.sealed` event with digest, admission, totals | `TRACED` |
+| MUT-A2-02 | `VerifierSemanticLedger._valid[...]` set | `VerifierSemanticLedger.after_decision` only | A person's valid decision bound to the subject as it is now | The ledger | In memory | None; lost with the process | The review record (durable, never read back by the loop) and the `verifier_semantic.ruling` event | `TRACED`. Negative control: `_valid` is written at one line of `verifier_semantic.py` |
+| MUT-A2-03 | Regeneration allowance spent | `VerifierSemanticAllowance.take_regeneration`, from `after_decision` | A person's invalid decision bound to the subject | The allowance | In memory | None | Same as `MUT-A2-02` | `TRACED` |
+| MUT-A2-04 | One attempt's write scope narrowed to the one verifier path, or the accepted paths removed from an allow-list | `development_loop.py::run_attempt_loop` (`run_scoped_attempt`) | The unit's pending regeneration or its denied set | `verifier_semantic.py::_AttemptScope` | The attempt | Restored on every exit, including exceptions | none of its own | `TRACED`; pinned by committed tests (not re-run) |
+| MUT-A2-05 | `state.environment_failure` set to the typed stop | `retry_strategy.py::_generated_verifier_ruling`, `_close_unadmitted_verifier_regeneration`; at the pass seams `development_loop.py::settle_generated_verifiers` raises a `QualityGateFailure` instead | The ruling of `AUTH-A2-08` | The seams (transport only) | - | - | `verifier_semantic.ruling` event (authoritative), seam and reason code | `TRACED`; `MEASURED` (7 tests) |
+| MUT-A2-06 | `state.last_attribution`, `failure.attribution_kind`, `failure.likely_files`, the next attempt's targets | `retry_strategy.py::_record_attempt_failure` | `AUTH-A2-09` when a ruling exists, else `AUTH-A2-10` (which may be a model tier) | `retry_strategy.py` | In memory | - | Attempt-evidence diagnosis record; the record shows the gate verdict's authority beside the localization's evidence class (`ATTRIBUTION-KIND-AND-AUTHORITY-LABEL-DIAGNOSTIC-TRUTH-001`) | `TRACED` |
+
+Observation: no mutation in this slice writes product semantics anywhere. A person's valid decision changes what may
+be written next; it is not stored as part of the contract and no later stage or run reads it as one (`GAP-A2-01`).

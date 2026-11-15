@@ -8,7 +8,7 @@ Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`, t
 | Stage ID | Stage | Owning slice | Status |
 |---|---|---|---|
 | STAGE-GOAL-INTAKE | Goal intake | A4 | pending |
-| STAGE-SEMANTIC-CONTRACT | Goal / semantic contract authority | A2 | pending |
+| STAGE-SEMANTIC-CONTRACT | Goal / semantic contract authority | A2 | **filled** (`AUTH-A2-01..05`, `GAP-A2-01`) |
 | STAGE-KNOWLEDGE | Knowledge / Skills | A4 | pending |
 | STAGE-PLANNING | Planning | A4 | pending |
 | STAGE-PLAN-VALIDATION | Plan validation | A4 | pending |
@@ -20,9 +20,9 @@ Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`, t
 | STAGE-CANDIDATE | Candidate formation | A3 | pending |
 | STAGE-REVIEW | Review / source approval | A3 | pending |
 | STAGE-GATES | Deterministic gates | A3 | pending |
-| STAGE-VERIFIER-ID | Generated-verifier identification | A2 | pending |
-| STAGE-VERIFIER-AUTH | Verifier semantic authority | A2 | pending |
-| STAGE-ATTRIBUTION | Failure attribution | A2 | pending |
+| STAGE-VERIFIER-ID | Generated-verifier identification | A2 | **filled** (`AUTH-A2-06`, `GAP-A2-02`) |
+| STAGE-VERIFIER-AUTH | Verifier semantic authority | A2 | **filled** (`AUTH-A2-07..09`, `SM-A2-01`, `GAP-A2-03`) |
+| STAGE-ATTRIBUTION | Failure attribution | A2 | **filled** (`AUTH-A2-10`, `AUTH-A2-11`) |
 | STAGE-RETRY | Retry | A1 | **filled** |
 | STAGE-RECOVERY | Recovery / owner reopen | A1 (accounting), A3 (apply) | A1 part filled |
 | STAGE-APPLY | Candidate apply | A3 | pending |
@@ -129,3 +129,22 @@ flowchart TD
 ```
 
 Stage and integration detail for these stages will be written as derivative views once the maps are stable.
+
+## STAGE-SEMANTIC-CONTRACT, STAGE-VERIFIER-ID, STAGE-VERIFIER-AUTH, STAGE-ATTRIBUTION (A2) - AS-IS flow
+
+Every step cites the row that holds the fact; nothing is defined here.
+
+```
+goal text (+ optional operator artifacts: --requirements, --acceptance, approval, authority bundle, dispositions)
+  -> requirement set, verbatim statements                                   AUTH-A2-01
+  -> verification contract: claim kinds, strength, closers, authorities     AUTH-A2-02   (no product semantics: AUTH-A2-05)
+  -> admission: refused before any model call only under policy "block"     AUTH-A2-03, FR-A2-10 / FR-A2-11
+  -> sealed, digest bound to resume identities                              MUT-A2-01
+  -> Planner / Developer write criteria, code and tests                     (models; GAP-A2-01)
+  -> a test gate executes
+       mapped run-authored test?                                            AUTH-A2-06   (unmapped: GAP-A2-02, FR-A2-08)
+         yes -> a person decides, or the unit stops                         AUTH-A2-07, AUTH-A2-08, SM-A2-01
+                 valid + failing -> strict production owner or stop         AUTH-A2-09
+         no  -> attribution ladder picks targets                            AUTH-A2-10, AUTH-A2-11
+  -> retry accounting                                                       STAGE-RETRY
+```

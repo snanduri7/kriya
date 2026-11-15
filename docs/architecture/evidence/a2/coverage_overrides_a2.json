@@ -1,0 +1,61 @@
+{
+  "GENERATED-VERIFIER-CONTRACT-AUTHORITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "A2 mandatory decision: C (the row conflates two issues). Verifier-authority half: closed by WS3 (VERIFIER-SEMANTIC-REVIEW-001 and VERIFIER-SEMANTIC-AUTHORITY-001, both CLOSED; AUTH-A2-06..09; MEASURED by 7 committed tests) with a residual, GAP-A2-02 (an executed run-authored test whose identity does not map is not a subject: MEASURED P5, P7). Semantic-contract half: still open and untouched by WS3, GAP-A2-01 (no canonical product-semantic contract before generation: MEASURED P8, P9). The row's closure_evidence text is stale (DOC-A2-01) and its 'one self-repair' scope line is superseded (DOC-A2-02). Disposition is a proposal for Phase D and applies to GAP-A2-01; split the row there."
+  },
+  "REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2: still current. MEASURED (P8): the row's own example sentence compiles to BEHAVIOR / GENERAL / AUTHORITY_REQUIRED with no closer; (P10) the runtime-observable grammar closes as the row's 2026-11-08 update says. Same root as GAP-A2-01, seen from requirement closure: no authority states what a general behaviour sentence means. Disposition in Phase B together with GAP-A2-01."
+  },
+  "WAVE5-O2-GENERATED-TEST-WEAKENING-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2: the retry-waste residual is changed by WS3. For a mapped run-authored test the Developer cannot weaken it across attempts: unattended the unit stops at its first executed result, attended an accepted test is write-denied and an invalid one gets exactly one regeneration (AUTH-A2-08, SM-A2-01; TRACED, pinned by committed tests). The route stays open only for unmapped tests (GAP-A2-02). The correctness containment the row records (terminal requirement authority) was not re-run in A2; it belongs to A3."
+  },
+  "ATTRIBUTION-KIND-AND-AUTHORITY-LABEL-DIAGNOSTIC-TRUTH-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2 (TRACED): still current. retry_strategy flips TEST_DEFECT to SOURCE_DEFECT on any attribution tier; a search of kriya/ for attribution_kind found only Failure.to_gate_outcome and core/attempt_evidence/scope.py as readers, so no control consumer (AUTH-A2-11). When a WS3 ruling exists the attribution is the ruling, not a model tier (AUTH-A2-09). Evidence-truth item; re-checked with the evidence schema in A6."
+  },
+  "INFRA-STOP-ATTRIBUTION-SOURCE-DEFECT-LABEL-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2 (TRACED): still current for internal_framework_error only: failure.classify_failure_attribution lists it in no table, so it is SOURCE_DEFECT by default and reaches attribute_failure, whose triage tier is a model call when more than one file is known (AUTH-A2-10, AUTH-A2-11). That a real stop of this type makes the call remains INFERRED; no probe was run because the owner's ruling of 2026-11-13 requires a separate characterization per type and the label is pinned by kernel goldens."
+  },
+  "REQUIREMENT-VERIFIER-ENFORCE-PATH-NO-PROJECT-BEFORE-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2 (TRACED by search): still current. workflow/terminal_gate_service.py passes baseline_contents to the terminal requirement verifier and contains no reference to the project view that kriya/repository/project_view.py gives the direct path's stages. A direct / enforce divergence in what the model verifier sees; its verdict is MODEL_CLAIMED on both paths, so no closure depends on it. Grouped with ENFORCE-EXECUTE-PLAN-CONVERGENCE-001 (A4)."
+  },
+  "GOAL-EXAMPLE-COMPILER-COVERAGE-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2 (TRACED): still current. workflow/example_oracle_java.py's own contract accepts only Type.method(literal args) -> literal or raises, and rejects instance expressions, non-literal arguments and collection results with a reason. A capability limit, fail-closed. Relevant to GAP-A2-01: goal examples are one of the few ways an operator can state semantics before generation, and the accepted forms are narrow. The frozen-twelve measurement was not repeated."
+  },
+  "GREENFIELD-DETERMINISTIC-OUTPUT-CLOSER-001": {
+    "reconciliation": "STALE_BOOKKEEPING",
+    "notes": "A2: the capability the row says does not exist is on this baseline for the anchored wording. MEASURED (P10): 'It prints hello world when executed.' compiles to BEHAVIOR with closer runtime_stdout and the goal is ADMITTED; REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001 records the delivery (2026-11-08, e4e2e48 / f9f48f4). What remains (a 'prints X' sentence outside the anchored grammar) is covered by that row. The closer's own evidence rules belong to A3."
+  },
+  "FIX-UNIT-BEHAVIOURAL-GATE-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2 (TRACED): the planning shape (a fix unit gated by compile only, exercised first by a later test-writing unit) is unchanged and belongs to A4. What follows it changed: the later unit's failing run-authored test is now a WS3 subject, so the NO_AUTHORIZED_REPAIR_TARGET ending the row observed is replaced by a review stop (unattended) or a person's decision and the strict owner predicate (FR-A2-01, FR-A2-02). See RECOVERY-UPSTREAM-OWNER-ROUTING-001."
+  },
+  "PROJECT-OWNED-DEPENDENCY-DEFECT-CLASSIFICATION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A2 (TRACED): the typed no-verdict codes exist (tools/dependency_execution.py: MAVEN_/GRADLE_COMPILE_RESOLUTION_UNVERIFIED) and the stop is the intentional current contract recorded by the owner on 2026-10-29; the ownership classifier is a future capability. Not an attribution-ladder gap: the failure never reaches source attribution as a candidate defect. The Slice F measurement was not repeated. Disposition is a proposal for Phase D."
+  },
+  "SUREFIRE-RENDERER-FAILURE-DETAIL-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2 (TRACED): still current. workflow/validation_baseline.py::extract_test_failure_sections isolates detail from pytest's FAILURES section only. Prompt quality for Maven repairs; attribution is decided before rendering (AUTH-A2-10). Disposition in Phase B."
+  },
+  "SUREFIRE-STABILITY-ENVELOPE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A2 (TRACED): workflow/pytest_stability.py has no Surefire path; the Maven comparison stays whole-output plus per-test fingerprints (handover/claude-context/requirements-and-brownfield.md, 'Maven runs'). Fail-closed and intentional; the envelope is a future capability the owner deferred twice. The cause of the PRE/POST state difference in C2-S3_A is still INFERRED in the row and was not investigated. Disposition is a proposal for Phase D."
+  },
+  "WAVE5-PRD022-DUPLICATE-OWNER-NAMED-SYMBOL-001": {
+    "reconciliation": "RECONCILED",
+    "notes": "A2: not an attribution or verifier gap; ownership grounding at planning time (A4). The row's open proof (a production-profile run either edits the owner or fails closed) needs a live run and cannot be produced under the freeze. TRACED context: under policy block a goal with an unbound behaviour claim is refused before any model call (AUTH-A2-03), which is a stronger fail-closed path than the one the row traced; whether this row's goal is of that shape was not checked. Carried to Phase D as a freeze-lift evidence item."
+  },
+  "RECOVERY-UPSTREAM-OWNER-ROUTING-001": {
+    "reconciliation": "DUPLICATE/SUPERSEDED",
+    "notes": "A2 (handed over by A1b): the missing evidence, the attribution tier of unit s2 in C2-S4_A-c3, cannot be obtained: the preserved classification records no tier and says 'Authority stores: run id only' (MEASURED, file read). It no longer decides anything: on this baseline s2's failing run-authored Java test is a WS3 subject (review stop unattended; attended, the strict owner predicate names the owner and the locator-tier attribution feeds the plan-scope escalation: AUTH-A2-09, FR-A2-02, TRACED, the cross-unit continuation not executed), and the old stop requires a deterministic tier since ATTRIBUTION-MODEL-CLAIM-HARD-STOP-001. Superseded by those two closed rows; residual in GAP-A2-02."
+  }
+}

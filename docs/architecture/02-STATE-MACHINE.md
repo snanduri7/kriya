@@ -108,3 +108,35 @@ in-memory episode state of `AUTH-A1-14`. One stage execution proceeds as follows
 
 A reopened owner whose bytes did not change has its dependents' states and results restored exactly. An owner whose
 repair the consumer step refuses ends `needs_review`, and so does the plan.
+
+## Slice A2
+
+### SM-A2-01 - A run-authored test source inside one unit invocation (`TRACED`; transitions marked `M` are `MEASURED` by probe or committed test)
+
+Owner of every transition: `workflow/verifier_semantic.py::UnitSemantics`, called from three seams
+(`retry_strategy.py::_generated_verifier_ruling` before attribution; `development_loop.py::settle_generated_verifiers`
+before the terminal regression and again before apply). State lives in memory: per unit (`pending`, `regenerating`,
+`denied`) and per run (`VerifierSemanticLedger`).
+
+| From | Event | To | Effect |
+|---|---|---|---|
+| written, not executed | a test gate returns a COMPLETE report and an executed identity maps to the file | SUBJECT (failing or passing) | none yet |
+| written, not executed | the report is not COMPLETE, or no test ran (collection or compile failure) | not a subject | the historical retry path handles the failure (`BYP-A2-03`) |
+| written, executed | an executed identity maps to no run-authored file (`M`: P5, P7) | **not a subject, no unknown** | the historical retry path handles the failure (`GAP-A2-02`) |
+| written, executed | the identity maps to two run-authored files, or a run-authored file cannot be read or parsed | UNKNOWN PROVENANCE | typed stop, nobody is asked |
+| SUBJECT | unattended (`M`) | NEEDS REVIEW (terminal for the unit) | typed stop `verifier_semantic_authority_required`; nothing applied |
+| SUBJECT | attended, the ledger already holds a valid decision for these bytes under this contract | ACCEPTED | proceed; not asked again |
+| SUBJECT | attended, person answers valid | ACCEPTED | path write-denied for the rest of the invocation |
+| SUBJECT | attended, person answers invalid, enforce allow-list unit, regeneration not yet spent | REGENERATION PENDING | the next attempt's write scope is exactly this path |
+| SUBJECT | attended, person answers invalid, direct run (`M`) or regeneration spent | NEEDS REVIEW | typed stop |
+| SUBJECT | cannot decide, no decision, decision bound to another subject | NEEDS REVIEW | typed stop |
+| REGENERATION PENDING | the retry policy admits a targeted attempt for exactly this path | REGENERATING | scope restored on every exit (`_AttemptScope`) |
+| REGENERATION PENDING | the retry policy does not admit it | NEEDS REVIEW | no budget is reset |
+| REGENERATING | a gate executes new bytes at the path | SUBJECT (new bytes: needs fresh authority; path write-denied; no second regeneration) | - |
+| REGENERATING | no new executed verifier | NEEDS REVIEW | typed stop |
+| ACCEPTED, failing | strict owner predicate selects one plan owner (`AUTH-A2-09`) | production repair | attribution is the ruling; the verifier is not a target |
+| ACCEPTED, failing | no owner selected (always in a direct run, `M`) | NEEDS REVIEW | typed stop |
+| ACCEPTED or denied | the retry policy's next attempt would be FULL_SET | NEEDS REVIEW | full-set regeneration refused |
+
+Not in this machine: a pre-existing test the run did not change (never a subject); a verifier replayed after an owner
+recovery (`AUTH-A2-13`); anything across a process restart (the ledger is not persisted: `AUTH-A1-14`, `GAP-A1-02`).

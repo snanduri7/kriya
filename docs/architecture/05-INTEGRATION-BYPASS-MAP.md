@@ -80,3 +80,20 @@ The unit loop itself has no route that grants a targeted or fallback-targeted al
 family (`AUTH-A1-03`). The routes that give a blocker more attempts than one unit ceiling are outside the unit:
 re-invocation by the enforce loop (`BYP-A1-01`) and resume (`BYP-A1-03`). Both are bounded by something other than
 the blocker, and neither knows whether the blocker is the same one.
+
+## Slice A2 - routes around semantic authority
+
+"Semantic authority" here means two different controls: the person's decision about an existing verifier
+(`AUTH-A2-07`) and a canonical contract before generation (`AUTH-A2-05`, which does not exist).
+
+| ID | Route | What it bypasses | Bounded by | Label |
+|---|---|---|---|---|
+| BYP-A2-01 | A run-authored pytest file under a `src/` layout root. pytest reports `src.pkg.test_x.test_y`; the structural parser drops the leading `src/` and declares `pkg.test_x.test_y`; the two never match | The verifier decision: the file is never a subject and no unknown is raised | The unit's retry ceiling; terminal requirement closure still refuses to close a claim on a model-written test | `MEASURED` (P5: real pytest run from the project root, Kriya's JUnit parser, the real derivation). Not measured: the working directory Kriya's own test gate uses |
+| BYP-A2-02 | A run-authored test in a language the structural parser has no grammar for (anything but `.py` and `.java`; Kotlin or Groovy tests of a Gradle project produce JUnit reports) | Same | Same | `MEASURED` at the derivation (P7, hand-built report in the documented identity form); no Kotlin run was executed |
+| BYP-A2-03 | A test gate failure with no COMPLETE report | Same; nothing executed, so there is no expectation to judge yet. The Developer may rewrite the test and the code under full budgets until a gate executes it; from then on it is a subject | The unit's retry ceiling | `TRACED`. The registry row's "one self-repair only for non-semantic construction errors" is not implemented and was superseded by the owner's correction (`DOC-A2-02`) |
+| BYP-A2-04 | Policy `record`: a goal whose every behaviour claim is `AUTHORITY_REQUIRED` runs | A canonical contract before generation | The terminal requirement outcome stays UNVERIFIED; reported success policy belongs to slice A3 | `TRACED` |
+| BYP-A2-05 | Policy `block`, a statement closed by a structural closer: "Include a pytest test for it" is `CLOSABLE` by `test_addition`, which proves a test was added, not what it asserts | A canonical contract for the content of that test | The behaviour statement beside it still needs its own authority (P8: the goal as a whole is refused). A goal made only of structural and anchored statements is admitted with a model-written test | `MEASURED` (P8, P10) |
+| BYP-A2-06 | Targeted-test self-correction loop in the gate orchestrator | Would rewrite files from a failing test's output | Closed for subjects: `UnitSemantics.autonomous_rewrite_permitted` refuses when the result identifies a failing run-authored verifier or unknown provenance. Open for unmapped tests (`BYP-A2-01`, `BYP-A2-02`) | `TRACED`; pinned by committed tests (not re-run) |
+| BYP-A2-07 | Compile-gate self-correction loop | Not guarded by the semantic owner. Its docstring gives the reason: a semantic decision exists only in an attended run, whose executing gates run behind the source review with the micro-loops off (`gate_orchestrator.py`: the loop requires `post_source_review_guard is None`) | The condition at the loop head | `TRACED` for the condition; that every attended run sets the guard is `INFERRED` here and is checked in slice A3 |
+| BYP-A2-08 | Owner-recovery self-correction body (`BYP-A1-13`) | Model calls and writes outside any unit, so outside `UnitSemantics` | See `BYP-A1-13` | Carried to slices A3 / A5, unchanged |
+| BYP-A2-09 | Direct run (the desktop path) | Not a bypass: a stricter path. No plan, so no regeneration and no production owner; a failing mapped run-authored test always ends the run | - | `MEASURED` (committed tests); `GAP-A2-03` |

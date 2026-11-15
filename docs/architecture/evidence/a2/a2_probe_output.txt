@@ -1,0 +1,92 @@
+=== Question 1: subject derivation over real pytest identities ===
+
+P1 module-level test in tests/ (no __init__)
+  executed identities : ['tests.test_widget.test_counts']
+  failed identities   : ['tests.test_widget.test_counts']
+  authored paths      : ['tests/test_widget.py']
+  subjects            : [('tests/test_widget.py', ['tests.test_widget.test_counts'])]
+  undetermined        : False (ambiguous=[], unreadable=[])
+  RESULT              : INTERCEPTED (subject or typed unknown)
+
+P2 test method of a class in tests/
+  executed identities : ['tests.test_widget.TestWidget.test_counts']
+  failed identities   : ['tests.test_widget.TestWidget.test_counts']
+  authored paths      : ['tests/test_widget.py']
+  subjects            : [('tests/test_widget.py', ['tests.test_widget.TestWidget.test_counts'])]
+  undetermined        : False (ambiguous=[], unreadable=[])
+  RESULT              : INTERCEPTED (subject or typed unknown)
+
+P3 parameterized test in tests/
+  executed identities : ['tests.test_widget.test_counts']
+  failed identities   : ['tests.test_widget.test_counts']
+  authored paths      : ['tests/test_widget.py']
+  subjects            : [('tests/test_widget.py', ['tests.test_widget.test_counts'])]
+  undetermined        : False (ambiguous=[], unreadable=[])
+  RESULT              : INTERCEPTED (subject or typed unknown)
+
+P4 unittest.TestCase method in tests/
+  executed identities : ['tests.test_widget.WidgetCase.test_counts']
+  failed identities   : ['tests.test_widget.WidgetCase.test_counts']
+  authored paths      : ['tests/test_widget.py']
+  subjects            : [('tests/test_widget.py', ['tests.test_widget.WidgetCase.test_counts'])]
+  undetermined        : False (ambiguous=[], unreadable=[])
+  RESULT              : INTERCEPTED (subject or typed unknown)
+
+P5 test under a src/ layout root (src/pkg/test_widget.py, rootdir-relative run)
+  executed identities : ['src.pkg.test_widget.test_counts']
+  failed identities   : ['src.pkg.test_widget.test_counts']
+  authored paths      : ['src/pkg/__init__.py', 'src/pkg/test_widget.py']
+  subjects            : []
+  undetermined        : False (ambiguous=[], unreadable=[])
+  RESULT              : NOT INTERCEPTED (historical retry path)
+
+P6 test inside a package with __init__ files
+  executed identities : ['pkg.tests.test_widget.test_counts']
+  failed identities   : ['pkg.tests.test_widget.test_counts']
+  authored paths      : ['pkg/__init__.py', 'pkg/tests/__init__.py', 'pkg/tests/test_widget.py']
+  subjects            : [('pkg/tests/test_widget.py', ['pkg.tests.test_widget.test_counts'])]
+  undetermined        : False (ambiguous=[], unreadable=[])
+  RESULT              : INTERCEPTED (subject or typed unknown)
+
+P7 run-authored Kotlin test (no structural grammar), JUnit identity failed
+  executed identities : ['com.example.WidgetTest.counts']
+  failed identities   : ['com.example.WidgetTest.counts']
+  authored paths      : ['src/test/kotlin/com/example/WidgetTest.kt']
+  subjects            : []
+  undetermined        : False (ambiguous=[], unreadable=[])
+  RESULT              : NOT INTERCEPTED (historical retry path)
+
+=== Question 2: what the sealed verification contract holds ===
+
+P8 general behaviour, no operator authority
+  goal      : Add a function percent(part, whole) that returns part as a percentage of whole rounded to one decimal place. Include a pytest test for it.
+  admission : VERIFICATION_AUTHORITY_REQUIRED  totals={"ambiguous": 0, "authority_required": 1, "closable": 1, "dispositioned": 0, "non_claim": 0, "requirements": 2, "residual_claims": 1}
+  refusal   : VerificationAuthorityRequired
+  REQ-1: status=AUTHORITY_REQUIRED claims=['BEHAVIOR'] strength=GENERAL closers=[] residual=[('BEHAVIOR', 'GENERAL')]
+        text='Add a function percent(part, whole) that returns part as a percentage of whole rounded to one decimal place.'
+  REQ-2: status=CLOSABLE claims=['TEST_ADDITION'] strength=None closers=['test_addition'] residual=[]
+        text='Include a pytest test for it.'
+  fields of one sealed entry: ['ambiguity', 'bindings', 'claims', 'closers', 'disposition', 'dispositioned_claims', 'documentation', 'kind', 'named_tests', 'non_claim', 'origin', 'requirement_id', 'residual', 'scopes', 'source', 'status', 'strength', 'strength_reasons', 'text']
+
+P9 binary field semantics (run-10 shape), no operator authority
+  goal      : Add an encoder that writes the record header: a 4-byte big-endian time field followed by a 2-byte length. Add a decoder that reads it back. Add tests for the round trip.
+  admission : VERIFICATION_AUTHORITY_REQUIRED  totals={"ambiguous": 0, "authority_required": 3, "closable": 0, "dispositioned": 0, "non_claim": 0, "requirements": 3, "residual_claims": 3}
+  refusal   : VerificationAuthorityRequired
+  REQ-1: status=AUTHORITY_REQUIRED claims=['BEHAVIOR'] strength=GENERAL closers=[] residual=[('BEHAVIOR', 'GENERAL')]
+        text='Add an encoder that writes the record header: a 4-byte big-endian time field followed by a 2-byte length.'
+  REQ-2: status=AUTHORITY_REQUIRED claims=['BEHAVIOR'] strength=GENERAL closers=[] residual=[('BEHAVIOR', 'GENERAL')]
+        text='Add a decoder that reads it back.'
+  REQ-3: status=AUTHORITY_REQUIRED claims=['TEST_ADDITION', 'BEHAVIOR'] strength=GENERAL closers=['test_addition'] residual=[('BEHAVIOR', 'GENERAL')]
+        text='Add tests for the round trip.'
+  fields of one sealed entry: ['ambiguity', 'bindings', 'claims', 'closers', 'disposition', 'dispositioned_claims', 'documentation', 'kind', 'named_tests', 'non_claim', 'origin', 'requirement_id', 'residual', 'scopes', 'source', 'status', 'strength', 'strength_reasons', 'text']
+
+P10 runtime-observable grammar
+  goal      : Create hello.py. It prints hello world when executed.
+  admission : ADMITTED  totals={"ambiguous": 0, "authority_required": 0, "closable": 2, "dispositioned": 0, "non_claim": 0, "requirements": 2, "residual_claims": 0}
+  refusal   : None
+  REQ-1: status=CLOSABLE claims=['FILE_CREATION'] strength=None closers=['file_creation'] residual=[]
+        text='Create hello.py.'
+  REQ-2: status=CLOSABLE claims=['BEHAVIOR'] strength=GENERAL closers=['runtime_stdout'] residual=[]
+        text='It prints hello world when executed.'
+  fields of one sealed entry: ['ambiguity', 'bindings', 'claims', 'closers', 'disposition', 'dispositioned_claims', 'documentation', 'kind', 'named_tests', 'non_claim', 'origin', 'requirement_id', 'residual', 'scopes', 'source', 'status', 'strength', 'strength_reasons', 'text']
+

@@ -46,3 +46,19 @@ A1 covers the accounting columns only (open finding, family, charge, stop). Whic
 
 Human authority in the retry loop: none. A person acts only at the approval gate, the verifier semantic review
 and the resume request, which belong to slices A2 and A3 and to `AUTH-A1-09` / `AUTH-A1-10`.
+
+## Slice A2 - failures that involve a run-authored test, and admission
+
+| ID | Situation | Decided by | Outcome | Label |
+|---|---|---|---|---|
+| FR-A2-01 | Mapped run-authored test **fails**, run unattended | `AUTH-A2-08` | Unit stops `verifier_semantic_authority_required` (`VERIFIER_SEMANTIC_UNATTENDED`) before any retry; nothing applied | `MEASURED` (committed test) |
+| FR-A2-02 | Same, attended, person says valid, strict owner selected, enforce unit | `AUTH-A2-09` | Production owner repaired; verifier write-denied. If the owner is another unit the locator-tier attribution names out-of-scope files and the existing plan-scope escalation takes over (`FR-A1` rows, `SM-A1-04`) | `TRACED`; the cross-unit continuation was not executed |
+| FR-A2-03 | Same, attended, valid, no owner selected (always so in a direct run) | `AUTH-A2-09` | Unit stops (`VERIFIER_SEMANTIC_NO_PRODUCTION_OWNER_AUTHORITY`) | `MEASURED` for direct (committed test) |
+| FR-A2-04 | Same, attended, person says invalid | `AUTH-A2-08` | Enforce allow-list unit: one regeneration of that path. Direct run: stop (`VERIFIER_SEMANTIC_REGENERATION_UNAVAILABLE`) | `MEASURED` for direct (committed test); enforce `TRACED` |
+| FR-A2-05 | A verifier may no longer be written and the next attempt would be FULL_SET | `UnitSemantics.full_regeneration_refusal` | Unit stops (`VERIFIER_SEMANTIC_FULL_REGENERATION_REFUSED`) | `TRACED` |
+| FR-A2-06 | Mapped run-authored test **passes**, run unattended | `AUTH-A2-08` at the pass seams | Candidate not accepted, unit stops for review; nothing applied | `MEASURED` (committed test) |
+| FR-A2-07 | Executed case whose run-authored source is ambiguous or unreadable | `AUTH-A2-06` | Unit stops (`..._SUBJECT_AMBIGUOUS` / `..._SUBJECT_UNREADABLE`), nobody asked | `TRACED` |
+| FR-A2-08 | Run-authored test executed and failed, identity **does not map** (src layout, language without a grammar) | nobody: `AUTH-A2-06` returns no subject and no unknown | Historical retry: `AUTH-A2-10` picks targets, the Developer may rewrite the test or the code beside it, full unit budgets | `MEASURED` at the derivation (P5, P7) and for the fall-through (committed test `..._keeps_the_historical_retry`); `GAP-A2-02` |
+| FR-A2-09 | Test gate failed without a COMPLETE report (collection error, test-source compile failure, timeout) | nobody (by the owner's correction of 2026-11-14) | Historical retry, full unit budgets | `TRACED`; `BYP-A2-03` |
+| FR-A2-10 | Goal has a mandatory claim with no bound authority, policy `block` | `AUTH-A2-03` | Refused before any model call: `VERIFICATION_AUTHORITY_REQUIRED` with typed authority requests; or `GOAL_INSUFFICIENT_FOR_VERIFICATION` when a statement is ambiguous | `TRACED`; refusal `MEASURED` (P8, P9) |
+| FR-A2-11 | Same goal, policy `record` | `AUTH-A2-03` | Sealed and run; model-written semantics follow (`GAP-A2-01`). Run 10 is the preserved instance: 5 of 5 entries `AUTHORITY_REQUIRED` and the run proceeded | `TRACED`; preserved (registry row, sealed run 10) |

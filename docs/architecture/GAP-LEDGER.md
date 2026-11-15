@@ -171,3 +171,83 @@ this baseline), and the line-by-line read of the enforce recovery loops recorded
 | Sprint log 46: "no other writer zeroes `targeted_retry_count` or clears `fallback_targeted_attempted`" | Confirmed, not disproved: the search found only `retry_policy.reset_scoped_budgets_for_new_family` | `TRACED` |
 | `NON-CANDIDATE-FAILURE-SCOPED-RESET-001` (CLOSED) | Holds on this baseline: its 9 tests pass and probe P7 shows a budget refusal does not replace the finding | `MEASURED` |
 | `MODULE-CONTRACTS.md` section 12 as a description of current code | Stale as a description: the module does not exist | `TRACED` |
+
+## Slice A2 (2026-11-15) - semantic contract, generated verifier, attribution
+
+Evidence: `evidence/a2/` (probe P1 to P10 and output; 7 committed tests passed unchanged on this baseline; citation
+check). Rows: `AUTH-A2-01..13`, `SM-A2-01`, `MUT-A2-01..06`, `FR-A2-01..11`, `BYP-A2-01..09`.
+
+### Mandatory row `GENERATED-VERIFIER-CONTRACT-AUTHORITY-001`: decision C (the row conflates two issues)
+
+| Half of the row | Finding | Label |
+|---|---|---|
+| "A model-generated verifier assertion drives repair with no proof that it is grounded" (verifier authority) | Closed by WS3 for every test the derivation can map: `VERIFIER-SEMANTIC-REVIEW-001` and `VERIFIER-SEMANTIC-AUTHORITY-001` are CLOSED in the registry and the code is on this baseline (`AUTH-A2-06` to `AUTH-A2-09`). The run-10 sequence (a never-accepted failing test becomes the repair objective for 7 attempts) cannot occur for a mapped subject: unattended it stops before any retry, attended a person decides first. The row's own status text ("characterization not started; nothing implemented") is stale bookkeeping. **Residual:** unmapped tests still take the pre-WS3 path (`GAP-A2-02`) | `MEASURED` (committed tests, probe) + `TRACED` |
+| "The sealed verification contract holds natural-language sentences with claim classes only ... no assertion can be grounded deterministically against it" (semantic-contract authority) | **Still true and untouched by WS3.** WS3 did not create a contract; it put a person behind each generated verifier. `GAP-A2-01` | `MEASURED` (P8, P9) + `TRACED` |
+
+So neither A (stale: WS3 closed it) nor plain B describes the row. The row should be split at Phase D into the
+closed verifier-authority issue with its residual (`GAP-A2-02`) and the open semantic-contract issue (`GAP-A2-01`).
+No registry edit is made in Phase A.
+
+### GAP-A2-01 - No canonical product-semantic contract exists before the Developer or the verifier is generated
+
+| Field | Content |
+|---|---|
+| Problem | Before the first model call Kriya seals what each of the user's sentences claims and how the claim could be verified. For a general behaviour statement with no operator artifact it seals nothing about what the product must do: no values, ranges, field semantics or edge cases, and no record that the sentence has more than one reading. When such a run is admitted, the first concrete semantics are written by models (Planner criteria, Developer code, Developer test). The generated verifier is then the first executable statement of the product's semantics, which is the forbidden order of the A2 invariant |
+| What WS3 changed and what it did not | WS3 guarantees that a mapped generated verifier never acts as authority without a person. It is a control **after** generation, per verifier file, per run, in memory. It does not create a contract: the person is shown the goal text as the "canonical contract" and judges the model's reading against their own intent; the decision is not stored as contract, is not given to the Developer that writes the production code, and does not survive the run (`MUT-A2-02`). Two verifier files of one run can be accepted on two different readings of the same sentence, and nothing detects it |
+| Evidence | `MEASURED` (P8, P9): a sealed entry's fields are text, claim kinds, strength, closers, residual, ambiguity, disposition and bookkeeping; for the percent goal and for a binary-header goal of run 10's shape every behaviour entry is `AUTHORITY_REQUIRED` / GENERAL with no closer. `TRACED`: `AUTH-A2-02` to `AUTH-A2-05`, `AUTH-A2-07`. Preserved: run 10 (`~/kriya-evidence/product-72h-confidence/scenario-a-run10-2026-11-13/CLASSIFICATION.md`, not re-read in A2; cited from the registry row) |
+| When it is reachable | (a) policy `record`: always (`BYP-A2-04`, `FR-A2-11`). (b) policy `block`: the goal is refused before any model call unless the operator supplies authority, so the gap becomes "the only way to state semantics is a complete external artifact"; it remains reachable for a test admitted by a structural closer (`BYP-A2-05`). Which policy a production or desktop launch really runs under is a configuration-authority fact for slice A5 |
+| Not established | Whether the Planner's criteria reach the Developer's prompt and in what form (slice A4). Whether the desktop launch runs under `block` (slice A5) |
+| First wrong owner | None exists. The nearest owners are `contract_compilation.py` (it owns admission and already types the missing authority as `acceptable_authorities` and authority requests) and `requirements.py::behavior_strength` (it already decides that a statement is GENERAL) |
+| Invariant violated | "A generated executable verifier must never be the first creator of required product semantics" (owner, A2). "Model text is evidence, never authority" holds formally (nothing model-written closes a requirement) and fails in effect (model-written semantics steer every attempt of the run) |
+| Affected flows | Every admitted run whose goal has a general behaviour statement: Planner, Developer, generated verifier, semantic review, attribution, repair |
+| Severity | P1 candidate (the registry row is P1 / blocking) |
+| Existing canonical seam | The sealed contract and its authority-request mechanism (`authority_request.py`): a typed request for the missing authority is already produced on refusal. The human semantic review is a second seam: it already binds a person's judgement to goal and contract digests |
+| Registry rows | `GENERATED-VERIFIER-CONTRACT-AUTHORITY-001` (its second half), `REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001` (the same absence seen from requirement closure), `GOAL-EXAMPLE-COMPILER-COVERAGE-001` (one of the few ways to state semantics is narrow) |
+| Reconciliation state | `CONFIRMED`. Contract required in Phase C ("semantic contract authority before Developer / verifier") |
+
+### GAP-A2-02 - Generated-verifier identification fails open when an executed identity does not map
+
+| Field | Content |
+|---|---|
+| Problem | A failed executed test identity that maps to no run-authored file is treated as a pre-existing test. The derivation cannot tell "the run did not write this test" from "the run wrote it and the identity did not map", and raises an unknown only for double mapping and unreadable files. Two reachable causes: a `src/` layout (the parser drops `src/`, pytest does not) and any test language without a structural grammar |
+| Evidence | `MEASURED` (P5, P7; P1 to P4 and P6 are the controls that do map). `TRACED`: `verifier_semantic.py::derive_executed_verifiers`, `code_intel/parsing.py::python_module_name`, `tools/test_execution.py::_identity`. Fall-through to the historical path: `MEASURED` by the committed test `test_a_failure_with_no_run_authored_executed_verifier_keeps_the_historical_retry` |
+| Not established | That a live run produced this (no run evidence). The identity Kriya's own gate reports for a `src/` layout (the probe ran plain pytest from the project root) |
+| Consequence | For those tests the pre-WS3 behaviour of the registry row is back: an unaccepted model-written assertion is an authoritative failure, attribution (possibly a model tier, `AUTH-A2-10`) picks targets, the Developer may rewrite the test or the code, and a passing one is applied without a semantic decision. No false requirement closure follows (a model-written test closes nothing) |
+| First wrong owner | `verifier_semantic.py::derive_executed_verifiers`: "no mapped file" is read as a negative fact about authorship |
+| Invariant violated | "Fail closed, never approximate"; "UNKNOWN fails safely" |
+| Severity | P2 candidate: a safety owner with a silent hole, on layouts and languages Kriya otherwise supports |
+| Existing canonical seam | The derivation already has an `undetermined` result and the seams already stop on it. The write journal knows every run-authored path; the pre-run baseline report knows which identities existed before the run |
+| Registry rows | None. New in A2. Residual of `VERIFIER-SEMANTIC-AUTHORITY-001` (CLOSED) and of `WAVE5-O2-GENERATED-TEST-WEAKENING-001` |
+| Reconciliation state | `CONFIRMED` at the owner. A deterministic loop-level reproducer (a scripted unit whose test sits under `src/`) is the first step of any fix |
+
+### GAP-A2-03 - What an unattended run and a direct run can still do once a test is written is decided, but stated nowhere as a product contract
+
+| Field | Content |
+|---|---|
+| Facts | (1) Unattended, any mapped run-authored test that a gate executes ends the unit for review, passing or failing: an unattended run cannot complete a goal that makes it write and run a test (`FR-A2-01`, `FR-A2-06`). (2) In a direct run, attended or not, a failing mapped run-authored test always ends the run: there is no regeneration and no production owner without a plan (`FR-A2-03`, `FR-A2-04`). The direct path is the desktop path. (3) Only an attended enforce run can repair from a generated test's failure |
+| Evidence | `MEASURED` (4 of the 7 committed tests); `TRACED` (`AUTH-A2-08`, `AUTH-A2-09`, `verifier_semantic.py::unit_semantics`) |
+| Is it a defect? | No: each fact follows the owner's WS3 rulings ("unattended and undecided ends needs-review"; a direct run has no validated plan owner). What is missing is the stated contract and its consequence for the product: (1) removes "unattended completion with tests" as a capability, (2) makes direct and enforce differ in what a run can recover from |
+| Relation | Direct / enforce divergence is the subject of `ENFORCE-EXECUTE-PLAN-CONVERGENCE-001` (slice A4). Together with `AUTH-A2-03` under `block`, an unattended production run can complete only goals that are fully closable by operator authority or anchored grammar and whose candidate contains no executed run-authored test |
+| Severity | Unclassified |
+| Reconciliation state | `OWNER_RULING` (Phase D item O): confirm these as the intended current contract, or name the capability that must exist before production |
+
+### RECOVERY-UPSTREAM-OWNER-ROUTING-001 (handed over by A1): resolved as superseded
+
+The missing evidence was the attribution tier of unit s2 in C2-S4_A-c3. It cannot be obtained: the preserved
+classification (`handover/evidence/backend-final-closure-005-repair-003/final-twelve/C2-S4_A-c3.CLASSIFICATION.md`)
+records no tier and states "Authority stores: run id only" (`MEASURED`, file read). It also no longer decides
+anything: on this baseline a failing Java test written by unit s2 is a generated-verifier subject, so the unit stops
+for review (unattended) or a person decides and the strict owner predicate, not the attribution ladder, names
+`PathCompiler.java`'s owner (`AUTH-A2-09`, `FR-A2-02`); and the old stop now requires a deterministic tier
+(`ATTRIBUTION-MODEL-CLAIM-HARD-STOP-001`, CLOSED). The cross-unit continuation of `FR-A2-02` was traced, not
+executed.
+
+### Documents reconciled in A2
+
+| ID | Document | Claim | Reconciliation (label) |
+|---|---|---|---|
+| DOC-A2-01 | Registry row `GENERATED-VERIFIER-CONTRACT-AUTHORITY-001`, `closure_evidence` | "characterization of the change not started; nothing implemented" | Stale: WS3-B and WS3-C are implemented and closed under two other rows (`TRACED`) |
+| DOC-A2-02 | Same row, `target_scope` | "one self-repair only for NON-semantic construction errors" | Not implemented, and superseded: the committed test `test_a_test_source_compile_failure_establishes_no_subject_and_the_policy_owner_has_no_phase_rule` records the owner's correction of 2026-11-14 that the phase establishes no subject. Construction errors take the ordinary retry (`BYP-A2-03`). Which statement is the current ruling should be confirmed at Phase D (`TRACED`) |
+| DOC-A2-03 | `handover/claude-context/requirements-and-brownfield.md`, "Claims (FS-1C1)" and "Claim strength (B2-COV)" | "B3 has no producer yet"; "human approval: not implemented" | Stale sentences: the same file's B3 section and `workflow/acceptance_approval.py`, `contract_compilation.py` (`CLOSER_ACCEPTANCE_APPROVAL`) show it implemented (`TRACED`) |
+| DOC-A2-04 | `workflow/verifier_replay.py` module contract | "a replay that FAILS ... is evidence against the owner's repair" | Current, with a precondition the text does not state: it holds as authority only for a verifier a person accepted. For an unmapped verifier (`GAP-A2-02`) a never-accepted test still has that role (`TRACED`) |
+| DOC-A2-05 | `handover/claude-context/requirements-and-brownfield.md` as a whole | Describes requirement lineage and closers | Matches the code where A2 read it (`AUTH-A2-01`). It does not describe the sealed verification contract's admission rule or WS3; whether another context file does was not checked in A2 |
