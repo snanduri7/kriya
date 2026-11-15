@@ -12,7 +12,7 @@ Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`, t
 | STAGE-KNOWLEDGE | Knowledge / Skills | A4 | **filled** (`AUTH-A4-05..09`, `SM-A4-03`, `SM-A4-04`, `GAP-A4-02..04`) |
 | STAGE-PLANNING | Planning | A4 | **filled** (`AUTH-A4-10..12`) |
 | STAGE-PLAN-VALIDATION | Plan validation | A4 | **filled** (`AUTH-A4-10`, `AUTH-A4-11`, `AUTH-A4-13`, `AUTH-A4-16`, `SM-A4-01`, `SM-A4-02`, `GAP-A4-05`) |
-| STAGE-WORKSPACE | Workspace / root authority | A5 | pending |
+| STAGE-WORKSPACE | Workspace / root authority | A5 | **filled** (`AUTH-A5-01..05`, `AUTH-A5-08`, `AUTH-A5-09`, `SM-A5-01`, `SM-A5-04`, `GAP-A5-01`, `GAP-A5-02`; tools and MCP `AUTH-A5-06`, `AUTH-A5-07`, `SM-A5-02`, `GAP-A5-03`; configuration `AUTH-A5-10..12`, `SM-A5-03`, `GAP-A5-04`) |
 | STAGE-SUBTASK-SELECTION | Subtask selection (direct, milestone, enforce) | A4 | **filled** (`AUTH-A4-04`, `AUTH-A4-14`, `AUTH-A4-15`, `GAP-A4-01`; A1 part below) |
 | STAGE-CONTEXT | Context construction | A4 (skill, plan and goal context), A6 (the Developer request and its budget) | A4 part **filled** (`AUTH-A4-09`, `AUTH-A4-12`); the request itself is owed by A6 |
 | STAGE-MODEL-RUNTIME | Runtime / model selection and qualification | A6 | pending |
@@ -239,3 +239,54 @@ flowchart TD
 Not traced in A4 and still owed: STAGE-GENERATION (the Developer request: `attempt.py`, `retry_prompts.py`,
 `prompt_composition.py`, the context budget) goes to slice A6 with the dispatch and budget rows; the Architect stage
 beyond its stage 2A and 2B blocks; `milestones.py`; `shadow_mode.py`; `plan_revision.py`; `triage.py`.
+
+## STAGE-WORKSPACE, with tools, MCP, private state and configuration (A5) - AS-IS flow
+
+Every step cites the row that holds the fact; nothing is defined here. STAGE-WORKSPACE is not a step in time: it is
+the set of authorities every other stage stands on. The diagram shows where each one is consulted during a run and
+which writes do not pass the candidate.
+
+```mermaid
+flowchart TD
+    C0[Configuration layers resolved, classified, approval checked<br/>AUTH-A5-10, SM-A5-03] --> C1{violation without approval?}
+    C1 -- yes --> X0[ConfigAuthorityError, nothing loads<br/>FR-A5-16]
+    C1 -- no --> K[Kernel start: MCP servers contained over the process directory<br/>AUTH-A5-07]
+    K --> R[Workspace identity and authority root<br/>AUTH-A5-01]
+    R --> RC{Root class<br/>AUTH-A5-02, SM-A5-01}
+    RC -- Git cannot answer --> X1[BOUND_TREE_UNAVAILABLE<br/>FR-A5-01]
+    RC -- no repository, not empty --> X2[BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY<br/>FR-A5-02]
+    RC -- no repository, empty --> B[Greenfield bootstrap in the owner workspace<br/>MUT-A5-01]
+    RC -- Git backed --> S
+    B --> S[Candidate sandbox created or reset, workspace bytes proven<br/>AUTH-A5-03, MUT-A5-02]
+    S --> I[Stores read for context: code index, skills, learned knowledge<br/>AUTH-A5-09, SM-A5-04]
+    I -. packaged defaults: one location for every project .-> G1[GAP-A5-01]
+    I --> U[Unit: Developer answer staged]
+    U --> W{Write gate per target<br/>AUTH-A5-04}
+    W -- outside root, control, credential, goal file, out of scope --> X3[PolicyDeniedError<br/>FR-A5-06]
+    W -- allowed, including kriya.yaml and workspace skills --> CB[Candidate batch commit in the sandbox<br/>MUT-A5-03]
+    CB -. authority inputs of later runs .-> G2[GAP-A5-02]
+    CB --> GT[Gates, approval, commit transaction<br/>slice A3]
+    U2[Planned TOOL subtask under enforce<br/>AUTH-A5-06, SM-A5-02] --> TG{Plannable and authorized?}
+    TG -- no --> X4[Refused pre-effect<br/>FR-A5-08]
+    TG -- read tool --> RD[Read gate over owner and candidate roots<br/>AUTH-A5-05]
+    TG -- MCP tool, approved --> MC[tools/call in the server container]
+    MC -. write grant: owner workspace changed in place .-> G3[GAP-A5-03, MUT-A5-06]
+    SK[Skill learning during analysis and apply<br/>MUT-A5-08] -. not through the write gate .-> G5[GAP-A5-05]
+```
+
+| Stage | Owner (one home per fact) | Rows |
+|---|---|---|
+| Configuration | `config/resolution.py`, `config/authority.py`, `config/authority_approval.py` | `AUTH-A5-10..12`, `SM-A5-03`, `FR-A5-16`, `FR-A5-17`, `GAP-A5-04` |
+| Root and identity | `context/workspace_identity.py` | `AUTH-A5-01` |
+| Membership | `repository/bound_tree.py` | `AUTH-A5-02`, `SM-A5-01`, `FR-A5-01`, `FR-A5-02` |
+| Candidate sandbox | `workflow/worktree.py` | `AUTH-A5-03`, `MUT-A5-01`, `MUT-A5-02`, `FR-A5-03..05` |
+| Write and read gates | `policy/filesystem.py` | `AUTH-A5-04`, `AUTH-A5-05`, `MUT-A5-03..05`, `FR-A5-06`, `FR-A5-07`, `GAP-A5-02` |
+| Planned tools | `tools/tool.py`, `workflow/subtask_executor.py` | `AUTH-A5-06`, `SM-A5-02`, `FR-A5-08`, `FR-A5-09` |
+| MCP | `policy/execution.py`, `mcp/mcp.py`, `mcp/containment_adapter.py` | `AUTH-A5-07`, `MUT-A5-06`, `FR-A5-10`, `FR-A5-11`, `GAP-A5-03` |
+| Authority state | `policy/protected_authority_paths.py`, `platform/private_store.py` | `AUTH-A5-08`, `MUT-A5-14..16` |
+| Project state namespace | none for the retrieval, knowledge and skill stores | `AUTH-A5-09`, `SM-A5-04`, `MUT-A5-08..13`, `FR-A5-12`, `FR-A5-15`, `GAP-A5-01`, `GAP-A5-05` |
+
+Not traced in A5 and still owed: the OCI backend and the mask code (`tools/containment_oci.py`), `repository/git.py`
+and `snapshot.py`, the scoped-snapshot builder's body, `kriya/platform/private_store.py`, `kriya/kup` beyond its
+outline, and the UI session code behind the two history rows. None of them changes a row above; each is named in the
+limitation field of the row it belongs to.

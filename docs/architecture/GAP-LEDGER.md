@@ -596,3 +596,159 @@ Rows handed over by A3 and settled here:
 | DOC-A4-06 | `kriya/workflow/terminal_gate_service.py` comment at the `file_creation` / `runtime_stdout` closers ("the units' own pre-apply boundary is where these two are decided") | Where those two claims are closed under enforce | CONTRADICTED BY CODE for enforce units: they have no requirement set, so their pre-apply boundary runs no closer (`GAP-A4-01` (c)) |
 | DOC-A4-07 | `kriya/config/config.py::WorkflowControllerConfig` docstring ("TOOL-tagged subtasks are refused outright") | Enforce and TOOL subtasks | STALE: TOOL subtasks execute through the governed path since TOOL-001 (`enforce_loop.py` comment at the validation call). Slice A5 owns the tool path |
 | DOC-A4-08 | `docs/user_guide.md` (requirements: "The Planner and the Architect are shown the list and asked to cite the ids they serve") | Requirement lineage | CURRENT AND CONSISTENT with `stage_planning.py` and the enforce request (`TRACED`); the Architect half was not read |
+
+## Slice A5 (2026-11-15) - workspace, root, tools, MCP, mutation, private state, configuration
+
+Evidence: `evidence/a5/` (probes P1 to P8 with output; the citation check with its negative controls). Every gap below
+uses `AS-IS -> GAP -> REQUIRED CONTRACT -> IMPLEMENTATION DELTA -> ACCEPTANCE PROOF`. The last three are `PROPOSED`
+outlines only: Phase C designs them from the truth owners backward and nothing here is implemented or authorized.
+Owner rulings received during this slice (acceptance of A4, 2026-11-15) are applied in "Updates to gaps of earlier
+slices".
+
+### The mandatory row
+
+| Registry row | A5 result | Evidence | Gap |
+|---|---|---|---|
+| `DESKTOP-PROJECT-RETRIEVAL-STATE-ISOLATION-001` | **Characterized; stays OPEN. The required invariant does not hold.** The row asked which supported path writes or reads the shared location and whether cross-project retrieval is reachable. (1) The location: with no `paths.memory` in the project's configuration every project resolves the installation's `memory` directory, and so does a folder initialized by Project Setup, whose file has no `paths` section. The same holds for `paths.skills`. (2) The key: the code index, the learned-knowledge store and the release cache carry no project, root or identity; rows are keyed by repository-relative path. (3) Writers of the code index: `kriya analyze` and the opt-in auto-index, nothing else; the desktop has no indexing operation. So a desktop-only installation at the packaged defaults holds an empty index and no cross-project read occurs, which matches the registry's measurement (no `retrieval.*` events in ten desktop runs). (4) Once any unconfigured folder was indexed from the CLI, a run in another project reads that index as its own: the "already indexed" test is true, symbol lookups return the other project's paths, retrieval matches the other project's files and stores its chunk text in this run's trace row. The structural readers that use `current_view()` are immune, and the Planner's assembled block omits files the project does not hold. (5) Indexing the second project deletes the first project's index. (6) The same default makes skills global: a scaffold written by one project's run removes another project's knowledge gap. (7) Control state, approvals and launch records are per project by identity; run history is one database for all projects, attributed through evidence manifests | `MEASURED` P1, P2, P7, P8; `TRACED` readers, writers and controls in `AUTH-A5-09`, `SM-A5-04`, `MUT-A5-08..13` | `GAP-A5-01` |
+
+### GAP-A5-01 - Retrieval, knowledge and skill state has no project owner: the packaged defaults are one installation-wide namespace
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A5-09`: location by configuration, packaged default resolved against the installation directory; no store records which project its content came from |
+| Evidence | `MEASURED` P1 (same `paths.memory` and `paths.skills` for two bare folders and a Project Setup folder; neither is inside the project), P2 (what project B reads of project A; B's indexing deletes A's), P7 (same learned-knowledge path), P8 (A's scaffold closes B's knowledge gate; the engine's refusal exists but the scaffold writer does not consult it). Controls: no workspace key in the three store modules; two index writers; no desktop indexing operation; the shared-install predicate absent from the scaffold, staged-fact and extraction writers |
+| GAP | Four distinct failures of one missing owner. (a) **Read:** another project's index answers for this project wherever a reader does not rebuild the view from the project's own bytes: the legacy graph readers (`investigation.py` `find_symbol` / `find_callers`, `triage.py` blast radius, the class-location index of the duplicate-type gate), the vector leg of retrieval and the "already indexed" test. (b) **Disclosure:** the other project's chunk text is persisted in this run's trace row and its file paths reach this run's analysis as matched files. (c) **Write:** a run or an `analyze` in one project deletes or replaces another project's index; a run writes skill scaffolds, rules, provenance and staged facts into the directory every project loads, and that directory is the one whose skills Kriya trusts by location. (d) **Installation tree:** the default locations are inside the installation, so normal operation writes there (an editable checkout's repository; a read-only installation would fail instead). The desktop is the product surface where this is the default: Project Setup neither sets the paths nor says they are shared |
+| First wrong owner | `config/resolution.py` (the default's anchor) for the location; no owner at all for attribution |
+| Violated invariant | The owner's isolation invariant (state or retrieval of project A is never returned, written or reused for project B through any explicit, fallback, default, global, legacy or missing-key path); evidence binds to exact identity |
+| REQUIRED CONTRACT (`PROPOSED`) | One owner of project-scoped derived state. Every store that holds project content (code index, vector index, staged run facts, conflict registry of project skills) lives under a location derived from the workspace identity, in Kriya's state directory, never in the installation and never selected by a default shared between projects. A store records the identity it was built for, and a reader refuses a store of another identity (typed, "no index for this project"), never reads it. Genuinely global knowledge (the shipped skill library, the public release-date cache) stays global, is read-only to a run, and is named as global. A project's explicit `paths.memory` / `paths.skills` remains possible and is bound the same way |
+| IMPLEMENTATION DELTA (`PROPOSED`) | A state-path function beside `resolve_state_directory` returning `<state>/projects/<workspace identity>/memory`; the default of `paths.memory` becomes "project state" instead of `./memory`; the index manifest gains the workspace identity and readers check it; the skills default splits into the read-only library and a per-project writable root; every skill writer goes through the engine's location rule. No migration of an existing shared index (it has no attribution to migrate by): it is ignored and reported |
+| ACCEPTANCE PROOF (`PROPOSED`) | P1, P2 and P8 as tests with inverted expectations: two unconfigured projects resolve different memory locations; after indexing A, every reader called for B answers "no index"; indexing B leaves A's index intact; A's scaffold does not change B's knowledge gate. Negative controls: a store whose recorded identity is altered is refused; removing the identity check makes the P2 test fail |
+| Registry rows | `DESKTOP-PROJECT-RETRIEVAL-STATE-ISOLATION-001` (owner-classified P1); related: `HISTORY-STATE-DIR-PER-PROJECT-001`, `GUI-RUN-ATTRIBUTION-001` (the same missing attribution, for run history) |
+| Severity (candidate) | **P1**, as the owner classified the row. Reach today: any machine on which `kriya analyze` (or auto-index) ran in a folder without its own `paths.memory`; for skills, any run that scaffolds or learns. Disposition candidate: FIX_REQUIRED_BEFORE_PRODUCTION |
+| Limits of this characterization | No real desktop run was made. The effect of a foreign index on plan quality or on a Developer request was not measured (A6 owns the request). Which reader created the empty database the registry found in the installation tree is `INFERRED` |
+
+### GAP-A5-02 - The write gate does not know which workspace paths are authority inputs of later runs
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A5-04`: the gate refuses paths outside the root, control paths, credential paths, the goal file and paths outside a unit's scope. Everything else inside the candidate is allowed |
+| Evidence | `MEASURED` P5: `kriya.yaml`, `kriya.yml`, `skills/local/rules.txt`, `skills/new-skill/skill.yaml`, `.github/workflows/ci.yml`, `.gitignore`, `.gitattributes` are allowed. Absent `kriya.yaml` in `policy/filesystem.py`. P6: the fields a repository file may set without approval include the run budget at any value. End to end (candidate to owner workspace) `INFERRED`: no path-specific exclusion found in the apply path |
+| GAP | "Model text is evidence, never authority" names a configuration value among the things model text must not become. A candidate may contain the project's `kriya.yaml`; once applied, its `REPOSITORY_SAFE` fields are the next run's configuration without any authority decision (`BYP-A5-01`), and workspace skill files are the next run's conventions and its knowledge-gate coverage (`BYP-A5-02`). The configuration authority cannot see this: it classifies sources, and the file's source is "the repository". The only person in the path is the unit's diff approval, which is unconditional in human-in-the-loop mode and absent in guardrails mode unless the diff is large |
+| First wrong owner | `AuthorizedFileWriter.authorize` (no class for Kriya's own project-level inputs); behind it the classification premise in `config/authority.py` that repository bytes are written by the repository's author |
+| Violated invariant | Model text is evidence, never authority; one authoritative owner per decision |
+| REQUIRED CONTRACT (`PROPOSED`) | Kriya's project-level inputs (the canonical configuration file names; the workspace skills root; any future project-local Kriya input) are a named path class. A model-directed write to that class is refused by the write gate unless the user's goal itself asks for it, in which case it requires an explicit human approval of that file in every autonomy mode. Whether CI workflow files and Git attribute files join the class is an owner policy choice (they change what runs elsewhere, not what Kriya decides) |
+| IMPLEMENTATION DELTA (`PROPOSED`) | A closed table of project-authority relpaths beside `TRUSTED_CONTROL_NAMES`; a new reason code; the approval trigger for the goal-requested case in `stage_apply.py`. No change to SEC-009 |
+| ACCEPTANCE PROOF (`PROPOSED`) | P5 as a test: the two configuration names and a path under the workspace skills root are denied with the new reason code in every scope mode; a scripted unit that emits `kriya.yaml` ends refused and the owner workspace's configuration is byte-identical. Mutation: removing the table entry makes the test fail |
+| Registry rows | None existing (new) |
+| Severity (candidate) | P1 candidate in guardrails mode (no person in the path), P2 in human-in-the-loop (a person sees the diff but is not told the file is Kriya's own input). Disposition candidate: FIX_REQUIRED_BEFORE_PRODUCTION |
+| Limits | Not exercised end to end. No live run is known in which a model wrote `kriya.yaml`; the goal-file incident recorded in the writer's own comment (a generated subtask overwrote the goal file) is the precedent for this class |
+
+### GAP-A5-03 - A planned MCP call with a write grant changes the owner workspace outside the candidate
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A5-07`, `BYP-A5-03`, `MUT-A5-06` |
+| Evidence | `TRACED`: `MCPManager.start_all` and the approval resolver bind `os.path.realpath(os.getcwd())`; `map_capability_profile_to_containment` mounts that path read-write when `workspace_write` is granted; `MCPTool` declares `GOVERNED_SIDE_EFFECT`, returns its arguments unchanged from `authorize_model_invocation` and never reads the invocation's roots; the enforce loop is the only supplier of roots. No MCP server was run |
+| GAP | Every other model-originated change reaches the owner workspace only through a candidate, its gates, its approval and the commit transaction. This one does not: the effect is immediate, in the owner workspace, and survives a failed or refused run. The governance is real (two operator approvals, containment), but it authorizes the tool, not the change: nothing shows the person what the call wrote, and the run's result, evidence and rollback do not include it. The subsystem note states "every planned file write is refused"; that holds for the filesystem tool and not for an MCP tool with this grant (`DOC-A5-02`) |
+| First wrong owner | `MCPManager.start_all` (the workspace an MCP server sees is the process directory, not a root the run owns) |
+| Violated invariant | Every mutation has one authority path; a run never edits the owner workspace before its commit transaction |
+| REQUIRED CONTRACT (`PROPOSED`) | Two valid alternatives, an owner policy choice: (A) a planned MCP call never receives a writable workspace mount: during a run the workspace grant is mounted read-only whatever the profile says, and write-capable MCP tools stay operator-only; or (B) a planned MCP call's writable workspace is the run's candidate, so its effect joins the candidate's diff, gates and approval. (B) needs a per-run server lifetime; (A) is a few lines |
+| IMPLEMENTATION DELTA (`PROPOSED`) | (A): the planned-governance resolution treats an MCP tool whose server holds a workspace or additional write grant as operator-only (a fact of the bound capability profile, not of the tool's description). Recommended as the minimal correction |
+| ACCEPTANCE PROOF (`PROPOSED`) | With the stand-in MCP fixture: a planned call to a tool of a write-granted server is refused pre-effect with a typed reason and the workspace is byte-identical; the same tool through `kriya tools execute` still runs. Mutation: restoring `GOVERNED_SIDE_EFFECT` for it makes the test fail |
+| Registry rows | None existing (new). Related: `TOOL-RUNPHASE-PRE-EFFECT-DENIAL-TERMINAL-001` |
+| Severity (candidate) | P2: reachable only after two explicit operator approvals, and only for a server the operator gave a write grant. Listed under owner policy for Phase D |
+
+### GAP-A5-04 - The run's time bound has no run-level owner, and outside the production profile a repository may remove it
+
+| | |
+|---|---|
+| AS-IS | `AUTH-A5-12` |
+| Evidence | `MEASURED` P6: a repository file sets 999999 or `null` with no violation; production refuses 7200 and `null`, accepts 2400. `TRACED`: the number bounds each unit invocation (slice A1b) |
+| GAP | (a) The bound on how long Kriya works on one request is a tuning field any repository may raise or delete; the Project Setup profile's 900 is therefore advisory against the project's own file (and `BYP-A5-01` lets a run rewrite it). (b) Under enforce the number is applied per unit invocation, so no layer owns a bound for the run. This is the answer to "which layer owns effective run budgets": the configuration owns the number, nothing owns the run. 2400 and 3600 do not conflict (a scenario's value under the production ceiling) |
+| First wrong owner | `config/authority.py` (class of the field); the enforce loop for (b), already recorded by A1b |
+| Violated invariant | A configuration source may only set what it cannot use to gain resource authority (the containment bounds follow this rule: a repository may lower them, never raise them) |
+| REQUIRED CONTRACT (`PROPOSED`) | The budget becomes value-bounded like the containment bounds: a repository may lower it below the operator's or the profile's value, never raise or remove it. A run-level deadline is defined once (Phase C, with the retry-allowance contract of A1) |
+| IMPLEMENTATION DELTA (`PROPOSED`) | An entry in `_VALUE_BOUNDED_FIELDS` semantics with the ceiling taken from the trusted layer; no change to the production seal |
+| ACCEPTANCE PROOF (`PROPOSED`) | P6 as a test: a repository raise and a repository `null` are violations; a repository value below the trusted one is accepted |
+| Registry rows | `DEMO-TIME-BUDGET-001` (slice A1) is the adjacent row; none for the authority class |
+| Severity (candidate) | P2 |
+
+### GAP-A5-05 - Skill learning is a second write path into a repository, outside the write gate and the candidate
+
+| | |
+|---|---|
+| AS-IS | `MUT-A5-08`, `BYP-A5-07` (`BYP-A4-07` handed over) |
+| Evidence | `TRACED`: eleven writers, none constructs the write gate (control); most call `git_commit_if_tracked`. The run shadow has one activator, the enforce loop (A4 control, re-run) |
+| GAP | On the direct and milestone shapes, model-extracted rules and Kriya's own scaffolds are written and Git-committed into whatever repository holds the skills directory, during analysis, before a candidate exists and whatever the run's outcome. Inside the workspace repository that moves HEAD outside the commit transaction; in the installation directory it is `GAP-A5-01` (c). Enforce defers the writes through the shadow, so the Project Setup shape is covered for a skills root inside the workspace repository only (the shadow covers directories inside the bound candidate repository; the installation directory is not one) |
+| First wrong owner | The Skills owner: "the one way the Skills owner writes a skill file" (`_write_skill_file`) is not the only way a skill file is written |
+| Violated invariant | Every mutation has one authority path |
+| REQUIRED CONTRACT (`PROPOSED`) | One skill-write entry on the engine, used by every writer, which applies the location rule and the run-shadow rule on every shape |
+| IMPLEMENTATION DELTA (`PROPOSED`) | Route the knowledge guard's scaffold, the staged-fact writer and the extraction writers through the engine; activate the shadow for every shape, or make run-time skill writes project-state writes under `GAP-A5-01` |
+| ACCEPTANCE PROOF (`PROPOSED`) | The control `open(` under the skill modules narrows to the engine; a direct-shape scripted run that fails leaves the skills directory and the repository HEAD unchanged |
+| Registry rows | None existing; adjacent: `GUI-SKILLS-MUTATION-001`, `SKILL-RULE-PROVENANCE-PROJECT-SUPPLIED-001` (slice A4) |
+| Severity (candidate) | P2 |
+
+### Updates to gaps of earlier slices
+
+| Gap | Update from A5 |
+|---|---|
+| `GAP-A3-05` (P1 candidate, owner ruling) | The owed trace is complete. **No aggregate plan-level or run-level approval or size authority exists anywhere**: not in planning (A4), and not in tools, MCP, configuration or the application layer (A5, item 10 of the A5 mapping in `01-AUTHORITY-MATRIX.md`, with the controls). Every approval binds one subject: one unit's candidate digest, one tool identity, one configuration field set, one runtime command list. Per the owner's rule this is proposed as FIX_REQUIRED_BEFORE_PRODUCTION for Phase B; reachability is unchanged (guardrails mode only; `autonomy.mode` is `SECURITY_AUTHORITY`, so leaving human-in-the-loop needs an operator approval, `MEASURED` P6) |
+| `GAP-A4-03` (P1 knowledge-authority candidate, owner ruling) | Within A5's scope **no later authority validates the Skill facts that satisfy the gate**: the gate reads a directory listing; the directory is by default global and writable by any project's run (`GAP-A5-01`); the scaffold writer has no validation and no location rule; and a candidate may write a covering folder into the workspace (`BYP-A5-02`). A desktop launch cannot confirm a knowledge gap (`BYP-A5-11`), so on the desktop the gate can only stop the run or be closed by a folder. What remains for A6: whether the Developer request treats an unverified or empty covering skill differently (STAGE-GENERATION). Unless A6 finds such a check, the classification is FIX_REQUIRED_BEFORE_PRODUCTION |
+| `GAP-A3-04` | Unchanged. A5 adds that the launch approval record does carry a candidate digest per review (`launch_approval.py::build_pending`), which Phase B must place in its split (A: runtime authorization binding; B: audit binding) |
+| `GAP-A1-06`, `BYP-A1-12` | The identity half is answered: a plan sandbox is its own authority root (`AUTH-A5-01`). Survival of unit checkpoints across the sandbox reset stays open for Phase B |
+| `BYP-A1-13`, `BYP-A2-08`, `BYP-A3-09` | Bounded: the self-correction loop is off unless an operator enabled it, and its writes pass the write gate (`MUT-A5-05`, `BYP-A5-13`) |
+| `BYP-A3-01` | Writers into the plan sandbox other than a unit's batch: the pom correction and the self-correction loop, both gated; no tool, no MCP server. So the terminal batch is the chain of unit commits plus those two deterministic or gated writers. The MCP route writes the owner workspace instead (`GAP-A5-03`) |
+| `BYP-A3-07` | Closed at the producer (`BYP-A5-12`) |
+| `BYP-A4-18` | Closed for the CLI entry points (`BYP-A5-10`) |
+| `GAP-A3-01` | The production profile blocks on unverified and unknown requirements; the Project Setup profile does not set either policy (`AUTH-A5-11`). The desktop product therefore runs with `record` / `record` unless the operator's configuration says otherwise |
+
+### Registry rows of slice A5 that did not need a gap of their own
+
+| Row | Result (label) |
+|---|---|
+| `HISTORY-STATE-DIR-PER-PROJECT-001` | Confirmed current: history is a property of the state directory (`resolve_state_directory`; one directory for all projects, `MEASURED` P7); the preflight reports when a run would record where the cockpit does not read (`application/run.py`, `observable_by_cockpit`). Same missing attribution owner as `GAP-A5-01`; design decision owed (`TRACED`) |
+| `HISTORY-SNAPSHOT-STALE-ON-REOPEN-001` | Not re-traced (UI session code); the registry's own authority is OI-91. Kept as stated: desktop behaviour, no kernel fact contradicts it |
+| `TOOL-RUNPHASE-PRE-EFFECT-DENIAL-TERMINAL-001` | Intentional current contract, confirmed: `_authority_phase` is the one place a refusal is proven pre-effect; anything after `_run_model_authored` is entered may have effected (`TRACED`, `SM-A5-02`). Per-tool tagging is a future feature |
+| `GUI-TOOLS-HEALTH-001` | Confirmed: the application's tool catalogue (`application/catalog.py::ToolCatalogService`) lists and describes; nothing in `kriya/application` starts a server. A bounded health read is a future feature (`TRACED` at the class) |
+| `DIRECTORY-NAME-PRUNING-P3-SIBLING-SITES-001` | Confirmed current for the two sites re-read (`BYP-A5-08`); the rest of the census is cited, not repeated. P3 correctness pass, none decides a result |
+| `GIT-ICASE-PATHSPECS-UNQUALIFIED-001` | Still UNKNOWN by construction on this host: `platform/__init__.py` strips `GIT_ATTR_SOURCE` and `GIT_LITERAL_PATHSPECS` and records `GIT_ICASE_PATHSPECS` as unknown. Cannot be characterized on a case-insensitive filesystem; a declared qualification item for a Linux host, not a blocker of this closure |
+| `SEC009-AGENT-ROLE-REASON-TEXT-001` | Confirmed current (`TRACED`): `compute_violations` chooses the reason with `is_known_field`, which ignores the classification override. Message only |
+| `CLI-ADMISSION-REFUSAL-TEXT-MIDRUN-AUTHORITY-UNAVAILABLE-001` | Confirmed current (`TRACED`, the sentence is in `cli.py::_echo_admission_refusal`). Display only |
+| `PLAT-WINDOWS-POLICY-PARITY-001`, `PLAT-WINDOWS-FS-GIT-001`, `PLAT-WINDOWS-PROVIDERS-001`, `PLAT-PORTABILITY-P3-001` | Not defects of the supported platform (registry classification). A5 adds one fact: the path decisions of this slice use `path_relation` / `path_identity`, not string logic, so the Windows work is providers and policy patterns, not a rewrite of the gates. Future platform program |
+| `GUI-EXEC-GIT-SHIM-001`, `GUI-EXEC-TOOLCHAIN-PATH-001` | Confirmed: the desktop child environment is a closed key list (`child_env.ts`, `KRIYA_CHILD_ENV_KEYS`: `PATH`, `PYTHONDONTWRITEBYTECODE`, `HOME`, `KRIYA_STATE_DIR`). Environment prerequisite and an owner PATH decision; intentional contract today |
+| `GUI-LAUNCH-RETENTION-001` | Confirmed current (control: no `launch` in `control/retention.py`). Small fix at the retention owner |
+| `GUI-RUN-ATTRIBUTION-001` | Confirmed current: the `runs` table has no workspace; attribution is the evidence manifest's identity (`application/history.py`). Same missing owner as `HISTORY-STATE-DIR-PER-PROJECT-001` |
+| `FINDER-ALIAS-BLIND-001` | Partly confirmed: `tests/architecture/access_sites.py` resolves `asname` in one finder (the HTTP-module finder) only; the working-directory, environment and home finders were not re-read. Test-harness enforcement gap, authoritative in OI-01 |
+| `DOCKER-BIND-SOURCE-REFUSED-AFTER-PATHNAME-RECREATION-001`, `WAVE8-DOCKER-VIEW-CLEANUP-RACE-001`, `CERT-OWNER-DEATH-MASK-SCRATCH-001`, `DEMO-RESET-RM-WORKSPACE-RACES-DOCKER-RELEASE-001` | One family: Docker Desktop holds or refuses a path around a contained gate. Product behaviour is fail-closed and cleanup is not gate truth (`FR-A5-18`, `FR-A5-19`). Not characterizable under the freeze without a loaded real daemon; the registry's measurements stand. Monitored environment items, plus optional hygiene |
+| `RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001`, `WAVE8-PY-RUNTIME-ONLY-VENV-BOOTSTRAP-001`, `WAVE8-DOCKER-REFUSAL-BECOMES-FALSE-VERDICT-001` (handed over by A3) | One owner, `tools/validate.py::_ensure_project_venv_impl`, with bounded creation attempts and the typed `PYTHON_ENVIRONMENT_UNAVAILABLE` (`TRACED` at the owner). The mechanisms the rows leave open (why one gate's venv lacked a dependency; a daemon refusal read as a False verdict) need a real container run and are **not characterizable under the freeze**; they do not block other slices. The architectural statement stands without them: an environment refusal must be a typed environment verdict, never a gate verdict (Phase C, with the failure-class table) |
+| `KERNEL-STAGING-WORKSPACE-BASE-ESCAPES-001` (handed over by A3) | Pinned by a committed test as today's behaviour: refused by the guarded commit, untyped (`FR-A5-05`). Fail closed; a typed refusal is the correction |
+| `GOAL-STATED-JAVA-VERSION-TOOLCHAIN-AUTHORITY-001` (handed over by A4) | A4's reading stands. A5 adds the authority candidates the row asks about: a configuration field would be classified by SEC-009 (operator authority), a requirement-contract field by slice A2's contract authority; a goal-text regex is neither. Owner policy choice; a genuine future feature until a project needs it |
+| `PRODUCT-CANONICAL-SPELLING-LISTING-001`, `PRODUCT-GIT-SUBPROCESS-COST-001` | Performance observations on identity-bearing or membership-bearing functions (`canonical_spelling`, the Git reads of `AUTH-A5-02`). No correctness fact. Future performance work on production measurement only |
+| `PROCESS-DIAGNOSTIC-PROBE-REAL-AUTHORITY-HOME-001` | Confirmed as a process rule (`BYP-A5-16`): the authority home is independent of the state directory by design |
+| `CERT-HISTORICAL-FIXTURE-EVIDENCE-EXPOSURE-001` | The guard test and the manifest exist at the baseline (files present; not run). The remaining question (published history) is an owner disposition outside the architecture |
+
+### Open items A5 hands on
+
+- A6: STAGE-GENERATION and the Developer request (unchanged from A4), now also: where retrieval hits and skill text
+  of a foreign index or a shared skill would sit in that request (`GAP-A5-01`); whether the run budget is part of
+  qualification identity (`GAP-A5-04`); the class-D environment evidence of `FR-A5-18`; `GAP-A4-04` per the owner's
+  ruling (full context path before any downgrade).
+- Phase B: survival of unit checkpoints across a sandbox reset (`BYP-A5-14`); the split of `GAP-A3-04` including the
+  launch record's digest; `GAP-A3-05` classification.
+- Phase D (owner policy), added by A5: the alternative in `GAP-A5-03` (A or B); whether CI workflow and Git attribute
+  files join the protected project-input class (`GAP-A5-02`); whether the desktop's Setup profile should set the
+  requirement policies (`AUTH-A5-11`); `GOAL-STATED-JAVA-VERSION-TOOLCHAIN-AUTHORITY-001`; per-project history
+  ownership (`HISTORY-STATE-DIR-PER-PROJECT-001`).
+
+### Documents reconciled in A5
+
+| ID | Document | Claim | Classification (label) |
+|---|---|---|---|
+| DOC-A5-01 | `handover/claude-context/kernel-mcp-and-tool-authority.md` | Tool governance, MCP invocation and capability authority, the TOOL lifecycle | CURRENT AND CONSISTENT for every fact A5 read in code (`TRACED`), except `DOC-A5-02` |
+| DOC-A5-02 | The same note, TOOL-001 honest security statement ("every planned file write is refused (OI-128)") | Planned writes | PARTIALLY CURRENT: true for the filesystem tool; an MCP tool of a write-granted server is a planned write path into the owner workspace (`GAP-A5-03`) |
+| DOC-A5-03 | `handover/claude-context/config-resolution-and-authority.md` | Layering, SEC-009 classes, the state-location authority, private stores | CURRENT AND CONSISTENT for what A5 read. It states that the packaged defaults resolve against the installation directory and does not state the consequence for the memory and skills stores (`GAP-A5-01`) |
+| DOC-A5-04 | Comments in `workflow/worktree.py::create_git_worktree` ("silently falling back to the unisolated real workspace ... at this function's only caller") | Sandbox failure behaviour | STALE: the function returns a sandbox or raises, and it has four callers (`development_loop.py`, which also asserts that the result is not the workspace and refuses "to generate directly in the application workspace"; `enforce_loop.py`; `best_of_n.py`; `production_doctor.py`). Comments in `file_resolution.py` and `context_source.py` repeat the fallback wording |
+| DOC-A5-05 | `docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md` | Execution surface and containment design | HISTORICAL PROPOSAL, IMPLEMENTED THEN SUPERSEDED: its own header records the S7 supersession (containment mandatory, no host opt-out); its inventory rows describe the pre-containment state (for example ShellTool with `os.getcwd()` and unrestricted network). Not authoritative for AS-IS; the subsystem notes are |
+| DOC-A5-06 | Registry `DESKTOP-PROJECT-RETRIEVAL-STATE-ISOLATION-001` ("Unknown: whether any supported product path can populate or read that shared location across different projects") | Reachability | SUPERSEDED BY THIS CHARACTERIZATION: reachable, with the exact writers and readers (`GAP-A5-01`). The registry is not edited here |
+| DOC-A5-07 | `kriya/application/project.py` `CONFIG_NOT_APPLIED` ("a kriya.yaml inside the opened folder is not applied to these reads") | Which configuration desktop reads use | CURRENT for reads (the cockpit's own configuration); a launched run uses the folder's configuration (`_launched_generate` runs in the workspace). Both statements are needed to read `AUTH-A5-09` |
+| DOC-A5-08 | `DOC-A4-07` (config docstring "TOOL-tagged subtasks are refused outright"), handed over | Enforce and TOOL subtasks | Confirmed STALE (`AUTH-A5-06`, `SM-A5-02`) |

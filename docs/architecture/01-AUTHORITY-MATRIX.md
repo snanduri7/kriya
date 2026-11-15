@@ -1145,3 +1145,396 @@ All three run each unit through the same primitive, `workflow.py::WorkflowEngine
 11. **Requirement ownership.** `AUTH-A4-15`.
 12. **Aggregate approval authority (owner question on `GAP-A3-05`).** None in this slice's scope: plan acceptance
     involves no person (`AUTH-A4-10`), and the size trigger has one reader, per unit (`BYP-A4-10`).
+
+## Slice A5 - workspace, root, tools, MCP, mutation, private state, configuration (2026-11-15)
+
+AS-IS at the baseline. Rows carry the full field set of the documentation addendum. Probe references (`P1` to `P8`)
+are `evidence/a5/a5_probe.py` with its output in `evidence/a5/a5_probe_output.txt`; "control" means a search in
+`evidence/a5/check_citations_a5.py` (output beside it). A committed test is named where one pins the fact.
+
+Three roots are distinct in the code and the rows keep them apart:
+
+| Root | What it is | Owner |
+|---|---|---|
+| operating root | The directory the run was invoked in and operates on (`workspace_path`) | the caller (CLI working directory; the desktop passes the opened folder as the child's working directory, `ui/standalone/src/main/execution_host.ts`) |
+| authority root | The repository root that workspace belongs to: every workspace-scoped authority is keyed by it | `context/workspace_identity.py::authority_root` |
+| candidate root | The sandbox a run edits (`<workspace>/.kriya/worktree` or the scoped snapshot) | `workflow/worktree.py::create_git_worktree` |
+
+A fourth location is not a root of the project at all and is the subject of the mandatory row: the **installation
+directory** (`config/environment.py::kriya_install_dir`), against which the packaged defaults `paths.skills` and
+`paths.memory` resolve (`AUTH-A5-09`).
+
+### AUTH-A5-01 - Which workspace is this, and what is its identity? (root binding)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The canonical spelling of the workspace, the repository root it belongs to, and the identity every workspace-scoped record is keyed by |
+| Owner | `context/workspace_identity.py`: `canonical_workspace`, `find_repository_root`, `authority_root`, `workspace_identity` |
+| Why this owner | D-001 (owner decision 2026-10-23, in the docstring): one repository, one authority; `<repo>` and `<repo>/sub` share the run lock, RunRecords, launches, approvals and recovery |
+| Authoritative inputs | The filesystem only: the real path re-spelled as stored (`platform/filesystem_semantics.py::canonical_spelling`) and the nearest `.git` entry at or above it. The search never ascends through a Kriya-owned directory (`_KRIYA_OWNED_DIRECTORIES`: `.kriya`, `gate-views`, `gate-caches`) |
+| Evidence allowed | A `.git` entry (directory, or the file of a linked work tree or submodule) |
+| Evidence forbidden | A Git process (none is run here), a name, the configuration, any model text |
+| Model role | None |
+| Human role | Chooses the folder (CLI working directory; the desktop's open-folder or `workspace.create`, `application/project.py::ProjectService.create`: one `os.mkdir`, nothing scaffolded) |
+| Persisted state | The identity is derived, never stored on its own: `sha256(authority_root)`. It is embedded in ownership metadata of control documents (`ownership_metadata`), in the file names of the configuration approval (`authority_approval.py::default_local_approval_path`), the MCP approval store (`mcp/invocation_approval.py::default_local_approval_path`) and the launch records (`control/launch.py`), and in attempt-evidence manifests |
+| State transitions | None (pure functions) |
+| Downstream consumers | Run lock and RunRecords, checkpoints (`AUTH-A1-09`), launches, approvals, recovery, history attribution (`application/history.py`), configuration discovery (`AUTH-A5-10`), root classification (`AUTH-A5-02`) |
+| Mutations authorized | None |
+| Mutations forbidden | - |
+| Failure / UNKNOWN | A path in no repository is its own root (not an error). A document recorded under another identity is refused (`validate_ownership`: `WORKSPACE_OWNERSHIP_MISSING` / `_MISMATCH`). The pre-PLAT-017 identity is still accepted on read and never written (`legacy_workspace_identity`, `workspace_identities`) |
+| Retry / recovery | None |
+| Checkpoint / resume | A linked work tree and a scoped snapshot hold their own `.git` entry, so `authority_root(<candidate root>)` is the candidate root itself: a unit of an enforce run, which operates inside the plan sandbox, keys its stage checkpoints by the sandbox, not by the owner workspace. This answers the open question of `BYP-A1-12` for the identity (`TRACED`); whether such a checkpoint survives the sandbox reset of the next run (`git clean -fd` keeps ignored paths only) was not established and goes to Phase B |
+| Audit emitted | The identity in every record named above |
+| Alternate paths | `kriya/mcp/mcp.py` binds an MCP server's workspace to `os.path.realpath(os.getcwd())`, not to `authority_root` or to the run's `workspace_path` (`BYP-A5-03`). Two projects have different identities (`MEASURED` P7); a renamed or moved folder is a new identity and its approvals and history do not follow it (by construction, not measured) |
+| Invariant | Every workspace-scoped authority of one repository is keyed by one root; a Kriya-owned directory never takes the identity of the repository around it |
+| Negative control | Control `os.getcwd()` lists every module that reads the process directory; `kriya/mcp/mcp.py` and `kriya/mcp/capability.py` are among them |
+| AS-IS evidence | `TRACED`; `MEASURED` P7 |
+| Required contract | None differing, except that the MCP workspace binding should be this owner's (Phase C, with `GAP-A5-03`) |
+| Limitation | `platform/filesystem_semantics.py` was read at `canonical_spelling` only. `PRODUCT-CANONICAL-SPELLING-LISTING-001` (cost of the per-component listing) is confirmed as a design property, not measured again |
+
+### AUTH-A5-02 - Which files belong to the workspace? (membership; the NO_GIT rule)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether a membership authority exists for the operating root, and the set of member paths |
+| Owner | `repository/bound_tree.py`: `_root_class` / `workspace_root_class` (the class), `bound_tree_paths` / `bound_tree_declaration` (the set), `admit_workspace_for_mutation` (the admission of a folder with no repository) |
+| Why this owner | W3-3 (D-001): the repository's own listing is the only membership; "the filesystem is never a membership authority" (docstring) |
+| Authoritative inputs | `authority_root` (`AUTH-A5-01`); Git's own answer for the work tree (`work_tree_root`) and its listing (`visible_repository_paths`: tracked plus untracked-not-ignored) |
+| Evidence allowed | Git agreeing with D-001: `identity_key(git top level) == identity_key(authority_root)` |
+| Evidence forbidden | A directory name, a basename list, an `os.walk`. A Git refusal is never read as "no repository" |
+| Model role | None |
+| Human role | For a populated folder with no repository: runs `git init` and commits a baseline (the refusal text says so) |
+| Persisted state | None. A candidate sandbox records its own membership once, at creation (`AUTH-A5-03`) |
+| State transitions | `SM-A5-01` |
+| Downstream consumers | Sandbox creation, the brownfield baseline, checkpoint tree identity, gate views, the static-analysis scope, closers that count files |
+| Mutations authorized | None by this owner. `NO_GIT_REPOSITORY` and empty admits the greenfield bootstrap (`MUT-A5-01`) |
+| Mutations forbidden | Committing a user's existing files for them (a populated non-Git folder is refused before the contract is compiled) |
+| Failure / UNKNOWN | Typed `BoundTreeError`: `BOUND_TREE_UNAVAILABLE` (Git cannot answer, answers differently from D-001, an unresolvable identity, an unlistable folder), `BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY`, `BOUND_TREE_OPERATING_SCOPE_EXCLUDED`, `BOUND_TREE_IDENTITY_MISMATCH`. UNKNOWN fails closed (`FR-A5-01`) |
+| Retry / recovery | None; a mid-run membership failure ends the run as `verification_authority_unavailable` (registry `CLI-ADMISSION-REFUSAL-TEXT-MIDRUN-AUTHORITY-UNAVAILABLE-001`: the CLI sentence for that category still says no model was called, `kriya/cli.py::_echo_admission_refusal`, `TRACED`) |
+| Checkpoint / resume | Not persisted; recomputed |
+| Audit emitted | The refusal's reason code in the result |
+| Alternate paths | The registry's own census (`DIRECTORY-NAME-PRUNING-P3-SIBLING-SITES-001`) lists sites that still decide a membership question by directory name and are not result truth. Re-confirmed for two of them only: `code_intel/service.py::discover_source_files` falls back to an `os.walk` that prunes dot-directories when `git ls-files` fails, and `analyzer.py::index_repository` walks with its own ignore rules (`BYP-A5-08`) |
+| Invariant | Membership is the repository's or nothing; a refusal is never an absence |
+| Negative control | Not run in A5 (the W3-3 census is cited, not repeated) |
+| AS-IS evidence | `TRACED` |
+| Required contract | None differing for result truth. The sibling sites are a P3 correctness pass (registry) |
+| Limitation | `repository/git.py` and `snapshot.py` were not read; `GIT-ICASE-PATHSPECS-UNQUALIFIED-001` stays UNKNOWN on this host by the registry's own account (`platform/__init__.py` records it beside `GIT_STRIPPED_ENVIRONMENT`) and needs a case-sensitive filesystem |
+
+### AUTH-A5-03 - Where does a candidate live, and what is in it? (candidate isolation)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The directory a run edits and verifies in, and the candidate's own member set |
+| Owner | `workflow/worktree.py::create_git_worktree` (creation), `candidate_member_declaration` / `candidate_member_paths` (members) |
+| Why this owner | The one sandbox builder; the direct executor and the enforce loop both call it |
+| Authoritative inputs | The workspace; Git's top level for it; the repository HEAD; the workspace's uncommitted changes |
+| Evidence allowed | A linked work tree at `<workspace>/.kriya/worktree` when the workspace is the repository's top level; a scoped snapshot sandbox (`_create_scoped_snapshot_sandbox`, built from the bound-tree membership) when the workspace is a subfolder of a larger repository |
+| Evidence forbidden | The enclosing repository's other content (the nested case exists because checking the owner repository out contaminated a subfolder project, comment in the function) |
+| Model role | None |
+| Human role | None |
+| Persisted state | The sandbox directory; Git's work-tree registration; in a scoped snapshot, a synthetic `.git` holding `kriya-candidate-membership.json` and the append-only `kriya-candidate-writes` |
+| State transitions | absent -> created; registered and present -> reset (`checkout -f` of the resolved HEAD, `git clean -fd`), then the workspace's uncommitted changes are copied in (`_sync_uncommitted_changes_into_worktree`) and the materialized tracked bytes are proven equal to the workspace's (`_verify_materialized_tracked_bytes`) |
+| Downstream consumers | Every write of a unit (`AUTH-A5-04`), every gate, the commit service (slice A3) |
+| Mutations authorized | `MUT-A5-01`, `MUT-A5-02` |
+| Mutations forbidden | Running a repository's content filters or hooks (`refuse_repository_content_filters`, `_HOOKS_DISABLED`); nesting a sandbox in a sandbox (`NestedWorktreeError`) |
+| Failure / UNKNOWN | The function returns a sandbox path or raises (typed `RepositoryContentFilterRefused` / `BoundTreeError`, else `ValueError` / `RuntimeError`). It has no branch that returns the workspace itself. This closes `BYP-A3-07` as far as this function is concerned: the commit service's `candidate_root == workspace_path` branch is not reachable from its return value (`TRACED`, every `return` read) |
+| Retry / recovery | A reused sandbox is reset to HEAD on every creation |
+| Checkpoint / resume | See `AUTH-A5-01` |
+| Audit emitted | `_audit_git_write` for the bootstrap commits |
+| Alternate paths | Comments in the function still speak of "falling back to the unisolated workspace"; no such return exists in it (`DOC-A5-04`). Writers into the sandbox other than a unit's batch are enumerated in `03-MUTATION-AUTHORITY.md` (`MUT-A5-03..05`): the pom correction and the self-correction loop, both through the write gate; no tool and no MCP server writes there (`BYP-A5-03` writes the owner workspace instead) |
+| Invariant | A run never edits the owner workspace before its commit transaction (`PRODUCTION_FIXED_RUNTIME_GUARANTEES`: `candidate_isolation_fail_closed`) |
+| Negative control | Control `AuthorizedFileWriter(`: four writing sites, all rooted at a candidate root or DENY_ALL |
+| AS-IS evidence | `TRACED` |
+| Required contract | None differing |
+| Limitation | The scoped-snapshot builder and the sync function were read at their signatures and docstrings only. `KERNEL-STAGING-WORKSPACE-BASE-ESCAPES-001`: a Developer edit whose base file exists in the workspace but not in the sandbox is refused by the guarded commit with an untyped `BatchCommitError`; pinned by `tests/test_candidate_transaction.py::test_a_whole_file_replacement_based_on_the_workspace_file_is_refused_by_the_guarded_commit` (committed, not re-run in A5). Fail closed, untyped: `FR-A5-05` |
+
+### AUTH-A5-04 - May model-directed content be written to this path? (the write gate)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether one target path may receive a workflow-originated content write |
+| Owner | `policy/filesystem.py::AuthorizedFileWriter.authorize` (real enforcement in every mode: `commit_batch` authorizes every item before the first write) |
+| Why this owner | MA4.16: the one content-write choke point once a root is known |
+| Authoritative inputs | The writer's roots (canonical, symlinks resolved), the target's canonical path, the control-object identities of the root, the unit's `allowed_write_relpaths` and `write_scope_mode`, the run's protected goal-file path |
+| Evidence allowed | Filesystem identity (`path_relation`, `path_identity`) |
+| Evidence forbidden | A lexical prefix; the path as the model spelled it |
+| Model role | Candidate generator: it names the path and supplies the bytes |
+| Human role | None at this gate (approval is slice A3) |
+| Persisted state | None |
+| State transitions | None; decisions in order: outside every root -> `PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS`; a trusted control path (`.git`, `.kriya` and their aliases) -> `TRUSTED_CONTROL_PATH_DENIED`; `DENY_ALL` scope -> `WRITE_SCOPE_DENY_ALL`; outside the unit's allowlist -> `FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE`; the goal file or an alias of it -> `GOAL_SOURCE_FILE_PROTECTED`; a narrow credential pattern (`_ENFORCEMENT_SENSITIVE_PATH_PATTERNS`) -> `SENSITIVE_PATH_DENIED`; else allow |
+| Downstream consumers | `candidate_transaction.py::_stage_candidate_writes` (the batch), `gate_orchestrator.py` (the pom correction), `self_correction.py`, `plugins/core_tools` `FilesystemTool` (planned calls, DENY_ALL) |
+| Mutations authorized | `MUT-A5-03..05` |
+| Mutations forbidden | The six refusals above |
+| Failure / UNKNOWN | `REQUIRE_APPROVAL` is treated as a denial (`_raise_if_denied`); an identity that cannot be established counts as an alias (fail closed) |
+| Retry / recovery | A denial raises `PolicyDeniedError` out of the batch; the attempt fails |
+| Checkpoint / resume | None |
+| Audit emitted | The `PolicyResult` in the exception; no separate record of an allow |
+| Alternate paths | **The gate knows the path classes above and nothing about what a path means to Kriya's next run.** `MEASURED` P5: it allows `kriya.yaml`, `kriya.yml`, `skills/<name>/rules.txt`, `skills/<new>/skill.yaml`, `.github/workflows/ci.yml`, `.gitignore`, `.gitattributes`; it denies `.kriya/control/*`, `.git/hooks/*`, `.env` and a path outside the root. So a candidate can carry the project's own Kriya configuration and workspace skills (`BYP-A5-01`, `GAP-A5-02`). Writers that do not pass this gate at all: every skill writer (`BYP-A5-02`), an MCP server with a write grant (`BYP-A5-03`), the stores of `AUTH-A5-09` |
+| Invariant | No workflow-originated content write lands outside the candidate root, on a control path or on a credential path |
+| Negative control | Control `AuthorizedFileWriter(` (the first run found two sites the draft had not listed: the facade `policy/authority.py::AuthorityPort.file_writer`, which has no caller, control `.file_writer(`; and the cockpit's `security_demonstration.py`, which only calls `authorize` over a disposable folder). Absent `kriya.yaml` in `policy/filesystem.py` |
+| AS-IS evidence | `TRACED`; `MEASURED` P5 |
+| Required contract | `GAP-A5-02` |
+| Limitation | P5 measures the gate's verdict. That a full run then carries such a file through approval and the commit into the owner workspace is `INFERRED` from the generic apply path (no path-specific exclusion was found by search in `kriya/workflow`, `kriya/policy`, `kriya/repository`); it was not exercised end to end |
+
+### AUTH-A5-05 - May this path be read at a model's request? (the read gate)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether one path may be read for a model-requested lookup |
+| Owner | `policy/filesystem.py::AuthorizedFileReader.authorize` / `raise_if_denied` |
+| Why this owner | DEV-INV-001: the read-side sibling of the write gate |
+| Authoritative inputs | The readable roots (owner workspace first, then the candidate), the canonical target, the same narrow credential patterns, the control-path rule, the hard-link census of the roots (`ReadableRootLinkCensus`) |
+| Evidence allowed / forbidden | As `AUTH-A5-04` |
+| Model role | Requester (Developer investigation verbs; a planned `filesystem`, `search`, `ast` or `git` read) |
+| Human role | None |
+| Persisted state | None |
+| State transitions | None |
+| Downstream consumers | `plugins/core_tools` (`_authorize_read_target`), `workflow/investigation.py` |
+| Mutations authorized / forbidden | None |
+| Failure / UNKNOWN | Typed denial; a hard link whose other names lie outside the roots is refused (`HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS`) |
+| Retry / recovery | None |
+| Checkpoint / resume | None |
+| Audit emitted | The denial |
+| Alternate paths | Readers that take a store path instead of a workspace path are outside this gate: `investigation.py` `find_symbol` / `find_callers` answer from `dependency_graph.db` (`AUTH-A5-09`). Kriya's own context construction reads workspace files directly; that is not a model-requested read |
+| Invariant | A model-requested read never leaves the roots and never returns a credential or control file |
+| Negative control | Not run in A5 (`tests/test_wave8_git_content_authority.py` and the DEV-INV tests are cited by the subsystem note, not re-run) |
+| AS-IS evidence | `TRACED` at the class and its callers |
+| Required contract | None differing |
+| Limitation | The class body below `authorize` was not read line by line |
+
+### AUTH-A5-06 - May a planned step run this tool? (planned-tool governance)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Whether a tool may be the subject of a model-authored (planned) call, and under which governance |
+| Owner | `tools/tool.py::resolve_planned_tool_governance`, rechecked in `authorize_model_authored`; the one entry is `execute_model_authored` |
+| Why this owner | S1 / S18: one resolution, projected to the Planner catalogue (`subtask_executor.py::plannable_tool_names`), enforced at plan validation and rechecked by the executor |
+| Authoritative inputs | The tool's class, the file that defines its `planned_governance` (closed table `_SHIPPED_PLANNED_DECLARATIONS`), the declared `ToolGovernance`, the run's autonomy mode |
+| Evidence allowed | A declaration made by a shipped class in its shipped file |
+| Evidence forbidden | A plugin's own declaration; a tool's description; the subtask's description or the Planner's rationale; the tool's name parsed as a string |
+| Model role | Candidate generator: `tool_name` and `tool_arguments` are model output |
+| Human role | Operator only: `kriya tools execute` is a separate authority and keeps `shell` and `validate_refactor` |
+| Persisted state | The TOOL subtask lifecycle in ControlState (`tool_started` -> effect -> `completed`, durable writes); the RunRecord's `tool_execution` for an operator run |
+| State transitions | `SM-A5-02` |
+| Downstream consumers | The enforce loop's TOOL branch (the only supplier of roots: control `tool_roots=`) |
+| Mutations authorized | A `READ_ONLY` tool: none. `FilesystemTool`: every planned write refused (`DENY_ALL`). `GOVERNED_SIDE_EFFECT` (`MCPTool` only): whatever the server does within its capability grant (`AUTH-A5-07`) |
+| Mutations forbidden | `shell`, `validate_refactor` (`TOOL_OPERATOR_ONLY`); a third-party plugin tool (`TOOL_MODEL_AUTHORITY_UNDECLARED`); a tool that asks for confirmation under human-in-the-loop (`TOOL_CONFIRMATION_UNSUPPORTED`; `MCPTool` does not ask: control `requires_confirmation` is declared by `BaseTool` and `ShellTool` only) |
+| Failure / UNKNOWN | An unreadable declaration is `TOOL_GOVERNANCE_INVALID`; no configuration means the strictest mode. A failure before `_run_model_authored` is `PROVEN_PRE_EFFECT`; any failure after it is `MAY_HAVE_EFFECTED`, terminal, never retried (`TOOL-RUNPHASE-PRE-EFFECT-DENIAL-TERMINAL-001`: intentional contract) |
+| Retry / recovery | None for a TOOL subtask; an interrupted one is `needs_review` (`UNRESOLVED_TOOL_EXECUTION`) |
+| Checkpoint / resume | A durably completed TOOL subtask is never run again; its authority is revalidated without effect (`revalidate_model_authored`) |
+| Audit emitted | The subtask result with reason codes; the policy decision record for MCP |
+| Alternate paths | The direct and milestone shapes have no TOOL subtasks at all. Under enforce the governance of an MCP call rests entirely on `AUTH-A5-07` |
+| Invariant | A planned call runs only a governed shipped tool, at most once per subtask, with the arguments the validated plan declared |
+| Negative control | Control `planned_governance` (declared in `kriya/mcp/mcp.py`, `plugins/core_tools/__init__.py`, `plugins/core_tools/validation_tool.py`); control `tool_roots=` |
+| AS-IS evidence | `TRACED` (the subsystem note `handover/claude-context/kernel-mcp-and-tool-authority.md` is CURRENT for these facts, `DOC-A5-01`) |
+| Required contract | None differing, except the statement of `BYP-A5-03` |
+| Limitation | `tests/test_s18_planned_tool_governance.py` and the TOOL-001 tests were not re-run |
+
+### AUTH-A5-07 - May this MCP tool be invoked, and what can its server touch?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | (a) whether one `tools/call` may be dispatched; (b) the filesystem and network authority of the server process |
+| Owner | (a) `policy/execution.py::ExecutionPolicy._check_mcp_invocation`, reached only through `mcp/mcp.py::MCPTool._decide_invocation_authority`; (b) `mcp/containment_adapter.py::map_capability_profile_to_containment` over the profile bound in `MCPManager.start_all` |
+| Why this owner | TOOL-002 / TOOL-003: invocation authority and capability authority are separate decisions, each with one owner |
+| Authoritative inputs | (a) the structured identity (server, tool, schema digest), the capability-profile digest, the workspace identity, the durable approval read fresh from `<MCP approval home>/<workspace identity>.json`; (b) `mcp.<server>.capabilities` (SEC-009 `SECURITY_AUTHORITY`, so operator-approved, `AUTH-A5-10`), the protected authority paths (`AUTH-A5-08`) |
+| Evidence allowed | An operator's `kriya mcp approve` record whose binding digest matches all five fields |
+| Evidence forbidden | The server's description, annotations, results; the call's arguments; a configuration approval (SEC-009 approval never authorizes an invocation); a flattened display name |
+| Model role | Candidate generator of the call (tool name and arguments) under enforce |
+| Human role | Operator: approves the configuration (SEC-009) and each tool identity (TOOL-002), both outside the workspace |
+| Persisted state | The approval store; the container label carrying the profile digest |
+| State transitions | Server: not started -> contained and started, or refused before any process (`ExternalExecutionRefused`, `MCPContainmentUnsupportedError` for `explicit_destinations`, `MCPProtectedAuthorityGrantError`). Call: decide -> dispatch |
+| Downstream consumers | `MCPTool._run`; the resume revalidation |
+| Mutations authorized | Inside the container: the workspace mount when `workspace_write` is granted (read-write), each `additional_write_paths` entry |
+| Mutations forbidden | A grant that is, contains or lies inside a protected authority path refuses the whole mapping (no masking: owner-accepted limit, `MCP-PROTECTED-AUTHORITY-GRANT-001`) |
+| Failure / UNKNOWN | DENY, REQUIRE_APPROVAL and a raising policy engine all mean no `tools/call`; an unreadable approval store grants nothing |
+| Retry / recovery | None |
+| Checkpoint / resume | The decision is re-made on resume without dispatch |
+| Audit emitted | `PolicyDecisionRecord` with the tool identity, the profile identity and the containment state (required / active / backend) |
+| Alternate paths | The workspace an MCP server is given is `os.path.realpath(os.getcwd())` in `MCPManager.start_all` and in the approval resolver: the **owner** workspace, mounted for the lifetime of the kernel, whatever root the run edits. `MCPTool.authorize_model_invocation` returns its arguments unchanged and never reads the invocation's roots (absent `invocation.roots` in `mcp.py`). A planned MCP call with a `workspace_write` grant therefore changes the owner workspace in place, outside the candidate (`BYP-A5-03`, `GAP-A5-03`) |
+| Invariant | No `tools/call` without a current, exactly bound operator approval; no server outside an isolating backend |
+| Negative control | Absent `invocation.roots` in `kriya/mcp/mcp.py`; control `os.getcwd()` |
+| AS-IS evidence | `TRACED` |
+| Required contract | `GAP-A5-03` |
+| Limitation | `mcp/capability.py`, `lifecycle.py` and the OCI backend were not read; no MCP server was started (the real-OCI tier is cited, not run) |
+
+### AUTH-A5-08 - Which paths are Kriya's own authority state, and who may touch them?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The set of protected authority paths for a workspace, and the access mode of Kriya's private stores |
+| Owner | `policy/protected_authority_paths.py::protected_authority_paths` (the set); `platform/private_store.py` (modes: directories 0700, files 0600, another owner's artifact or a symlink refused, `PrivateStoreUnsafeError`); `policy/filesystem.py::is_trusted_control_path` (the write and read gates' view) |
+| Why this owner | One canonical set, consumed by the MCP grant check and by containment; "a path added to the canonical set is protected with no MCP change" (subsystem note) |
+| Authoritative inputs | The workspace root; the authority homes' own resolvers (configuration approval home, MCP approval home and the others in `AUTHORITY_HOMES`); an explicit trust file |
+| Evidence allowed / forbidden | Filesystem identity; never string logic |
+| Model role | None |
+| Human role | The operator's homes are the operator's: `KRIYA_AUTHORITY_HOME`, `KRIYA_MCP_APPROVAL_HOME`, `KRIYA_TRUST_FILE` |
+| Persisted state | `<workspace>/.kriya/control`, `<workspace>/.kriya/checkpoints`; `~/.kriya/authority/<workspace identity>.json`; `~/.kriya/authority/launches/<workspace identity>/<id>.json`; `~/.kriya/mcp_approvals/<workspace identity>.json`; the state directory (`AUTH-A5-09`) |
+| State transitions | None |
+| Downstream consumers | The write and read gates, `containment_adapter.refuse_grants_exposing_protected_authority`, the OCI masks |
+| Mutations authorized | Control state through `control_store.write_control_file`; approvals through the `kriya authority` and `kriya mcp` commands and the desktop configuration operations |
+| Mutations forbidden | Any model-directed write (`TRUSTED_CONTROL_PATH_DENIED`, `MEASURED` P5); an approval store inside the workspace (`validate_trust_path_outside_workspace`, `validate_store_path_outside_workspace`) |
+| Failure / UNKNOWN | An authority home that resolves inside the workspace: `ProtectedAuthorityPathsUnresolvable`; the MCP mapping then refuses (`MCP_PROTECTED_AUTHORITY_UNRESOLVABLE`) |
+| Retry / recovery | None |
+| Checkpoint / resume | - |
+| Audit emitted | - |
+| Alternate paths | The authority home does not follow `KRIYA_STATE_DIR` (`authority_approval.py::_authority_home_dir`: `KRIYA_AUTHORITY_HOME`, else `~/.kriya/authority`), so a probe or test that isolates only the state directory still writes launch records into the real home (registry `PROCESS-DIAGNOSTIC-PROBE-REAL-AUTHORITY-HOME-001`: confirmed by the code, a process rule, not a product defect; the A5 probe sets its own authority home for this reason). Launch records are never pruned (absent `launch` in `control/retention.py`; `GUI-LAUNCH-RETENTION-001` confirmed current). The skills and memory locations are **not** in the protected set and not private stores (`AUTH-A5-09`) |
+| Invariant | A repository can neither ship nor reach an approval of itself |
+| Negative control | Absent `launch` in `kriya/control/retention.py` |
+| AS-IS evidence | `TRACED`; the per-project store paths `MEASURED` P7 |
+| Required contract | None differing |
+| Limitation | `private_store.py`, `control_store.py` and the OCI mask code were not read (the subsystem note `config-resolution-and-authority.md`, "Private stores", is cited as written); `CERT-OWNER-DEATH-MASK-SCRATCH-001` and the Docker cleanup rows are environment residue of that mask code, not traced |
+
+### AUTH-A5-09 - Where does Kriya's state live, and to which project does each store belong? (mandatory row)
+
+The owner's proof standard for `DESKTOP-PROJECT-RETRIEVAL-STATE-ISOLATION-001` asks for nine facts per store. The
+table gives them; the row below it carries the authority fields.
+
+| Store | Storage path (default) | Namespace key | Write key | Read / lookup key | Fallback, default or global lookup | Legacy / migration path | Reopen / resume | Desktop vs CLI |
+|---|---|---|---|---|---|---|---|---|
+| Run control: RunRecords, ControlState, plan document, checkpoints | `<authority root>/.kriya/control`, `.kriya/checkpoints` | The folder itself, plus `workspace_id` ownership metadata checked on read | workspace path | workspace path | None | Legacy nested control store (not read) | Per project by construction | Same |
+| Configuration approval | `<authority home>/<workspace identity>.json` | workspace identity in the file name and in the record | same | same; else an explicit trust file | The trust file is operator-supplied and applies to whatever workspace it is used with (bound by the set digest) | - | Follows the path identity | Same store |
+| MCP invocation approval | `<MCP approval home>/<workspace identity>.json` | workspace identity + tool identity + profile digest | same | same, read fresh per call | None | - | Follows the path identity | CLI only (`kriya mcp`) |
+| Launch records | `<authority home>/launches/<workspace identity>/<id>.json` | workspace identity | same | same | None | - | Never pruned | Desktop launches only |
+| Run history (`traces.db`), attempt evidence, model runtime records | State directory: `KRIYA_STATE_DIR` > `paths.state` > `~/.kriya/state` | **None in the `runs` table.** A run belongs to a workspace only through its evidence manifest's `workspace_identity` | run id | The desktop history filters by the manifest's identity; a run with no manifest is `unattributed` and shown for no workspace (`application/history.py`) | One state directory for every project (`MEASURED` P7: same for A and B); a window started with another `KRIYA_STATE_DIR` reads another history (`HISTORY-STATE-DIR-PER-PROJECT-001`, confirmed) | `kriya traces --migrate-legacy` copies a pre-move database once | A window pins a history snapshot (`HISTORY-SNAPSHOT-STALE-ON-REOPEN-001`, not re-traced) | The desktop passes `KRIYA_STATE_DIR` through only when the operator set it (`child_env.ts`) |
+| Code index: `dependency_graph.db` (legacy graph tables and the structural `ci_*` tables), `vector_index.db` | `paths.memory`; packaged default `./memory` resolved against the **installation directory** | **None.** Rows are keyed by repository-relative path; the manifest holds the embedding fingerprint, the structural identity and a `repository_revision`, and no root, identity or path of the indexed repository (`MEASURED` P2: columns and manifest keys) | relative path | relative path, symbol name, embedding similarity | **The default is global**: every project without its own `paths.memory` resolves the same directory (`MEASURED` P1: two bare folders and a Project Setup folder) | None | The store outlives every run; whichever project indexed last owns it | Same resolution. Writers differ: see the row below |
+| Release-date cache `knowledge_cache.db` | `paths.memory` | None (ecosystem, package, version) | package coordinate | package coordinate | Global by default | Columns added in place | - | Same |
+| Learned web knowledge `web_knowledge.db` | `paths.memory` | None | embedding of fetched text | embedding of the goal | Global by default (`MEASURED` P7: same path for A and B) | - | - | Same; written only when web lookup is enabled |
+| Skills: folders, rules, provenance, conflict registry, staged facts | `paths.skills`; packaged default `./skills` resolved against the installation directory; plus `<cwd>/skills` when `skills.load_cwd` | The folder name. `auto-<basename of the workspace>` for staged run facts (`stage_apply.py`, `repo_slug`): two projects with the same folder name share it | skill name | folder name (knowledge gate), tags and text (selection, slice A4) | **Global by default** (`MEASURED` P1). The engine also loads the installation library whenever `skills.load_global` | - | Under enforce a run shadow isolates the run's writes until commit (slice A4) | Same |
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | Which location each store uses, and which project its content belongs to |
+| Owner | Location: `config/resolution.py::resolve_config_state` for `paths.*` (anchored to the directory of the file that set the value; the packaged default to `KRIYA_INSTALL_DIR`), `core/state_paths.py` for the state directory. **Project attribution of the retrieval, knowledge and skill stores: no owner.** No module assigns, records or checks one |
+| Why this owner | Historical: the packaged defaults predate the desktop; `./skills` in the installation is the shipped skill library, and `./memory` was resolved the same way |
+| Authoritative inputs | The effective configuration; for the state directory the environment variable |
+| Evidence allowed | For control state and approvals: the workspace identity. For the stores under `paths.memory` and `paths.skills`: nothing identifies the project |
+| Evidence forbidden | - |
+| Model role | Consumer: retrieval hits, goal facts, skill text and learned references enter Planner and Developer requests (slices A4, A6) |
+| Human role | Sets `paths.memory` / `paths.skills` in the project's `kriya.yaml` to make them project-local (a relative value inside the project is `REPOSITORY_SAFE`). Project Setup does not write them (`MEASURED` P1: the file has no `paths` section; absent `"paths"` in `application/project_init.py`) |
+| Persisted state | The stores of the table |
+| State transitions | `SM-A5-04` |
+| Downstream consumers | Readers of the code index: the analysis stage (`stage_analysis.py`, when `vector_index.db` exists), `graph_retrieval.py` (`retrieve_graph_context`, the localization helper), `goal_facts.py::developer_goal_facts`, `plan_targets.py`, `candidate_transaction.py`, `enforce_loop.py`, `edit_feasibility.py`, `generation_service.py`, `investigation.py` (`find_symbol`, `find_callers`), `triage.py` (blast radius), `process_boundary.py` and `gate_orchestrator.py` (class locations), `production_doctor.py` (control `paths.memory` lists them all) |
+| Mutations authorized | `MUT-A5-09..13` |
+| Mutations forbidden | A **new skill** in the installation's skills directory from another project's run (`SkillEngine.new_skill_refusal`, enforced by `create_skill` and asked by the analyzer's conventions skill only). Nothing forbids any other write there |
+| Failure / UNKNOWN | An absent or empty index reads as "no index" and the run proceeds without retrieval. A populated index of **another** project reads as this project's index (`MEASURED` P2, below). There is no "this index is not mine" state |
+| Retry / recovery | None |
+| Checkpoint / resume | The memory and skills paths are part of the configuration fingerprint a checkpoint binds (comment in `control/checkpoint.py`); the stores' content is not |
+| Audit emitted | `retrieval.*` run events; the trace row's `retrieved_chunks` (`control/trace.py`) |
+| Alternate paths | Who can populate the shared code index: `kriya analyze` (`cli.py`) in any folder whose configuration does not set `paths.memory`, and `autonomy.auto_index_missing_dependency_graph` (`workflow.py::_ensure_repository_indexed`), which is off by default and `REPOSITORY_SAFE`, so a project's own `kriya.yaml` may turn it on (control `index_repository(cfg`: these two callers only). The desktop has no indexing operation (absent `index_repository` under `kriya/kup`, `kriya/application`, `kriya/client`). So a desktop-only installation with the packaged defaults never populates the index, and a machine where `kriya analyze` was run once in any unconfigured folder has a populated global one |
+| Invariant | REQUIRED and not held: state or retrieval belonging to project A is never returned, written or reused for project B through any explicit, fallback, default, global, legacy or missing-key path |
+| Negative control | Absent `workspace` in `code_intel/store.py` and `memory/learned_knowledge.py`; absent `workspace_id` in `memory/vector.py`; the directory-level absences above |
+| AS-IS evidence | `MEASURED` P1, P2, P7, P8; `TRACED` for the reader and writer lists |
+| Required contract | `GAP-A5-01` |
+| Limitation | The registry's own measurement (ten desktop runs with no `retrieval.*` event; an install-tree database with no `files` rows) was not repeated. Which reader created that empty database was not traced; at least one reader opens `DependencyGraph(db_path)` on a path it did not first check (the class-location index in `gate_orchestrator.py`), and SQLite creates a missing file on open, so a read can create the file in the installation tree (`INFERRED` for the measured file) |
+
+What project B reads once project A has been indexed into the location both resolve (`MEASURED` P2, a deterministic
+embedder, no model):
+
+| Reader, called for project B | Result |
+|---|---|
+| `DependencyGraph.has_indexed_files()` (the auto-index "already indexed" test) | True: B is never indexed, A's index stands in for it |
+| `DependencyGraph.find_symbol_locations("AlphaSecretService")`, `get_class_symbol_locations()` (investigation verbs; the duplicate-type gate) | A's file `src/alpha_secret.py` |
+| `open_code_intelligence(B, ...)` | A service: a "baseline exists" for B. Its `find_symbol` without `current_view()` returns A's symbol; with `current_view()` it returns nothing of A and B's own symbols (the overlay shadows every stored path that B does not hold) |
+| `retrieve_graph_context(goal, B, ...)` | `matched` True, `matched_files` = A's file; A's private marker text is in `retrieved_chunks` (which `stage_analysis.py` appends to the run's trace row); it is **not** in `graph_rag_context` (the file does not exist in B, so the assembled block has no content for it) |
+| `developer_goal_facts(goal, B, ...)` | Empty (it uses `current_view()`) |
+| Indexing B afterwards (`RepositoryAnalyzer(B).index_repository`) | A's rows are gone: `indexed_paths` = B's file only. The full walk decides what exists, so each `kriya analyze` replaces the other project's index |
+
+### AUTH-A5-10 - Which configuration is effective, and who may set each field? (configuration authority)
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The effective value of every configuration field, the source of each, and whether that source may set it |
+| Owner | `config/resolution.py::resolve_config_state` (layering, provenance, canonical paths, preset expansion, closed vocabularies), `config/authority.py::compute_violations` (classification), `config/authority_approval.py::resolve_with_approval` (approval coverage), `config/config.py::load_config` (the raise) |
+| Why this owner | SEC-009: one path for what counts as a violation, shared by `load_config`, `kriya authority inspect / approve` and the desktop's configuration operations (`application/configuration.py`, `config/service.py`) |
+| Authoritative inputs | The packaged default; one user layer (the `kriya.yaml` at the authority root of the working directory, else the installation directory's, else `--config`); the approval artifact or trust file |
+| Evidence allowed | For a non-`REPOSITORY_SAFE` field from an untrusted source: an approval whose set digest covers exactly the current security-relevant field set |
+| Evidence forbidden | The field's presence in a `runtime_profile` preset set by the repository (derived fields inherit the untrusted source); an approval of a malformed `autonomy.mode`, egress policy or containment opt-out (refused before classification) |
+| Model role | None by design. See alternate paths |
+| Human role | Operator: `kriya authority approve` or the desktop approval. A Project Setup folder needs it before its first run: `autonomy.mode`, `llm.base_url`, `embedding.base_url`, `llm_chain`, `workflow_controller.enabled`, `workflow_controller.mode` (`MEASURED` P1) |
+| Persisted state | The approval artifact (outside the workspace, salted value digests) |
+| State transitions | `SM-A5-03` |
+| Downstream consumers | Everything; `serve.py` reloads the configuration per request so a `SECURITY_AUTHORITY` value is never read once and kept |
+| Mutations authorized | The approval store (`MUT-A5-14`) |
+| Mutations forbidden | A trust file or approval inside the workspace |
+| Failure / UNKNOWN | An unclassified field is `SECURITY_AUTHORITY` (fails closed). A `kriya.yaml` between the working directory and the root is refused (`ShadowedConfigurationError`). A corrupt approval grants nothing |
+| Retry / recovery | None |
+| Checkpoint / resume | The configuration fingerprint is a checkpoint binding (slice A1) |
+| Audit emitted | `kriya authority inspect` shows each pending field, value redacted |
+| Alternate paths | (1) **`REPOSITORY_SAFE` means "a repository may set it without approval", and the repository's bytes can be written by a run** (`BYP-A5-01`): the write gate allows `kriya.yaml` (`MEASURED` P5). The repository-safe set includes `autonomy.run_verification_enabled`, `spec_compliance_enabled`, `knowledge.check_enabled`, `knowledge.offline_mode`, `auto_index_missing_dependency_graph`, `brownfield_full_regression_baseline_policy` and the run budget (`AUTH-A5-12`). (2) The reason text for a dynamically classified field (`agent_llms.<role>`) says "unknown/future field" because `compute_violations` labels with `is_known_field`, which reads the static tables only (`SEC009-AGENT-ROLE-REASON-TEXT-001`: confirmed current, message only, `TRACED`). (3) The installation directory's `kriya.yaml` is an untrusted source (`AUTO_DISCOVERED_INSTALL_DIR`), while the installation directory's `skills/` and `memory/` are the trusted default locations (`AUTH-A5-09`) |
+| Invariant | Repository-controlled configuration cannot grant itself control-plane authority |
+| Negative control | Not a search: P6 measures the classification of the budget, the size trigger and the mode |
+| AS-IS evidence | `TRACED`; `MEASURED` P1, P6 |
+| Required contract | `GAP-A5-02` (what a run may write), `GAP-A5-04` (budget) |
+| Limitation | `authority_approval.py` was read at its outline; the desktop configuration operations were not read |
+
+### AUTH-A5-11 - What is the production profile, and what does it seal?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The values a `runtime_profile: production` run is held to |
+| Owner | `config/resolution.py::runtime_profile_preset_fields` and the contradiction check in `resolve_config_state`; `production_doctor.py` verifies the fixed guarantees against the real environment |
+| Why this owner | The preset is expanded before classification so a profile cannot launder a field |
+| Authoritative inputs | The preset table; the user layer's explicit values |
+| Evidence allowed | An explicit value equal to the preset, or for the budget a positive integer at most 3600 (`_PRODUCTION_STRICTER_ACCEPTED`) |
+| Evidence forbidden | Any other explicit value for a sealed leaf: `ValueError`, not approvable |
+| Model role | None |
+| Human role | Operator selects the profile; from a repository file it is a `PLATFORM_POLICY` violation needing approval, as are twelve of the derived fields (`MEASURED` P6) |
+| Persisted state | None of its own |
+| State transitions | None |
+| Downstream consumers | Every reader of the sealed fields |
+| Mutations authorized / forbidden | - |
+| Failure / UNKNOWN | Contradiction refuses at load |
+| Retry / recovery / checkpoint | - |
+| Audit emitted | `kriya doctor --production` |
+| Alternate paths | The seal sets: enforce workflow; `execution_policy` enforce; `egress_policy: local_only`; containment `oci` with both mandates; `brownfield_full_regression_baseline_policy: required`; `shell_network: denied`; `knowledge.offline_mode: true`; **`requirement_unknown_policy: block` and `requirement_unverified_policy: block`**; budget 3600. This answers what A4 handed over: the production profile blocks on unverified and unknown requirements and keeps KnowledgeGuard off public registries. It does **not** set `autonomy.mode` (so the mode stays whatever the configuration says; the packaged default is human-in-the-loop), `web_lookup_enabled`, `risk_threshold_lines` or `paths.*`. The Project Setup profile is a different profile (`local-models-governed`): enforce, human-in-the-loop, budget 900, no requirement policy, so `record` / `record` (slice A4 P10) |
+| Invariant | A production run cannot be weakened by an explicit override of a sealed leaf |
+| Negative control | P6: production with 7200 or with `null` is refused; with 2400 accepted |
+| AS-IS evidence | `TRACED`; `MEASURED` P6 |
+| Required contract | Phase C decides whether the desktop's Setup profile and the production profile should differ on requirement policy (`GAP-A3-01` depends on it) |
+| Limitation | `production_doctor.py` was not read |
+
+### AUTH-A5-12 - What is the run's wall-clock budget, and who owns it?
+
+| Field | AS-IS |
+|---|---|
+| Truth decided | The number of seconds a run may take before it stops |
+| Owner | The value: whichever configuration layer sets `autonomy.generation_time_budget_seconds` (`REPOSITORY_SAFE`). The clock: each unit invocation's `GenerationState` (slice A1, `AUTH-A1-08`) |
+| Why this owner | The field was classified repository-safe as a tuning value ("picking a model or tuning sampling never grants new capability") |
+| Authoritative inputs | Packaged default `null` (no deadline); Project Setup writes 900; the production preset 3600 (or a smaller explicit value); the Scenario-04 template 2400 |
+| Evidence allowed | Any value from any layer; `null` included, outside the production profile |
+| Evidence forbidden | Under production: a value above 3600, zero, negative, a boolean, or `null` |
+| Model role | None directly (but see `BYP-A5-01`: the field is in a file a run may write) |
+| Human role | Operator or repository author |
+| Persisted state | None |
+| State transitions | None |
+| Downstream consumers | `workflow.py` (the deadline of a unit), `core/llm.py` (inference deadline), `memory/embedding.py` (`run_deadline`), `tools/validate.py`, `workflow/attempt.py`, `control/run_coordinator.py` (control `generation_time_budget_seconds`) |
+| Mutations authorized / forbidden | - |
+| Failure / UNKNOWN | No budget means no deadline |
+| Retry / recovery | Under enforce each unit invocation starts a fresh budget (A1b); the number is therefore a per-invocation bound, not a run bound |
+| Checkpoint / resume | A resumed run starts a fresh clock (slice A1) |
+| Audit emitted | The CLI's "GENERATION BUDGET EXHAUSTED" text |
+| Alternate paths | A repository `kriya.yaml` may set 999999 or `null` with no violation (`MEASURED` P6). **2400 versus 3600:** 2400 is one scenario's calibrated configuration value (`demo-v2/scenarios/04-spring-ignite-protocol/config/kriya.template.yaml`), 3600 is the production seal's ceiling (`PRODUCTION_GENERATION_TIME_BUDGET_SECONDS`), and 2400 satisfies the seal (`MEASURED` P6). No lower layer diverges from an accepted profile silently: the effective number is the configuration's, read directly by every consumer. What is missing is an owner of the **run-level** bound (the number is applied per unit invocation) and any binding of the number into qualification identity, which slice A6 checks |
+| Invariant | Under the production profile every unit invocation has a finite deadline of at most one hour |
+| Negative control | P6 |
+| AS-IS evidence | `TRACED`; `MEASURED` P6 |
+| Required contract | `GAP-A5-04` |
+| Limitation | The consumers were located by search, not read |
+
+### How the A5 trace list maps to rows
+
+1. **Root binding.** `AUTH-A5-01`. 2. **Git membership, NO_GIT rules.** `AUTH-A5-02`, `SM-A5-01`. 3. **Candidate
+member paths.** `AUTH-A5-03`. 4. **Filesystem reads and writes, the write gate, mutation scopes.** `AUTH-A5-04`,
+`AUTH-A5-05`, `MUT-A5-01..17`. 5. **Tool and MCP writes, containment.** `AUTH-A5-06`, `AUTH-A5-07`, `SM-A5-02`,
+`GAP-A5-03`. 6. **Protected authority paths, private state.** `AUTH-A5-08`. 7. **Desktop project and retrieval
+isolation (mandatory row).** `AUTH-A5-09`, `SM-A5-04`, `GAP-A5-01`. 8. **Configuration authority, production profile,
+the 2400 / 3600 budget.** `AUTH-A5-10..12`, `SM-A5-03`, `GAP-A5-04`. 9. **MCP parent-read limitation.** An intentional
+secure contract today (`AUTH-A5-07`, mutations forbidden): a grant containing a protected path is refused, nothing is
+masked. 10. **Aggregate approval authority (owner question on `GAP-A3-05`).** None in tools, MCP, configuration or the
+application layer: the launch approval binds one candidate digest per review (`control/launch_approval.py::build_pending`),
+the MCP approval binds one tool identity, the configuration approval binds a field set, and the process-profile
+approval (`process_profiles.enforce_approval`, off by default) forces the same per-unit gate. Controls: no
+`risk_threshold_lines` under `kriya/kup`, `kriya/application`, `kriya/mcp`, in `enforce_loop.py` or in
+`launch_approval.py`. 11. **Class-D setup errors.** Not owned here: the three contained-environment rows are
+characterized in `GAP-LEDGER.md` (slice A5 registry table) as environment-coupled and go to A6 with the remaining
+class-D evidence.

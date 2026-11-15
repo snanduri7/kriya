@@ -234,17 +234,17 @@
   "RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001": {
     "reconciliation": "NEEDS_CHARACTERIZATION",
     "disposition": "-",
-    "notes": "Handed to slice A5 (tools and containment). One owner with the two WAVE8 rows below: the contained project environment (tools/validate.py PolymorphicValidator._ensure_project_venv_impl). Missing evidence: the mechanism, which the row itself records as INFERRED; it needs a container, so A5 must state whether it can be characterized under the freeze."
+    "notes": "A5: owner TRACED (tools/validate.py _ensure_project_venv_impl, VENV_CREATION_ATTEMPTS, PYTHON_ENVIRONMENT_UNAVAILABLE; FR-A5-18). The open mechanism (why one gate's venv lacked a dependency the other gate's had) needs a real contained run and is NOT characterizable under the freeze. It blocks no slice: a required runtime check fails closed, typed. Declared as a Phase-D item: characterize with a deterministic reproducer through the one venv owner when the freeze lifts."
   },
   "WAVE8-PY-RUNTIME-ONLY-VENV-BOOTSTRAP-001": {
-    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "reconciliation": "RECONCILED",
     "disposition": "-",
-    "notes": "Handed to slice A5; same owner as RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001. The row records a mitigation (one bounded retry) and a root-cause finding of transient container faults; nothing re-measured in A3."
+    "notes": "The registry's own root-cause finding stands (transient container or mount faults; not a bootstrap-ordering defect; mitigated by one bounded retry at the one owner, TRACED at VENV_CREATION_ATTEMPTS). Nothing re-measured in A5; it stays open in the registry until a customer-flow demo is observed passing repeatedly, which is an observation item, not an architecture gap."
   },
   "WAVE8-DOCKER-REFUSAL-BECOMES-FALSE-VERDICT-001": {
     "reconciliation": "NEEDS_CHARACTERIZATION",
     "disposition": "-",
-    "notes": "Handed to slice A5; same owner. The architectural question (a daemon refusal should be a typed environment verdict, never a plain False gate verdict) is an UNKNOWN-behaviour question for the containment owner."
+    "notes": "A5: the architectural statement is recorded (an environment refusal must be a typed environment verdict, never a gate verdict; FR-A5-18, UNKNOWN table). Whether the plain False verdict is still reachable after the bind-source relaunch fix (334da9a) needs a real daemon refusal and is NOT characterizable under the freeze. Fail-closed in the recorded case; blocks no slice. Declared as a Phase-D item with RUNTIME-GATE-VENV-LACKS-PROJECT-TEST-DEPENDENCY-001."
   },
   "ENFORCE-CLOSURE-STABILITY-CACHE-REUSE-001": {
     "reconciliation": "RECONCILED",
@@ -267,9 +267,9 @@
     "notes": "Attachment half confirmed, TRACED: stage_review.py attaches the Reviewer's text and never reads a truncation signal (negative control: no finish_reason in the file), so a review cut at the output cap reaches the approver as a complete report. GAP-A3-06. The latency half (a non-streamed completion running to the cap) is model-runtime scope, slice A6."
   },
   "KERNEL-STAGING-WORKSPACE-BASE-ESCAPES-001": {
-    "reconciliation": "NEEDS_CHARACTERIZATION",
+    "reconciliation": "RECONCILED",
     "disposition": "-",
-    "notes": "Handed to slice A5 (root and write-gate authority). Not re-traced in A3. Missing evidence: whether a staged write whose base is the workspace file still reaches the guarded batch commit and raises an untyped BatchCommitError; the row's reach is INFERRED."
+    "notes": "Pinned as today's behaviour by tests/test_candidate_transaction.py::test_a_whole_file_replacement_based_on_the_workspace_file_is_refused_by_the_guarded_commit (committed; present at the baseline; not re-run in A5). Refused by the guarded commit, untyped BatchCommitError (FR-A5-05, AUTH-A5-03). Fail closed; reach still INFERRED. Correction: a typed refusal at the staging owner."
   },
   "RUN-ATTEMPT-GATE-EXTRACTION-001": {
     "reconciliation": "RECONCILED",
@@ -348,8 +348,8 @@
   },
   "GOAL-STATED-JAVA-VERSION-TOOLCHAIN-AUTHORITY-001": {
     "reconciliation": "RECONCILED",
-    "disposition": "-",
-    "notes": "Confirmed current (TRACED): workflow/toolchain.py states the goal-stated JDK handed to the toolchain owner is 'Always None today'; platform/toolchain_locator.jdk_home_for_version has no caller (negative control). An ownership gap by owner ruling (no heuristic over goal text). The authority choice (requirement-contract field, plan field or operator configuration) is owner policy; slice A5 owns toolchain and configuration authority and carries the disposition."
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "A4's reading stands (TRACED: no feeder of the toolchain override; jdk_home_for_version has no caller). A5 adds the candidate authorities the row asks about: an operator configuration field (SEC-009 classified, AUTH-A5-10) or a requirement-contract field (slice A2); never a goal-text regex. Owner policy choice (Phase D); a future capability until a project that declares no version needs it."
   },
   "JAVA-DEVELOPER-WRONG-PACKAGE-PATH-001": {
     "reconciliation": "RECONCILED",
@@ -385,5 +385,135 @@
     "reconciliation": "RECONCILED",
     "disposition": "GENUINE_FUTURE_FEATURE",
     "notes": "Confirmed: tools/lsp.py JdtlsClient.start is the typed refusal, so the consumer chain cannot run. Dormant by owner decision of 2026-10-27 (keep); it owns no current approval, containment, evidence or result decision."
+  },
+  "DESKTOP-PROJECT-RETRIEVAL-STATE-ISOLATION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "FIX_REQUIRED_BEFORE_PRODUCTION",
+    "notes": "A5 mandatory row: characterized, stays OPEN, the isolation invariant does not hold (GAP-A5-01, AUTH-A5-09, SM-A5-04). MEASURED P1: two unconfigured folders and a Project Setup folder resolve the same paths.memory and paths.skills, in the installation directory. MEASURED P2: the stores have no project key; after project A is indexed, project B's readers return A's symbol paths, the auto-index test says 'already indexed', retrieval matches A's file and A's chunk text enters B's trace row; current_view() readers are immune; indexing B deletes A's index. MEASURED P8: A's skill scaffold closes B's knowledge gate. TRACED: index writers are kriya analyze and the opt-in auto-index only; the desktop has no indexing operation, so a desktop-only installation at the defaults holds an empty index (matches the registry's measurement). Owner-classified P1. Implementation required: yes (project-scoped state owner, identity recorded in each store, readers refuse a foreign store)."
+  },
+  "HISTORY-STATE-DIR-PER-PROJECT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (TRACED, MEASURED P7: one state directory for two projects). Run history is a property of the state directory; the runs table has no workspace; the preflight reports a cockpit/run mismatch (application/run.py observable_by_cockpit). Same missing attribution owner as GAP-A5-01. Owner design decision (Phase D): project-owned history or state-directory history."
+  },
+  "HISTORY-SNAPSHOT-STALE-ON-REOPEN-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Not re-traced in A5 (UI session code, core/context.tsx). Registry authority is OPEN-ITEMS OI-91 (present at the baseline). No kernel fact contradicts the row. Desktop behaviour; belongs with the history-ownership decision of HISTORY-STATE-DIR-PER-PROJECT-001."
+  },
+  "TOOL-RUNPHASE-PRE-EFFECT-DENIAL-TERMINAL-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "Confirmed (TRACED, AUTH-A5-06, SM-A5-02): tools/tool.py _authority_phase is the one place a refusal is proven pre-effect; a failure after _run_model_authored is entered is MAY_HAVE_EFFECTED and terminal. Per-tool pre-effect tagging is a future feature by owner ruling. Implementation required: no."
+  },
+  "GUI-TOOLS-HEALTH-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Confirmed (TRACED at application/catalog.py ToolCatalogService): the application layer lists and describes tools and starts no server. A bounded Kriya-owned health read is a future feature; starting a server is an operator action (AUTH-A5-07)."
+  },
+  "DIRECTORY-NAME-PRUNING-P3-SIBLING-SITES-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current for two sites re-read (BYP-A5-08): code_intel/service.py discover_source_files falls back to an os.walk pruning dot-directories when git ls-files fails; analyzer.py index_repository walks with its own ignore rules. Neither decides a result. The rest of the W3-3 census is cited, not repeated. P3 correctness pass at each root class's canonical owner (AUTH-A5-02)."
+  },
+  "GIT-ICASE-PATHSPECS-UNQUALIFIED-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Still UNKNOWN by construction on this host (TRACED: platform/__init__.py strips GIT_ATTR_SOURCE and GIT_LITERAL_PATHSPECS and records GIT_ICASE_PATHSPECS as unknown). Needs a case-sensitive filesystem; cannot be characterized here. A declared Linux-host qualification item, not a closure blocker."
+  },
+  "SEC009-AGENT-ROLE-REASON-TEXT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (TRACED, AUTH-A5-10): compute_violations picks the reason with is_known_field, which reads the static tables only, so a dynamically classified agent_llms.<role> is labelled 'unknown/future field'. Message only; decision, records and set digest unaffected."
+  },
+  "CLI-ADMISSION-REFUSAL-TEXT-MIDRUN-AUTHORITY-UNAVAILABLE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (TRACED): cli.py _echo_admission_refusal prints 'Nothing was generated and no model was called' for every verification_authority_unavailable, including the mid-run membership stop (FR-A5-01). Display only."
+  },
+  "PLAT-WINDOWS-POLICY-PARITY-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Not a defect of the supported platform (registry classification, unchanged). A5 fact: the root, write and read decisions use path_relation / path_identity, not string logic (AUTH-A5-04), so the Windows work is providers and policy patterns. Future platform program."
+  },
+  "PLAT-WINDOWS-FS-GIT-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "As PLAT-WINDOWS-POLICY-PARITY-001; authoritative in OPEN-ITEMS OI-85. The autocrlf facet was split and closed in W3-2 (registry). Not traced further in A5."
+  },
+  "PLAT-WINDOWS-PROVIDERS-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "As PLAT-WINDOWS-POLICY-PARITY-001. The OS mechanisms live behind kriya/platform ports (not read in A5)."
+  },
+  "PLAT-PORTABILITY-P3-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "As PLAT-WINDOWS-POLICY-PARITY-001. One sub-item is visible in A5: several home resolvers exist (authority home, MCP approval home, state directory), each with its own environment variable (AUTH-A5-08)."
+  },
+  "GUI-EXEC-GIT-SHIM-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "Confirmed (TRACED): the desktop child environment is a closed key list (ui/standalone/src/main/child_env.ts KRIYA_CHILD_ENV_KEYS) with a fixed PATH. Environment prerequisite plus an owner PATH decision; the preflight reports it. Every run needs git for its sandbox (AUTH-A5-03)."
+  },
+  "GUI-EXEC-TOOLCHAIN-PATH-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "As GUI-EXEC-GIT-SHIM-001: the fixed child PATH is an owner decision; no configurable tool-path setting exists and adding one would be a new SEC-009 field (AUTH-A5-10)."
+  },
+  "GUI-LAUNCH-RETENTION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (control: no 'launch' in control/retention.py; AUTH-A5-08, MUT-A5-16). Launch records live under the authority home, per workspace identity, and are never pruned. Small fix at the retention owner."
+  },
+  "GUI-RUN-ATTRIBUTION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed current (TRACED, application/history.py): attribution is the evidence manifest's workspace identity; a run without one is unattributed. Same missing owner as HISTORY-STATE-DIR-PER-PROJECT-001 and GAP-A5-01 (no project attribution on shared state). Owner decision outside the GUI, as the row says."
+  },
+  "FINDER-ALIAS-BLIND-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Partly confirmed (TRACED): tests/architecture/access_sites.py resolves an import alias (asname) in the HTTP-module finder only; the working-directory, environment and home finders were not re-read. Test-harness enforcement gap, authoritative in OPEN-ITEMS OI-01."
+  },
+  "DOCKER-BIND-SOURCE-REFUSED-AFTER-PATHNAME-RECREATION-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Environment behaviour of Docker Desktop, monitored (registry). Product side is fail-closed and typed since 334da9a (FR-A5-18). Not characterizable under the freeze without a loaded real daemon; the registry's measurements stand. No architecture fact depends on it."
+  },
+  "WAVE8-DOCKER-VIEW-CLEANUP-RACE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Confirmed at the function (TRACED): tools/gate_view.py _remove_tree uses shutil.rmtree(ignore_errors=True); cleanup is deliberately not gate truth (FR-A5-19). Environment timing; optional hygiene."
+  },
+  "CERT-OWNER-DEATH-MASK-SCRATCH-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Not traced (the mask code in tools/containment_oci.py was not read). The registry's account stands: empty 0700 scratch directories after an owner SIGKILL, no security or capacity effect. Optional containment hygiene."
+  },
+  "PRODUCT-CANONICAL-SPELLING-LISTING-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Performance observation on an identity-bearing function (AUTH-A5-01: canonical_spelling feeds every workspace identity). No correctness fact. Any change must be byte-identical for every path; future performance work on production measurement, owner decision."
+  },
+  "PRODUCT-GIT-SUBPROCESS-COST-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "GENUINE_FUTURE_FEATURE",
+    "notes": "Performance observation: root class and membership are recomputed, not cached (SM-A5-01: no persisted state), which is where the cheap Git calls come from. No product change by owner ruling; revisit only on production measurement."
+  },
+  "PROCESS-DIAGNOSTIC-PROBE-REAL-AUTHORITY-HOME-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "INTENTIONAL_CURRENT_CONTRACT",
+    "notes": "Confirmed as a process rule (TRACED, BYP-A5-16): the authority home is KRIYA_AUTHORITY_HOME else ~/.kriya/authority, independent of KRIYA_STATE_DIR by design (authority_approval.py _authority_home_dir). The A5 probe sets its own authority and MCP-approval homes. Not a product defect."
+  },
+  "CERT-HISTORICAL-FIXTURE-EVIDENCE-EXPOSURE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "The guard test (tests/test_private_fixture_hygiene.py) and the manifest (evidence/PRD-036/HISTORICAL_FIXTURE_EVIDENCE_MANIFEST.md) exist at the baseline (files present, not run). The remaining question (published history and tags) is an owner disposition outside the architecture."
+  },
+  "DEMO-RESET-RM-WORKSPACE-RACES-DOCKER-RELEASE-001": {
+    "reconciliation": "RECONCILED",
+    "disposition": "-",
+    "notes": "Demo script behaviour (demo-v2/scripts/reset_demo.sh), one occurrence, cause INFERRED by the registry; same Docker Desktop family as WAVE8-DOCKER-VIEW-CLEANUP-RACE-001. Not a kernel fact; not characterizable under the freeze."
   }
 }

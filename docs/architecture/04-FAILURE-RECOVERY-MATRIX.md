@@ -144,3 +144,41 @@ workspace.
 | Whether a skill applies to a unit | Decided on text that includes Planner prose (`AUTH-A4-08`) | Not safe or unsafe: unbound |
 | Whether the request requires execution | A miss reads "no" (`AUTH-A4-13`) | No |
 | A plan criterion id that does not resolve at render time | Silently omitted from the unit goal | Relies on `validate_plan` having rejected it |
+
+## Slice A5 - failures of the workspace, the sandbox, tools, shared stores and configuration
+
+| ID | Failure | Detected by | Outcome | Retry / recovery | Fails safely? | Label |
+|---|---|---|---|---|---|---|
+| FR-A5-01 | Git cannot say what the workspace is, or says something other than the authority search | `bound_tree.py::_root_class` | `BOUND_TREE_UNAVAILABLE`; mid-run it ends the run as `verification_authority_unavailable` | None | Yes. The CLI sentence for that category is wrong for the mid-run case (registry `CLI-ADMISSION-REFUSAL-TEXT-MIDRUN-AUTHORITY-UNAVAILABLE-001`, display only) | `TRACED` |
+| FR-A5-02 | A folder with no repository already holds user files | `admit_workspace_for_mutation` | `BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY`, before the contract is compiled | The person runs `git init` and commits | Yes | `TRACED` |
+| FR-A5-03 | The repository declares content filters, or Git refuses it for ownership | `create_git_worktree` (first statement; again before a reset) | Typed refusal before any Git command that would run a filter | None | Yes | `TRACED` |
+| FR-A5-04 | The sandbox cannot be created or its bytes do not match the workspace | `create_git_worktree`, `_verify_materialized_tracked_bytes` | An exception; the run does not proceed in the owner workspace (no such return exists) | None | Yes | `TRACED` |
+| FR-A5-05 | A Developer edit is based on a file the workspace holds and the sandbox lacks | The guarded batch commit | Untyped `BatchCommitError` ("Candidate target/base escapes workspace"); the attempt fails | The ordinary retry | Fails closed, but untyped: the retry cannot tell it from a code defect (`KERNEL-STAGING-WORKSPACE-BASE-ESCAPES-001`; pinned by a committed test, not re-run) | `TRACED` by the registry's citation; reach still `INFERRED` |
+| FR-A5-06 | A model-directed write names a path outside the root, a control path, a credential path, the goal file, or a file outside the unit's scope | `AuthorizedFileWriter.authorize` | `PolicyDeniedError` with the reason code; nothing in the batch is written | The ordinary retry | Yes | `TRACED`; `MEASURED` P5 |
+| FR-A5-07 | A model-directed write names `kriya.yaml`, a workspace skill file, a CI workflow or a Git attribute file | Nothing at the gate | Allowed into the candidate (`MEASURED` P5); the unit's approval rules then apply (slice A3) | - | **Not at this layer.** `GAP-A5-02` | `MEASURED` at the gate; end to end `INFERRED` |
+| FR-A5-08 | A planned step names a tool that may not be planned, or an MCP tool with no current approval | `tools/tool.py::_authority_phase` | Refused with the reason code, proven pre-effect; the subtask is not completed, the loop breaks | None | Yes | `TRACED` |
+| FR-A5-09 | A tool's effect raises, or the process dies during it | The execution owner | Terminal, may-have-effected; after a crash `UNRESOLVED_TOOL_EXECUTION` blocks every mutating run until a person disposes of it | Operator only | Yes (conservative by owner ruling) | `TRACED` by the subsystem note |
+| FR-A5-10 | An MCP server's configuration asks for `explicit_destinations`, a non-isolating backend, or a grant touching authority state | `MCPManager.start_all`, `map_capability_profile_to_containment` | Typed refusal before any process; `start_all` is atomic, so no tool of any server is registered | None | Yes | `TRACED` by the subsystem note and the adapter's first lines |
+| FR-A5-11 | An MCP server with a write grant changes the owner workspace during a run that later fails | Nothing | The changes stay; the run's result does not mention them | None | **No** (`GAP-A5-03`) | `TRACED` |
+| FR-A5-12 | The code index at the configured location belongs to another project | Nothing | Read as this project's index (`SM-A5-04`) | None | **No** (`GAP-A5-01`) | `MEASURED` P2 |
+| FR-A5-13 | The embedding model served differs from the index's identity | `index_repository` (probe before indexing); queries read rows of the served identity only | Rebuilt at the next index; until then the semantic leg reports unavailable (slice A6 owns the embedding contract) | - | Yes | `TRACED` at the reset block |
+| FR-A5-14 | Auto-index fails | `_ensure_repository_indexed` | Logged; the run continues without an index. With a strict dependency index required: `needs_review`, `DEPENDENCY_INDEX_UNAVAILABLE` | None | Yes | `TRACED` |
+| FR-A5-15 | A skill write targets the installation's skills directory from another project | `new_skill_refusal` for a new skill through the engine; otherwise only a warning | New skill: `SkillWriteRefused`. Scaffold, appended rules, provenance, staged facts: written | - | Partly (`GAP-A5-01`) | `TRACED`; `MEASURED` P8 |
+| FR-A5-16 | A configuration field is set by a source that may not set it | `compute_violations`, then the approval check | `ConfigAuthorityError` naming field, source and class; no value in the message | The operator approves | Yes. The reason text mislabels a dynamically classified role field (`SEC009-AGENT-ROLE-REASON-TEXT-001`) | `TRACED`; `MEASURED` P1, P6 |
+| FR-A5-17 | A production profile with a contradicting explicit value | `resolve_config_state` | `ValueError`, not approvable | The author fixes the file | Yes | `MEASURED` P6 |
+| FR-A5-18 | The contained project environment cannot be created (the three registry rows on venv bootstrap and a Docker bind-source refusal) | `tools/validate.py::_ensure_project_venv_impl`: `VENV_CREATION_ATTEMPTS` bounded attempts, then `PYTHON_ENVIRONMENT_UNAVAILABLE` | A typed environment failure for the venv; the registry records one path where a daemon refusal became a plain False gate verdict (`WAVE8-DOCKER-REFUSAL-BECOMES-FALSE-VERDICT-001`) | One bounded relaunch | Fails closed in every recorded case; the reason was misattributed in one | `TRACED` at the owner and its constants only. Not characterized further: it needs a real Docker daemon under load, and the registry's own measurements classify the triggers as environment faults |
+| FR-A5-19 | A gate view or a mask scratch directory cannot be removed after a contained gate | `gate_view.py::_remove_tree` (`ignore_errors=True`) | A leftover directory; never part of gate truth | None | Yes (cleanup is not a verdict) | `TRACED` at the function |
+
+### UNKNOWN handling in this slice
+
+| UNKNOWN | What the code does | Fails safely? |
+|---|---|---|
+| Whether a folder is a repository | A Git refusal or disagreement is `BOUND_TREE_UNAVAILABLE`, never "no repository" | Yes |
+| Whether two paths are the same object | An identity that cannot be established counts as an alias | Yes |
+| The class of a configuration field | Unclassified is `SECURITY_AUTHORITY` | Yes |
+| A tool's governance | Undeclared or unreadable is not plannable | Yes |
+| Whether a tool's effect happened | May-have-effected, terminal | Yes |
+| Whether an MCP approval is current | Anything but an exact binding match denies | Yes |
+| **Which project a code index, a skill folder, a learned reference or a cached release date belongs to** | Not represented; whatever is at the location is used | **No** |
+| **What a workspace path means to Kriya's next run** (configuration, skill) | Not represented at the write gate | **No** |
+| Whether a run-level time bound exists | Not represented: the configured number bounds each unit invocation | No, outside the production profile, where the number itself may also be absent |

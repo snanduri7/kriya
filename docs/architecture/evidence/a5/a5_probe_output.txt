@@ -1,0 +1,73 @@
+scratch: <tmp>/kriya-a5-probe-ne_486gn
+
+=== P1 packaged-default paths.memory / paths.skills for two projects and a Project Setup folder
+A (no kriya.yaml): paths.memory='memory' paths.skills='skills' (both relative to the Kriya installation directory) paths.state=None
+B (no kriya.yaml): paths.memory='memory' paths.skills='skills' (both relative to the Kriya installation directory) paths.state=None
+A and B resolve the SAME paths.memory: True
+A and B resolve the SAME paths.skills: True
+that paths.memory is inside project A: False
+Project Setup folder: config_source=auto_discovered_cwd paths.memory='memory' paths.skills='skills' (relative to the installation directory)
+Project Setup folder resolves the same paths.memory as A: True
+Project Setup kriya.yaml top-level keys: ['autonomy', 'embedding', 'llm', 'llm_chain', 'workflow_controller'] | has a 'paths' section: False
+Project Setup fields needing operator approval (SEC-009 violations): ['autonomy.mode[security_authority]', 'embedding.base_url[security_authority]', 'llm.base_url[security_authority]', 'llm_chain[security_authority]', 'workflow_controller.enabled[security_authority]', 'workflow_controller.mode[security_authority]']
+
+=== P2-P4 one index location, two projects: what project B reads of project A; what indexing B does to A
+after indexing project A: {"dependency_graph.db": {"ci_files": 1, "ci_fts": 2, "ci_symbols": 2, "files": 1, "index_manifest": 3, "relations": 0, "symbols": 2}, "vector_index.db": {"embedding_identity": 1, "file_metadata": 1, "fts_chunks": 2, "fts_chunks_config": 1, "fts_chunks_content": 2, "fts_chunks_data": 3, "fts_chunks_docsize": 2, "fts_chunks_idx": 1, "learned_knowledge": 0, "vector_chunks": 2, "vector_index_state": 1}}
+columns (is there any workspace/project/root column?): {"dependency_graph.db": {"ci_files": ["path", "language", "source_digest", "state", "parser_digest", "namespace", "imports", "error_count"], "ci_symbols": ["symbol_id", "path", "language", "kind", "name", "lookup_key", "parent_id", "source_digest", "decl_start_line", "decl_end_line", "decl_start_byte", "decl_end_byte", "sig_start_line", "sig_end_line", "sig_start_byte", "sig_end_byte", "body_start_line", "body_end_line", "body_start_byte", "body_end_byte", "modifiers", "annotations", "parameter_types", "return_type", "signature_text", "doc_summary", "extends", "implements"], "files": ["filepath", "mtime", "hash", "source_digest"], "index_manifest": ["key", "value"], "relations": ["id", "source", "target", "type", "source_file"], "symbols": ["id", "filepath", "name", "type", "start_line", "end_line"]}, "vector_index.db": {"embedding_identity": ["id", "fingerprint", "details"], "file_metadata": ["filepath", "mtime", "hash"], "learned_knowledge": ["id", "text", "embedding", "model_name", "dimensions", "provenance_url", "fetch_date"], "vector_chunks": ["filepath", "chunk_index", "text", "embedding", "model_name", "dimensions", "parent_chunk", "segment_index", "span_start", "span_end", "source_digest", "fingerprint", "generation", "is_current"], "vector_index_state": ["id", "generation"]}}
+index manifest keys: ['embedding_fingerprint', 'repository_revision', 'structural_identity']
+B: DependencyGraph.has_indexed_files() (the auto-index 'already indexed' test): True
+B: find_symbol_locations('AlphaSecretService'): [{'filepath': 'src/alpha_secret.py', 'name': 'AlphaSecretService', 'type': 'class', 'start_line': 1, 'end_line': 5}]
+B: get_class_symbol_locations(): {'.py:AlphaSecretService': ['src/alpha_secret.py']}
+B: open_code_intelligence returns a service (a baseline 'exists' for B): True
+B: baseline find_symbol('AlphaSecretService') WITHOUT current_view(): ['src/alpha_secret.py']
+B: current_view().find_symbol('AlphaSecretService'): []
+B: current_view().find_symbol('BetaThing'): ['src/beta.py']
+B: retrieve_graph_context matched: True | matched_files: ['src/alpha_secret.py'] | related_files: []
+B: A's private marker in retrieved_chunks: True | in graph_rag_context (the Planner's block): False
+B: retrieval_member_hints: {} | hypothesis_candidates: {}
+B: developer_goal_facts names A's file: False | names the marker: False | length: 0
+after indexing project B into the same location: indexed paths = ['src/beta.py']
+A's symbol still locatable: False
+counts: {"dependency_graph.db": {"ci_files": 1, "ci_fts": 2, "ci_symbols": 2, "files": 1, "index_manifest": 3, "relations": 0, "symbols": 2}, "vector_index.db": {"embedding_identity": 1, "file_metadata": 1, "fts_chunks": 2, "fts_chunks_config": 1, "fts_chunks_content": 2, "fts_chunks_data": 5, "fts_chunks_docsize": 2, "fts_chunks_idx": 3, "learned_knowledge": 0, "vector_chunks": 2, "vector_index_state": 1}}
+
+=== P5 the write gate over workspace paths that carry authority into later runs
+AuthorizedFileWriter.authorize('src/app.py'): allow PATH_WITHIN_WORKSPACE_ALLOWED
+AuthorizedFileWriter.authorize('skills/local/rules.txt'): allow PATH_WITHIN_WORKSPACE_ALLOWED
+AuthorizedFileWriter.authorize('skills/new-skill/skill.yaml'): allow PATH_WITHIN_WORKSPACE_ALLOWED
+AuthorizedFileWriter.authorize('kriya.yaml'): allow PATH_WITHIN_WORKSPACE_ALLOWED
+AuthorizedFileWriter.authorize('kriya.yml'): allow PATH_WITHIN_WORKSPACE_ALLOWED
+AuthorizedFileWriter.authorize('.kriya/control/state.json'): deny TRUSTED_CONTROL_PATH_DENIED
+AuthorizedFileWriter.authorize('.git/hooks/pre-commit'): deny TRUSTED_CONTROL_PATH_DENIED
+AuthorizedFileWriter.authorize('.github/workflows/ci.yml'): allow PATH_WITHIN_WORKSPACE_ALLOWED
+AuthorizedFileWriter.authorize('.gitignore'): allow PATH_WITHIN_WORKSPACE_ALLOWED
+AuthorizedFileWriter.authorize('.gitattributes'): allow PATH_WITHIN_WORKSPACE_ALLOWED
+AuthorizedFileWriter.authorize('../outside.txt'): deny PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS
+AuthorizedFileWriter.authorize('.env'): deny SENSITIVE_PATH_DENIED
+
+=== P6 who may set the run's wall-clock budget and the size trigger
+packaged default budget: ([], None)
+repository raises the budget to 999999: ([], 999999)
+repository sets the budget to null (no deadline): ([], None)
+repository sets 2400 (the Scenario-04 template value): ([], 2400)
+runtime_profile production alone: (['autonomy.contained_execution_required', 'autonomy.containment_backend', 'autonomy.egress_policy', 'autonomy.mcp_contained_execution_required', 'autonomy.requirement_unknown_policy', 'autonomy.requirement_unverified_policy', 'autonomy.shell_network', 'engineering_triage.shadow_mode', 'execution_policy.enabled', 'execution_policy.mode', 'runtime_profile', 'workflow_controller.enabled', 'workflow_controller.mode'], 3600)
+runtime_profile production + 2400: (['autonomy.contained_execution_required', 'autonomy.containment_backend', 'autonomy.egress_policy', 'autonomy.mcp_contained_execution_required', 'autonomy.requirement_unknown_policy', 'autonomy.requirement_unverified_policy', 'autonomy.shell_network', 'engineering_triage.shadow_mode', 'execution_policy.enabled', 'execution_policy.mode', 'runtime_profile', 'workflow_controller.enabled', 'workflow_controller.mode'], 2400)
+runtime_profile production + 7200: ("REFUSED ValueError: runtime_profile 'production' rejects contradictory overrides: autonomy.generation_time_budget_seconds=7200 (production requires 3600 or a smaller positive integ", None)
+runtime_profile production + null: ("REFUSED ValueError: runtime_profile 'production' rejects contradictory overrides: autonomy.generation_time_budget_seconds=None (production requires 3600 or a smaller positive integ", None)
+repository sets risk_threshold_lines 100000 and mode guardrails: (['autonomy.mode', 'autonomy.risk_threshold_lines'], None)
+
+=== P7 state and identity keys of two projects
+workspace_identity: same for A and B = False
+state_directory: same for A and B = True
+trace_db: same for A and B = True
+config_approval: same for A and B = False
+mcp_approval: same for A and B = False
+learned_knowledge_db: same for A and B = True
+workspace .kriya/control is per project by construction (inside each workspace root): True
+
+=== P8 one skills location, two projects, and the knowledge gate
+project B before anything: gaps = ['org.apache.ignite:ignite-core']
+project A's run scaffolds: org.apache.ignite-ignite-core-2.16.0
+project B afterwards: gaps = []
+is_accidental_shared_skills_write(<install>/skills, project A): True
+SkillEngine.new_skill_refusal for project A on <install>/skills is a refusal: True
+KnowledgeGuard has a workspace attribute: False

@@ -367,3 +367,67 @@ Owner: `stage_planning.py::plan_work_unit`.
 | held | the run ends otherwise | discarded (`discard_run_learning`) |
 | any | `kriya skills unverify` | unverified |
 | workspace skill | `verified: true` written by the project | ignored (`M` P8); `verified_claim` is display only |
+
+## Slice A5
+
+Evidence labels as in the other slices; `M` = `MEASURED` by `evidence/a5/a5_probe.py`.
+
+### SM-A5-01 - The class of a workspace root and its admission (`TRACED`, `repository/bound_tree.py`)
+
+| From | Event | To |
+|---|---|---|
+| unclassified | a `.git` entry at or above the root, and Git resolves the same top level as the authority root | `GIT_BACKED`: membership is the bound tree |
+| unclassified | no `.git` entry, Git resolves nothing, and the folder is plainly not a repository | `NO_GIT_REPOSITORY` |
+| unclassified | a `.git` entry but Git cannot resolve a work tree; Git resolves a repository the search did not find or another one; an identity is unresolvable; an OS or subprocess error; a content-filter refusal | refused: `BOUND_TREE_UNAVAILABLE` (never read as "no repository") |
+| `NO_GIT_REPOSITORY` | the folder holds nothing but `.kriya`, a regular `kriya.yaml` and desktop metadata files | admitted as a greenfield; `create_git_worktree` then initializes the repository (`MUT-A5-01`) |
+| `NO_GIT_REPOSITORY` | any other entry (a README, a `kriya.yml`, a `kriya.yaml` that is a directory or a link) | refused: `BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY`, before the contract is compiled |
+| `GIT_BACKED` | the operating root is excluded by the repository's own ignore rules | refused: `BOUND_TREE_OPERATING_SCOPE_EXCLUDED` (read only when the listing is empty) |
+| `GIT_BACKED` | the workspace is the repository's top level | candidate = linked work tree `<workspace>/.kriya/worktree` |
+| `GIT_BACKED` | the workspace is a subfolder of the repository | candidate = scoped snapshot sandbox, with its own recorded membership |
+
+No state is persisted: the class is recomputed wherever it is needed.
+
+### SM-A5-02 - One planned TOOL subtask (`TRACED`, `workflow/subtask_executor.py`, `tools/tool.py`; lifecycle persistence cited from the subsystem note)
+
+| From | Event | To | Effect boundary |
+|---|---|---|---|
+| planned | tool name not in the registry | `needs_review` | proven pre-effect |
+| planned | malformed autonomy mode | failed, typed | proven pre-effect |
+| planned | the tool asks for confirmation and the run is human-in-the-loop | `needs_review`, `TOOL_CONFIRMATION_UNSUPPORTED` | proven pre-effect |
+| planned | governance not plannable (operator-only, undeclared, invalid) | refused, the governance reason code | proven pre-effect |
+| planned | arguments fail the tool's schema; the tool's own authorization refuses; the call-time authority refuses (MCP: no current approval) | refused | proven pre-effect |
+| authorized | the durable `tool_started` marker cannot be written | `TOOL_STARTED_NOT_DURABLE`; the effect never runs | proven pre-effect |
+| started | the effect returns | durable `completed`, then success is authoritative | - |
+| started | the effect raises | failed, never retried | may have effected |
+| started | the process dies | on the next run: `needs_review`, the workspace gate reports `UNRESOLVED_TOOL_EXECUTION` | unknown, treated as may have effected |
+| completed | a resume | not run again; authority revalidated without effect; a revoked approval refuses | - |
+
+The machine has no retry edge and no approval edge of its own: a person is involved only through the MCP approval
+that already exists before the run, or not at all for a read-only tool.
+
+### SM-A5-03 - One configuration field, from file to effect (`TRACED`; `M` P1, P6)
+
+| From | Event | To |
+|---|---|---|
+| in a layer | the packaged default or the platform floor set it | effective, trusted |
+| in a layer | another source set it and its class is `REPOSITORY_SAFE` (static, or by value: a path inside the configuration's directory, a restricting value, a bound at most the packaged ceiling) | effective, no approval (`M`: the run budget at any value) |
+| in a layer | another source set it and its class is anything else, or it is unclassified | violation (`M`: `autonomy.mode`, `risk_threshold_lines`, the Project Setup six) |
+| violation | a current approval covers exactly the current security-relevant set | effective |
+| violation | no approval, or the set changed since the approval | `ConfigAuthorityError`: nothing loads |
+| any | a malformed mode or egress policy, a containment opt-out, a removed field, a relative log directory, a state path inside the workspace but outside `.kriya`, a shadowed configuration file | typed refusal before classification; not approvable |
+| any, under `runtime_profile: production` | an explicit value of a sealed leaf that is not the preset (budget: not a positive integer at most 3600) | `ValueError` (`M`: 7200 and `null` refused, 2400 accepted) |
+
+### SM-A5-04 - The code index of a location, as two projects see it (`M` P2 throughout)
+
+The states are those of the one `dependency_graph.db` / `vector_index.db` pair at the configured memory location.
+With the packaged defaults that location is the same for every project (`AUTH-A5-09`).
+
+| From | Event | To | What a run in another project then sees |
+|---|---|---|---|
+| absent | a reader opens the graph database | empty (file created) | "no index": no retrieval, no auto-index skip |
+| absent or empty | `kriya analyze` in project A, or A's run with auto-index on | holds A | - |
+| holds A | a run in project B | holds A (unchanged) | "already indexed" is true for B; symbol lookups return A's paths; retrieval matches A's files and records A's chunk text in B's trace row; the structural readers that take `current_view()` see only B |
+| holds A | `kriya analyze` in project B | holds B | A's index is gone; A's next run is in the row above with the roles exchanged |
+| holds X | the embedding identity or the parser identity changes | rebuilt under the new identity for whichever project indexes next | - |
+
+There is no state "holds A, and the reader knows it is A's": the store records no root, so the reader cannot tell.
