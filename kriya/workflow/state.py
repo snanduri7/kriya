@@ -21,6 +21,7 @@ from kriya.workflow.process_profile import ProcessProfile
 from kriya.workflow.repair_contract import RepairContract
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
 from kriya.workflow.triage import EngineeringRoute
+from kriya.workflow.untrusted_context import ExternalReference
 
 
 class APIContractRecoveryPhase(str, Enum):
@@ -333,7 +334,15 @@ class GenerationState:
     # not a heuristic).
     candidate_independent_diagnostic_invocations: int = 0
     baseline_replay_count: int = 0
+    # Validator and Kriya text only. Text fetched during the run is never
+    # joined to it (C-10): ten readers take this string as validator evidence.
     error_context: str = ""
+    # What the live lookup fetched for the failure in error_context: typed
+    # untrusted data, replaced with every failure, shown only to the next
+    # Developer request and only inside the untrusted fence
+    # (untrusted_context.with_external_references). Not an error, not a
+    # routing or selection input, not review or lesson evidence.
+    external_references: Tuple[ExternalReference, ...] = ()
     # MA1.3/MA1.4 of the control-plane implementation plan (kriya/workflow/
     # triage.py) - the shadow-mode classification computed once, before this
     # object is even constructed (see run_generation_workflow's own MA1.3

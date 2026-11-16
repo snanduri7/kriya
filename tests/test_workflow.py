@@ -156,11 +156,11 @@ from kriya.workflow.triage import (
     ImpactVector,
     RiskClass,
 )
+from kriya.workflow.untrusted_context import ExternalReference, outside_untrusted_reference
 from kriya.workflow.workflow import (
     RESOURCE_LIFECYCLE_HEADER,
     IncompleteGenerationError,
     WorkflowEngine,
-    _augment_error_with_live_lookup,
     _build_ecosystem_invariant_block,
     _build_error_source_context,
     _build_full_set_retry_prompt,
@@ -176,6 +176,7 @@ from kriya.workflow.workflow import (
     _is_near_duplicate_rule,
     _java_toolchain_fact,
     _likely_misattributed_sibling,
+    _lookup_external_references,
     _normalize_error_for_repeat_detection,
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -19524,35 +19525,36 @@ async def test_approve_web_lookup_fails_closed_when_callback_raises():
     assert await we._approve_web_lookup(["ignite"], "http://fake-search:8080", callback) is False
 
 @pytest.mark.asyncio
-async def test_augment_error_with_live_lookup_no_terms_never_searches():
+async def test_lookup_external_references_no_terms_never_searches():
     with patch("kriya.tools.search.search_web", new=AsyncMock()) as mock_search:
-        result = await _augment_error_with_live_lookup("some error", [], "http://fake-search:8080", 3)
-    assert result == "some error"
+        result = await _lookup_external_references([], "http://fake-search:8080", 3)
+    assert result == ()
     mock_search.assert_not_called()
 
 @pytest.mark.asyncio
-async def test_augment_error_with_live_lookup_appends_found_content():
+async def test_lookup_external_references_returns_typed_found_content():
+    """C-10: what the lookup found is a typed untrusted reference (term, URL, text), never a string joined to an error."""
     found = [{"term": "org.codehaus.mojo:exec-maven-plugin", "url": "https://example.com/exec-plugin", "snippet": "..."}]
     with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)), \
          patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="Remove the <arguments> block.")):
-        result = await _augment_error_with_live_lookup(
-            "COMPILATION FAILURE: ...", ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
+        result = await _lookup_external_references(
+            ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
         )
-    assert "COMPILATION FAILURE: ..." in result
-    assert "Reference material found for 'org.codehaus.mojo:exec-maven-plugin'" in result
-    assert "Remove the <arguments> block." in result
+    assert result == (ExternalReference(
+        term="org.codehaus.mojo:exec-maven-plugin", url="https://example.com/exec-plugin",
+        text="Remove the <arguments> block."),)
 
 @pytest.mark.asyncio
-async def test_augment_error_with_live_lookup_nothing_found_returns_unchanged():
+async def test_lookup_external_references_nothing_found_is_empty():
     with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=[])):
-        result = await _augment_error_with_live_lookup(
-            "some error", ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
+        result = await _lookup_external_references(
+            ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
         )
-    assert result == "some error"
+    assert result == ()
 
 
 @pytest.mark.asyncio
-async def test_augment_error_with_live_lookup_skips_a_thin_landing_page_candidate():
+async def test_lookup_external_references_skips_a_thin_landing_page_candidate():
     """Regression test for a finding from the 2026-08-12 SME review: this
     function always used candidates[0]'s text, even though
     _resolve_via_web_lookup fetches MULTIPLE candidates per term specifically
@@ -19571,28 +19573,26 @@ async def test_augment_error_with_live_lookup_skips_a_thin_landing_page_candidat
 
     with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)), \
          patch("kriya.tools.web.fetch_url_text", new=AsyncMock(side_effect=fake_fetch)):
-        result = await _augment_error_with_live_lookup(
-            "COMPILATION FAILURE: ...", ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
+        [reference] = await _lookup_external_references(
+            ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
         )
 
-    assert "https://example.com/real-example" in result
-    assert "Full working example" in result
-    assert "Welcome to our project." not in result
+    assert reference.url == "https://example.com/real-example"
+    assert reference.text.startswith("Full working example")
 
 
 @pytest.mark.asyncio
-async def test_augment_error_with_live_lookup_falls_back_to_first_candidate_when_none_are_usable():
+async def test_lookup_external_references_falls_back_to_first_candidate_when_none_are_usable():
     found = [
         {"url": "https://example.com/thin1", "snippet": "..."},
         {"url": "https://example.com/thin2", "snippet": "..."},
     ]
     with patch("kriya.tools.search.search_web", new=AsyncMock(return_value=found)), \
          patch("kriya.tools.web.fetch_url_text", new=AsyncMock(return_value="too short")):
-        result = await _augment_error_with_live_lookup(
-            "some error", ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
+        [reference] = await _lookup_external_references(
+            ["org.codehaus.mojo:exec-maven-plugin"], "http://fake-search:8080", 3
         )
-    assert "https://example.com/thin1" in result
-    assert "too short" in result
+    assert (reference.url, reference.text) == ("https://example.com/thin1", "too short")
 
 
 @pytest.mark.asyncio
@@ -19760,14 +19760,15 @@ async def test_workflow_repeated_failure_live_lookup_excludes_own_project_coordi
         "org.codehaus.mojo:exec-maven-plugin example", "http://fake-search:8080", top_k=3
     )
 
+    # C-10: the fetched text is never joined to the error or the task. This script answers each attempt from the
+    # file-list request alone (design + task, a routing step), so no request here may carry it at all; the fenced
+    # delivery to the content request is proven in tests/test_s2_prompt_trust_boundary.py.
+    for call in llm.complete.await_args_list:
+        prompt = call.kwargs.get("user_prompt", call.args[1] if len(call.args) > 1 else "")
+        assert "Remove the <arguments> block" not in outside_untrusted_reference(prompt)
     third_attempt_prompt = llm.complete.await_args_list[4].args[1]
-    assert "Reference material found for 'org.codehaus.mojo:exec-maven-plugin'" in third_attempt_prompt
-    assert "Remove the <arguments> block" in third_attempt_prompt
-
-    # And the first (non-repeat) failure must not have triggered anything - the
-    # second Developer call's prompt has the raw error but no lookup content yet.
-    second_attempt_prompt = llm.complete.await_args_list[3].args[1]
-    assert "Reference material found" not in second_attempt_prompt
+    assert "Cannot store value into array" in third_attempt_prompt
+    assert "Remove the <arguments> block" not in third_attempt_prompt
 
 @pytest.mark.asyncio
 async def test_workflow_error_triggered_live_lookup_disabled_by_default_never_searches(tmp_path):

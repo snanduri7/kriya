@@ -213,7 +213,7 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.goal_facts import developer_goal_facts
 from kriya.workflow.graph_retrieval import retrieve_graph_context
 from kriya.workflow.live_lookup import (
-    _augment_error_with_live_lookup as _augment_error_with_live_lookup,
+    _lookup_external_references as _lookup_external_references,
 )
 from kriya.workflow.localization_decision import decide as decide_localization
 from kriya.workflow.lsp_integration import (

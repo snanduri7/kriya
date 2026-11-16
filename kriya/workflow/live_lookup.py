@@ -1,7 +1,10 @@
 """Untrusted, error-triggered live web lookup for skill-gap resolution (Stage 3 escalation) - a separate trust tier from the RAG index, see CLAUDE.md. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence, Tuple
+
+from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.untrusted_context import ExternalReference
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +84,7 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
 
 
 # Cheap proxy for "this candidate has real content, not just a thin
-# landing/index page" - see _augment_error_with_live_lookup's own docstring
+# landing/index page" - see _lookup_external_references' own docstring
 # for why this can't just call the LLM-based extraction judgment
 # (_extract_first_usable) uses elsewhere.
 _MIN_USABLE_LOOKUP_TEXT_CHARS = 200
@@ -105,34 +108,55 @@ def _first_usable_lookup_candidate(candidates: List[Dict[str, str]]) -> Dict[str
     return candidates[0]
 
 
-async def _augment_error_with_live_lookup(
-    error_text: str, terms: List[str], search_base_url: str, top_k: int
-) -> str:
+_MAX_EXTERNAL_REFERENCE_CHARS = 2000
+
+
+async def _lookup_external_references(
+    terms: List[str], search_base_url: str, top_k: int
+) -> Tuple[ExternalReference, ...]:
     """When the SAME Quality Gate failure repeats across consecutive Developer
     retry attempts - a sign the model isn't self-correcting on its own - tries
-    live lookup for the extracted tool/library terms and appends anything found
-    directly to the error text for the next retry's prompt. Deliberately skips
-    the SkillGapAgent extraction call used elsewhere (Stage 1.2/2B) - that's
+    live lookup for the extracted tool/library terms and returns what it found
+    as typed untrusted references (C-10): the page text is never joined to the
+    validator's error text, it is shown to the next Developer request inside
+    the untrusted fence and to nothing else. Deliberately skips the
+    SkillGapAgent extraction call used elsewhere (Stage 1.2/2B) - that's
     another slow LLM round-trip, which would work against the whole point of
     this feature (fewer/faster retries) - and doesn't persist anything to a
     skill's rules.txt; this is ephemeral, scoped to the current retry only, not
-    durable knowledge. Best-effort: returns error_text unchanged if lookup finds
-    nothing usable."""
+    durable knowledge. Best-effort: empty if lookup finds nothing usable."""
     found = await _resolve_via_web_lookup(terms, search_base_url, top_k)
-    if not found:
-        return error_text
-
-    augmented = error_text
+    references = []
     for item in found:
         candidate = _first_usable_lookup_candidate(item["candidates"])
-        snippet = candidate["text"][:2000]
-        augmented += (
-            f"\n\n=== Reference material found for '{item['term']}' (from {candidate['url']}) - "
-            "this repeated failure may be resolved by it, but verify before relying on it ===\n"
-            f"{snippet}"
-        )
+        references.append(ExternalReference(
+            term=item["term"], url=candidate["url"], text=candidate["text"][:_MAX_EXTERNAL_REFERENCE_CHARS],
+        ))
         logger.info(f"Live lookup found reference material for repeated failure term '{item['term']}' ({candidate['url']}).")
-    return augmented
+    return tuple(references)
+
+
+def lookup_query_event(
+    *, origin: str, attempt: int, terms: List[str], search_base_url: str, results: Sequence[Dict[str, Any]],
+) -> RunEvent:
+    """The run's record of one approved outbound lookup (C-10): the terms that
+    left the machine, where they went, and which bytes came back (URL, digest
+    and size per reference - never the fetched text). ``results`` are
+    ``ExternalReference.segment()`` rows."""
+    return RunEvent(
+        kind="lookup.query", attempt=attempt, source=f"live_lookup.{origin}", authority=EventAuthority.ADVISORY,
+        message=f"outbound lookup for {len(terms)} term(s) returned {len(results)} untrusted reference(s)",
+        details={"origin": origin, "terms": list(terms), "search_base_url": search_base_url,
+                 "trust": "untrusted_external", "references": [dict(row) for row in results]},
+    )
+
+
+def lookup_result_segments(found: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The ``segment()`` rows of every page ``_resolve_via_web_lookup`` fetched."""
+    return [
+        ExternalReference(term=item["term"], url=candidate["url"], text=candidate.get("text", "")).segment()
+        for item in found for candidate in item["candidates"]
+    ]
 
 
 async def _extract_first_usable(

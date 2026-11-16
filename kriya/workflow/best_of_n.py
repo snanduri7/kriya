@@ -80,6 +80,7 @@ def reset_state_for_independent_candidate(state) -> None:
       run by design, never resets here (see its own docstring in state.py).
     """
     state.error_context = ""
+    state.external_references = ()
     state.last_failure = None
     state.open_findings = []
     state.last_implicated_files = None

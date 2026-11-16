@@ -21,7 +21,12 @@ from kriya.policy.egress import web_lookup_allowed
 from kriya.repository.bound_tree import BoundTreeError
 from kriya.repository.project_view import build_current_project_view, project_view_event_details
 from kriya.workflow.evidence import EvidenceRecord
-from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
+from kriya.workflow.live_lookup import (
+    _extract_first_usable,
+    _resolve_via_web_lookup,
+    lookup_query_event,
+    lookup_result_segments,
+)
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.skill_conventions import render_skill_conventions, skill_applies_to_goal
 from kriya.workflow.stage_context import StageContext, StageDeps
@@ -240,6 +245,10 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
                 found = await _resolve_via_web_lookup(
                     lookup_terms, deps.config.search.base_url, deps.config.search.top_k
                 )
+                state.record_event(lookup_query_event(
+                    origin="skill_gap", attempt=0, terms=lookup_terms,
+                    search_base_url=deps.config.search.base_url, results=lookup_result_segments(found),
+                ))
             else:
                 found = []
             proceed = bool(found)

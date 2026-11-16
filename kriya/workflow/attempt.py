@@ -270,6 +270,7 @@ from kriya.workflow.toolchain import (
     _resolve_java_home_override,
     toolchain_declaration_mutable,
 )
+from kriya.workflow.untrusted_context import with_external_references
 from kriya.workflow.verification_contract import ContractVerdictState
 from kriya.workflow.verification_coordinator import (
     # Re-exported: tests and older callers import these from attempt.
@@ -880,6 +881,13 @@ def _planned_source_context(
     """GRAPHIFY-OVERSIZE-REQUEST-001: the current source of a bounded enforce subtask's planned files. The body is
     kriya/workflow/generation_service.py (E6)."""
     return generation_service._planned_source_context(_generation_deps(), ctx, exclude, budget)
+
+
+def _developer_reference_source(state: GenerationState, ctx: "AttemptContext") -> str:
+    """C-10: the fenced reference a Developer request of this attempt draws on - the run's learned reference and,
+    in the same fence, whatever the live lookup fetched for the failure being retried. The one reader of
+    ``state.external_references``; byte-identical to ``ctx.learned_rag_context`` when nothing was fetched."""
+    return with_external_references(ctx.learned_rag_context, state.external_references)
 
 
 def _developer_optional_sections(
@@ -2775,7 +2783,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # always the primary model's own window, not a fallback's.
         reference_window = allocation_window(ctx.kernel.config)
         learned_reference = developer_reference(
-            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+            reference_window, _developer_reference_source(state, ctx), ctx.skills_prompt, ctx.design, ctx.plan,
         )
         current_limit = _reserve_graph_context_budget(
             reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
@@ -2982,7 +2990,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.budgets.fallback_attempts_used += 1
         reference_window = allocation_window(ctx.kernel.config, fallback)
         learned_reference = developer_reference(
-            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+            reference_window, _developer_reference_source(state, ctx), ctx.skills_prompt, ctx.design, ctx.plan,
         )
         current_limit = _reserve_graph_context_budget(
             reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
@@ -3076,7 +3084,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # error or regenerating the whole file set.
         reference_window = allocation_window(ctx.kernel.config)
         learned_reference = developer_reference(
-            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+            reference_window, _developer_reference_source(state, ctx), ctx.skills_prompt, ctx.design, ctx.plan,
         )
         current_limit = _reserve_graph_context_budget(
             reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
@@ -3157,7 +3165,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # Re-run context budget allocator dynamically for escalated model context window size
         reference_window = allocation_window(ctx.kernel.config)
         learned_reference = developer_reference(
-            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+            reference_window, _developer_reference_source(state, ctx), ctx.skills_prompt, ctx.design, ctx.plan,
         )
         current_limit = _reserve_graph_context_budget(
             reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
@@ -3179,7 +3187,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             active_prompt_window = allocation_window(ctx.kernel.config, fallback)
             reference_window = active_prompt_window
             learned_reference = developer_reference(
-                reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+                reference_window, _developer_reference_source(state, ctx), ctx.skills_prompt, ctx.design, ctx.plan,
             )
             current_limit = _reserve_graph_context_budget(
                 reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan

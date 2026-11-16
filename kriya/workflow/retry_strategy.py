@@ -70,7 +70,7 @@ from kriya.workflow.file_resolution import (
     classify_api_recovery_file_roles,
     is_runnable_test_file,
 )
-from kriya.workflow.live_lookup import _augment_error_with_live_lookup
+from kriya.workflow.live_lookup import _lookup_external_references, lookup_query_event
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.model_transition import fallback_routing_for_context
 from kriya.workflow.open_findings import (
@@ -916,6 +916,8 @@ async def _record_attempt_failure(
         )
         reset_scoped_budgets_for_new_family(state.budgets)
     state.error_context = raw_error_context
+    # C-10: what an earlier failure's lookup fetched is not evidence about this one.
+    state.external_references = ()
     if (
         current_failure_signature == previous_failure_signature
         # unaddressed_error_location included alongside compile: it's a
@@ -930,10 +932,16 @@ async def _record_attempt_failure(
         and error_terms
         and await ctx.approve_web_lookup(error_terms, ctx.kernel.config.search.base_url, ctx.web_lookup_query_callback)
     ):
-        state.error_context = await _augment_error_with_live_lookup(
-            raw_error_context, error_terms,
-            ctx.kernel.config.search.base_url, ctx.kernel.config.search.top_k
+        # C-10: fetched text stays typed and apart from the error context; its
+        # one reader is the next Developer request's fenced reference.
+        state.external_references = await _lookup_external_references(
+            error_terms, ctx.kernel.config.search.base_url, ctx.kernel.config.search.top_k
         )
+        state.record_event(lookup_query_event(
+            origin="repeated_failure", attempt=state.attempt_number, terms=error_terms,
+            search_base_url=ctx.kernel.config.search.base_url,
+            results=[reference.segment() for reference in state.external_references],
+        ))
     state.budgets.last_failure_signature = current_failure_signature
     # Measure every failed attempt. Repeating the same failure/action against
     # identical bytes is the strongest no-progress evidence and must not reset

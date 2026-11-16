@@ -23,11 +23,12 @@ def _bounded_text(text: str, max_chars: int) -> str:
 
 @dataclass(frozen=True)
 class RetryPackage:
-    """Canonical local evidence projected into a bounded model-facing view."""
+    """Canonical local evidence projected into a bounded model-facing view.
+    Validator output and repository bytes only: text fetched during the run
+    is not retry evidence (C-10, ``GenerationState.external_references``)."""
 
     failure_type: str
     authoritative_error: str
-    advisory_context: str
     target_files: tuple[str, ...]
     target_projections: tuple[FileProjection, ...]
     reference_projections: tuple[FileProjection, ...]
@@ -40,11 +41,6 @@ class RetryPackage:
             f"Failure type: {self.failure_type}\n"
             f"Authoritative validator evidence:\n{self.authoritative_error}"
         )
-        if self.advisory_context:
-            rendered += (
-                "\n\nAdvisory reference evidence (verify against local validators):\n"
-                + self.advisory_context
-            )
         unresolved = self._unresolved_block()
         if unresolved:
             rendered += "\n\n" + unresolved
@@ -93,7 +89,6 @@ def build_retry_package(
     source_context: Optional[Dict[str, str]],
     max_chars: int,
     max_error_chars: int = 6000,
-    advisory_context: str = "",
     known_revisions: Optional[Dict[str, str]] = None,
     open_findings: Sequence[OpenFinding] = (),
 ) -> RetryPackage:
@@ -164,7 +159,6 @@ def build_retry_package(
     return RetryPackage(
         failure_type=failure.type,
         authoritative_error=anchored if anchored is not None else _bounded_text(error, max_error_chars),
-        advisory_context=_bounded_text(advisory_context, 3000),
         target_files=requested_targets,
         target_projections=tuple(target_projections),
         reference_projections=tuple(reference_projections),

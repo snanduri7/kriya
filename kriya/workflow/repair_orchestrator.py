@@ -47,6 +47,7 @@ from kriya.workflow.context_package import ContextItem, make_context_item
 from kriya.workflow.failure import Failure, QualityGateFailure
 from kriya.workflow.retry_progress import SAMPLING_NOT_PERMITTED, SAMPLING_RESAMPLE, sampling_resample_permitted
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.untrusted_context import with_external_references
 
 RunState = Any    # kriya.workflow.state.GenerationState
 AttemptCtx = Any  # kriya.workflow.attempt.AttemptContext
@@ -682,7 +683,8 @@ def _prepare_retry_context(
     if unhinted:
         probe_limit = deps._reserve_graph_context_budget(
             prompt_window, ctx.skills_prompt,
-            deps.developer_reference(prompt_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan),
+            deps.developer_reference(prompt_window, with_external_references(ctx.learned_rag_context, state.external_references),
+                                     ctx.skills_prompt, ctx.design, ctx.plan),
             ctx.design, ctx.plan, base_code_context,
         )
         _rendered, _package, fallback = deps._target_package_with_goal_member_fallback(
@@ -714,7 +716,8 @@ def _prepare_retry_context(
     if retry_member_hints:
         retry_member_limit = deps._reserve_graph_context_budget(
             prompt_window, ctx.skills_prompt,
-            deps.developer_reference(prompt_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan),
+            deps.developer_reference(prompt_window, with_external_references(ctx.learned_rag_context, state.external_references),
+                                     ctx.skills_prompt, ctx.design, ctx.plan),
             ctx.design, ctx.plan, base_code_context,
         )
         retry_member_rendered, retry_member_package = deps._target_package_with_window_reserve(
@@ -966,13 +969,6 @@ def _retry_package_for_attempt(
         # ones) simply fall back to a fresh hash inside project_implementation_source.
         known_revisions=state.validated_file_revisions,
         open_findings=state.open_findings,
-        advisory_context=(
-            state.error_context[
-                state.error_context.index("=== Reference material found"):
-            ]
-            if "\n\n=== Reference material found" in state.error_context
-            else ""
-        ),
     )
 
 

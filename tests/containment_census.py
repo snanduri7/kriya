@@ -274,6 +274,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_runtime_stdin_rerun_binding.py': ('S', 'M'),
  'tests/test_runtime_verification.py': ('S', 'M'),
  'tests/test_s18_planned_tool_governance.py': ('S', 'T'),
+ 'tests/test_s2_prompt_trust_boundary.py': ('S', 'M'),
  'tests/test_s18b_planned_tool_contracts.py': ('S', 'M'),
  'tests/test_s18c_read_root_identity.py': ('S', 'M'),
  'tests/test_s18d_read_view_and_enforce_prompt.py': ('S', 'M'),

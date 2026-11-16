@@ -29,7 +29,12 @@ from kriya.workflow.file_resolution import (
     resolve_planned_artifact_owners,
     undeclared_response_construction_owners,
 )
-from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
+from kriya.workflow.live_lookup import (
+    _extract_first_usable,
+    _resolve_via_web_lookup,
+    lookup_query_event,
+    lookup_result_segments,
+)
 from kriya.workflow.requirements import requirements_prompt_block
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
@@ -473,6 +478,10 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
                 found = await _resolve_via_web_lookup(
                     new_design_terms, deps.config.search.base_url, deps.config.search.top_k
                 )
+                state.record_event(lookup_query_event(
+                    origin="design_derived", attempt=0, terms=new_design_terms,
+                    search_base_url=deps.config.search.base_url, results=lookup_result_segments(found),
+                ))
             else:
                 # A declined search must still fall through to the human-ask
                 # fallback below, exactly as if lookup had been tried and come

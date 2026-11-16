@@ -16,7 +16,7 @@ Two levels:
 - attempt-level runs of ``run_attempt`` for every retry family on a fixture whose evidence sources each name a
   DIFFERENT member (a failure locator, a rejected SEARCH text, the retrieval grounding, the goal's named members, the
   unfit-target fallback), a fallback whose window and temperature differ from the primary's, an excluded hinted path,
-  a target not yet written, the reference-material marker in the error context: targeted, fallback-targeted,
+  a target not yet written, a live-lookup reference held beside the error context (C-10): targeted, fallback-targeted,
   missing-files, the full-set retry (scoped and unscoped), API-contract recovery (all three phases), the
   verification-only unit (which sends no Developer request), the no-progress and sampling decisions, and a
   coordinated multi-file repair whose RepairContract is derived by the real ``_record_process_boundary_obligation``
@@ -55,6 +55,7 @@ from kriya.workflow.obligations import ObligationLedger
 from kriya.workflow.open_findings import OpenFinding
 from kriya.workflow.retry_package import RetryPackage
 from kriya.workflow.state import APIContractRecovery, APIContractRecoveryPhase, GenerationState
+from kriya.workflow.untrusted_context import ExternalReference
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "state_machine"))
 import _kernel_golden as kg  # noqa: E402 - needs the sys.path entry above  # pylint: disable=wrong-import-position
@@ -365,7 +366,8 @@ BIG, BASE, MEDIUM, CATALOG = ("src/org/example/Big.java", "src/org/example/Base.
 # (Node defines absUrl too) and five bare calls Element defines: more goal members than the per-file cap of four.
 GOAL = ("Fix Element.absUrl so a relative key resolves: it calls attr(key), text(), lookup(key) and id(); keep "
         "Node.childCount unchanged.")
-REFERENCE_MARKER = "\n\n=== Reference material found for this failure ===\nReference: an advisory snippet."
+# C-10: what a live lookup fetched for the failure - typed, and no part of the retry package or the error context.
+EXTERNAL_REFERENCES = (ExternalReference(term="jsoup", url="https://example.invalid/ref", text="Reference: an advisory snippet."),)
 
 
 def _big_source():
@@ -465,7 +467,8 @@ def _state(workspace, *, attempt_number=1, mode="targeted", implicated=(E, N), f
     state.last_implicated_files = list(implicated)
     state.all_files_written = {E, U}
     state.last_failure = failure if failure is not None else _failure()
-    state.error_context = "COMPILE ERROR in Element.java: cannot find symbol relative" + REFERENCE_MARKER
+    state.error_context = "COMPILE ERROR in Element.java: cannot find symbol relative"
+    state.external_references = EXTERNAL_REFERENCES
     state.last_error_source_context = {E: "    public String absUrl(String key) {"}
     # a recorded post-compile revision differs from a fresh hash only in name: the package must take it as recorded
     state.validated_file_revisions = {E: content_revision(ELEMENT), U: "sha256:validated-after-compile"}
@@ -671,7 +674,8 @@ def _family_coordinated(tmp_path):
     state.last_attempt_mode = "full_set"
     state.all_files_written = {APP, APP_TEST}
     state.last_implicated_files = [APP_TEST]
-    state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict" + REFERENCE_MARKER
+    state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict"
+    state.external_references = EXTERNAL_REFERENCES
     state.last_error_source_context = {APP_TEST: "    void testMain() { App.main(new String[0]); }"}
     state.last_failure = Failure(type="test_process_terminated", message="TEST_PROCESS_TERMINATED", raw_output=PRV06_CRASH,
                                  source="test", attempt=1, likely_files=[APP_TEST])
@@ -749,7 +753,8 @@ def test_a_coordinated_repair_across_three_groups_carries_each_participants_cand
     state = GenerationState()
     state.attempt_number = 3
     state.all_files_written = set(paths)
-    state.error_context = "TEST_PROCESS_TERMINATED" + REFERENCE_MARKER
+    state.error_context = "TEST_PROCESS_TERMINATED"
+    state.external_references = EXTERNAL_REFERENCES
     state.last_error_source_context = {APP: "        if (args.length == 0) { System.exit(1); }"}
     ctx = _ctx(str(tmp_path), _config(chain=False, retry_temperature=0.45), architect_files=list(paths),
                expected_files_upfront=list(paths), ecosystem_invariant_block="ECOSYSTEM: maven",
@@ -908,7 +913,8 @@ def test_the_retry_package_is_built_from_the_retrys_own_universe_budget_and_evid
                           evidence="Element.java:16 concat", first_attempt=1)
     state = _failed(likely_files=[E])
     state.all_files_written = {E, U, big}
-    state.error_context = "ERROR" + REFERENCE_MARKER
+    state.error_context = "ERROR"
+    state.external_references = EXTERNAL_REFERENCES
     state.last_error_source_context = {E: "line 16"}
     state.validated_file_revisions = {U: "sha256:validated-after-compile"}
     state.open_findings = [finding]
@@ -918,7 +924,7 @@ def test_the_retry_package_is_built_from_the_retrys_own_universe_budget_and_evid
     assert [p.path for p in package.target_projections] == [N]  # ... only the universe: N (requested, unwritten)
     assert sorted(p.path for p in package.reference_projections) == [BASE, big]   # established + written, U excluded
     assert package.source_context == {E: "line 16"} and package.open_findings == (finding,)
-    assert package.advisory_context == REFERENCE_MARKER.lstrip("\n")
+    assert "advisory snippet" not in package.render_error() + package.render_context() + package.prior_error_text()
     with_known = attempt._retry_package_for_attempt(state, ctx, target_files=[U], prompt_window=4000)
     assert [p.revision for p in with_known.target_projections if p.path == U] == ["sha256:validated-after-compile"]
     narrow = attempt._retry_package_for_attempt(state, ctx, target_files=[big], prompt_window=4000)
@@ -935,7 +941,7 @@ def test_retry_projections_are_recorded_as_context_items_without_losing_member_p
         path=N, content="body", reason="member", source_type="named_in_request", trust_level="repository",
         tier="member_exact", is_exact=True, revision="rev-N", member_id="Node.childCount", omitted_regions=False)
     package = RetryPackage(
-        failure_type="compile", authoritative_error="e", advisory_context="", target_files=(E,),
+        failure_type="compile", authoritative_error="e", target_files=(E,),
         target_projections=(FileProjection(E, "rev-E", ProjectionLevel.FULL, "target", ELEMENT, False, len(ELEMENT)),),
         reference_projections=(FileProjection(U, "rev-U", ProjectionLevel.FULL, "dependency_reference", UTIL, True, 9),
                                FileProjection(N, "rev-N", ProjectionLevel.FULL, "dependency_reference", NODE, True, 9)),
