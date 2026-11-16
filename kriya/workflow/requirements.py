@@ -1064,8 +1064,14 @@ def requirement_counter_evidence(
     return None
 
 
-def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, RequirementOutcome]:
+def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet, *,
+                         contract: Any = None) -> Dict[str, RequirementOutcome]:
     """Each requirement's authoritative outcome (PENDING until a verdict).
+    S5 (C-01): with the run's sealed verification ``contract``, a requirement
+    the contract holds (``semantic_holds``: AMBIGUOUS, or a required claim
+    with no bound authority) is never CLOSED_BY_EVIDENCE or HUMAN_ACCEPTED,
+    whatever a ledger record says: the contract is the requirement truth, a
+    record is evidence under it. Counter-evidence still makes it VIOLATED.
     Deterministic counter-evidence for the candidate the verdict judged makes
     it VIOLATED, whatever the verdict. UNVERIFIED becomes CLOSED_BY_EVIDENCE
     only with closure evidence for that exact candidate; a SATISFIED verdict
@@ -1073,6 +1079,7 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
     itself (MUTATION_SCOPE), so the outcome names what actually proved it.
     VIOLATED, UNKNOWN and PENDING verdicts are never closed."""
     outcomes: Dict[str, RequirementOutcome] = {}
+    held = contract.semantic_holds() if contract is not None else {}
     for requirement in requirements.requirements:
         if non_claim_record(ledger, requirement.id) is not None:
             # VERIFICATION-CONTRACT-003 (D1): nothing to verify, whatever any
@@ -1115,6 +1122,10 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
         elif outcome is RequirementOutcome.SATISFIED:
             # FS-1B: a SATISFIED verdict record without deterministic closure
             # (a pre-FS-1 record, e.g. read back on resume) authorizes nothing.
+            outcome = RequirementOutcome.UNVERIFIED
+        if requirement.id in held and outcome in _TRUTH_RESOLVED:
+            # S5: nothing sealed says what would prove this requirement (or which reading of it is meant), so no
+            # record written during the run closes it - a generated test is evidence, never the requirement.
             outcome = RequirementOutcome.UNVERIFIED
         outcomes[requirement.id] = outcome
     return outcomes
@@ -2092,7 +2103,7 @@ def close_suite_preservation_requirements(
 
 def blocking_requirements(
     ledger: ObligationLedger, requirements: RequirementSet, *,
-    unknown_policy: str = "record", unverified_policy: str = "record",
+    unknown_policy: str = "record", unverified_policy: str = "record", contract: Any = None,
 ) -> List[Tuple[Requirement, RequirementOutcome]]:
     """The requirements that forbid a successful terminal state. VIOLATED
     always blocks; PENDING and UNKNOWN (no verdict) block under
@@ -2100,7 +2111,7 @@ def blocking_requirements(
     always when the verifier reported it missing (GR-R0: an unrefuted model
     negative is not evidence either way, so it cannot become success)."""
     blocking: List[Tuple[Requirement, RequirementOutcome]] = []
-    outcomes = requirement_outcomes(ledger, requirements)
+    outcomes = requirement_outcomes(ledger, requirements, contract=contract)
     for requirement in requirements.requirements:
         outcome = outcomes[requirement.id]
         if (outcome is RequirementOutcome.VIOLATED

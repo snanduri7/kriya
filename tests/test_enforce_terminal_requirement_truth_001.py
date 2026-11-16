@@ -50,7 +50,7 @@ def _outcome_patches(outcome):
     if outcome is None:
         return ()
 
-    def outcomes(ledger, requirement_set):
+    def outcomes(ledger, requirement_set, **_reader_inputs):   # S5: the readers pass the sealed contract (``contract=``)
         return {requirement.id: outcome for requirement in requirement_set.requirements}
     return (patch.object(requirements_module, "requirement_outcomes", outcomes), patch(f"{C}.requirement_outcomes", outcomes))
 

@@ -3228,5 +3228,5 @@ class WorkflowEngine:
             workspace_path=workspace_path, run_id=run_id, required_verification=required_verification,
             unresolved_skill_gap_names=unresolved_skill_gap_names, skill_staleness_warnings=skill_staleness_warnings,
             active_skill_manifest=active_skill_manifest, requirement_set=requirement_set,
-            resolved_obligation_ledger=resolved_obligation_ledger,
+            resolved_obligation_ledger=resolved_obligation_ledger, verification_contract=verification_contract,
         )

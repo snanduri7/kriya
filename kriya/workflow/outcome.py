@@ -275,7 +275,7 @@ def completed_result(
     failure_report_dicts: List[Dict[str, Any]], plan: Any, design: Any, review: Any, workspace_path: str,
     run_id: str, required_verification: Optional[List[Dict[str, Any]]], unresolved_skill_gap_names: List[str],
     skill_staleness_warnings: List[str], active_skill_manifest: Any, requirement_set: Any,
-    resolved_obligation_ledger: Any,
+    resolved_obligation_ledger: Any, verification_contract: Any = None,
 ) -> Dict[str, Any]:
     """The result dict of a run that reached its terminal stage, every field in the order the run has always
     built it (``generation_metrics`` is sampled here, after the terminal trace row sampled its own)."""
@@ -355,13 +355,15 @@ def completed_result(
         **({"requirements": {
             **requirement_set.to_dict(),
             "outcomes": {rid: outcome.value for rid, outcome in
-                         requirement_outcomes(resolved_obligation_ledger, requirement_set).items()},
+                         requirement_outcomes(resolved_obligation_ledger, requirement_set,
+                                              contract=verification_contract).items()},
             "evidence": requirement_evidence(resolved_obligation_ledger, requirement_set),
             # MODEL-EVIDENCE-HARDENING-001: each verdict with its reason
             # code, evidence, verifier identity and judged candidate.
             "verdicts": requirement_verdict_details(resolved_obligation_ledger, requirement_set),
         }, "requirement_truth": requirement_truth(
-            requirement_outcomes(resolved_obligation_ledger, requirement_set), requirement_set,
+            requirement_outcomes(resolved_obligation_ledger, requirement_set, contract=verification_contract),
+            requirement_set,
         )} if requirement_set is not None else {}),
     }
 

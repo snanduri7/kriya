@@ -348,7 +348,8 @@ class TerminalGateService:
         requirement_gap, closure_attempts = await self._requirement_gap(request, migration_gap)
         requirements_verified = False
         if requirement_gap is None and request.requirement_set is not None and request.obligation_ledger is not None and request.autonomy is not None and request.autonomy.spec_compliance_enabled:
-            requirements_verified = requirements_fully_verified(requirement_outcomes(request.obligation_ledger, request.requirement_set).values(), requirement_gap)
+            requirements_verified = requirements_fully_verified(
+                requirement_outcomes(request.obligation_ledger, request.requirement_set, contract=request.verification_contract).values(), requirement_gap)
         await emit_gate_outcome(
             "original_requirements", "failed" if requirement_gap else "passed", requirement_gap,
         )
@@ -700,6 +701,7 @@ class TerminalGateService:
             ledger, requirement_set,
             unknown_policy=getattr(autonomy, "requirement_unknown_policy", "record"),
             unverified_policy=getattr(autonomy, "requirement_unverified_policy", "record"),
+            contract=request.verification_contract,   # S5: the sealed contract holds what no run-written record may close
         )
         if blocking:
             gap = f"{REQUIREMENTS_UNRESOLVED}: " + "; ".join(

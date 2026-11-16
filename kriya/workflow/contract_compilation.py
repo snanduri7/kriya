@@ -126,6 +126,21 @@ AUTHORITY_EXTERNAL_COMMAND = "external_acceptance_command"  # a sealed operator 
 AUTHORITY_CONTRACT = "contract"  # the compiler's own structural decision
 AUTHORITY_OPERATOR_DISPOSITION = "operator_disposition"  # a sealed operator disposition (kriya/workflow/requirement_disposition.py)
 
+# S5 (C-01, R-01): the semantic state of one sealed entry. DERIVED from what the entry already seals (status, required
+# claims, bindings): it is not a field, it is not serialized and it is not in the digest, because it adds no identity
+# the digest does not already hold. One closed table (``ContractEntry.semantic_state``); every entry has exactly one.
+SEMANTIC_SPECIFIED = "SPECIFIED"  # a behaviour claim whose every binding is an authority that states the behaviour itself
+SEMANTIC_GENERAL_UNSPECIFIED = "GENERAL_UNSPECIFIED"  # a required claim with no bound authority: nothing sealed says what would prove it
+SEMANTIC_AMBIGUOUS = "AMBIGUOUS"  # two readings the compiler can name; no candidate may choose one
+SEMANTIC_STRUCTURAL = "STRUCTURAL"  # repository-authority claims only (regression, immutability, scope, migration, test addition, ...)
+SEMANTIC_NOT_APPLICABLE = "NOT_APPLICABLE"  # not a claim, or dispositioned by the operator
+SEMANTIC_STATES = (SEMANTIC_SPECIFIED, SEMANTIC_GENERAL_UNSPECIFIED, SEMANTIC_AMBIGUOUS, SEMANTIC_STRUCTURAL,
+                   SEMANTIC_NOT_APPLICABLE)
+# The states whose requirement NO evidence produced during the run can close: the sealed contract holds no authority
+# for it, so a ledger record that claims to close it was not written under the contract (a generated test, a forged or
+# resumed record). ``requirements.requirement_outcomes`` reads this through ``VerificationContract.semantic_holds``.
+SEMANTIC_HOLD_STATES = frozenset({SEMANTIC_GENERAL_UNSPECIFIED, SEMANTIC_AMBIGUOUS})
+
 VISIBILITY_HIDDEN = "hidden"  # never in a prompt, never in the workspace
 VISIBILITY_GOAL_TEXT = "goal_text"  # part of the goal the Developer reads anyway
 
@@ -244,6 +259,11 @@ _ACCEPTABLE: Dict[Tuple[str, Optional[str]], Tuple[str, ...]] = {
     (REGRESSION_PRESERVATION, None): ("a statement naming the existing tests, or a whole-suite preservation statement",),
 }
 
+# S5: the authorities that state a behaviour themselves (an operator artifact, the goal's own examples or literal, the
+# operator's oracle). A behaviour claim bound only by these is SPECIFIED.
+_SPECIFYING_AUTHORITIES = frozenset({AUTHORITY_ACCEPTANCE_FILE, AUTHORITY_ACCEPTANCE_APPROVAL, AUTHORITY_GOAL_EXAMPLES,
+                                     AUTHORITY_EXTERNAL_COMMAND, AUTHORITY_RUNTIME_OBSERVATION})
+
 VERIFICATION_CONTRACT_EVENT_KINDS = frozenset({
     "verification_contract.authority_requested",  # BACKEND-READINESS-004 (D2): typed requests sealed on refusal
     "verification_contract.dispositioned",  # BACKEND-READINESS-004 (D3): operator dispositions bound and sealed
@@ -350,6 +370,28 @@ class ContractEntry:
     def required_claims(self) -> Tuple[str, ...]:
         return tuple(claim for claim in self.scope.claims if claim not in self.dispositioned_claims)
 
+    @property
+    def semantic_state(self) -> str:
+        """S5 (C-01): what the sealed entry establishes about the product's semantics, from one closed table over the
+        status and the bindings the compiler already sealed. Nothing a model produced is an input. A behaviour claim
+        bound by an authority outside the specifying set is a programming error (the compiler raises it at compile
+        time, before any model call), never a guessed state."""
+        if self.status == STATUS_AMBIGUOUS:
+            return SEMANTIC_AMBIGUOUS
+        if self.status in (STATUS_NOT_A_CLAIM, STATUS_DISPOSITIONED):
+            return SEMANTIC_NOT_APPLICABLE
+        if self.status == STATUS_AUTHORITY_REQUIRED:
+            return SEMANTIC_GENERAL_UNSPECIFIED
+        if self.status != STATUS_CLOSABLE:
+            raise ValueError(f"unclassified contract status {self.status!r} for {self.requirement_id}")
+        behaviour = [binding for binding in self.bindings if binding.claim == BEHAVIOR and BEHAVIOR in self.required_claims]
+        if not behaviour:
+            return SEMANTIC_STRUCTURAL
+        foreign = sorted({binding.authority_kind for binding in behaviour} - _SPECIFYING_AUTHORITIES)
+        if foreign:
+            raise ValueError(f"behaviour claim of {self.requirement_id} bound by an unclassified authority: {foreign}")
+        return SEMANTIC_SPECIFIED
+
     def to_dict(self) -> Dict[str, Any]:
         return {"requirement_id": self.requirement_id, "text": self.text, "kind": self.kind, "source": self.source,
                 "origin": self.scope.origin, "scopes": list(self.scope.scopes), "claims": list(self.scope.claims),
@@ -415,6 +457,15 @@ class VerificationContract:
                              "why": "; ".join(f"{r.claim}{' ' + r.strength if r.strength else ''}: {r.why}"
                                               for r in entry.residual)})
         return rows
+
+    def semantic_states(self) -> Dict[str, str]:
+        """S5 (C-01): requirement id -> its one semantic state (``ContractEntry.semantic_state``)."""
+        return {entry.requirement_id: entry.semantic_state for entry in self.entries}
+
+    def semantic_holds(self) -> Dict[str, str]:
+        """S5 closure rule: the requirements no run-produced evidence may close, with the state that holds each
+        (``SEMANTIC_HOLD_STATES``). The one input of the hold in ``requirements.requirement_outcomes``."""
+        return {rid: state for rid, state in self.semantic_states().items() if state in SEMANTIC_HOLD_STATES}
 
     def non_claim_ids(self) -> List[str]:
         return [e.requirement_id for e in self.entries if e.status == STATUS_NOT_A_CLAIM]
@@ -857,12 +908,14 @@ def compile_verification_contract(
         entries.append(ContractEntry(requirement.id, requirement.text, requirement.kind, requirement.source, scope,
                                      status, tuple(bindings), tuple(residual), ambiguity,
                                      disposition=disposition_detail, dispositioned_claims=tuple(dispositioned)))
-    return VerificationContract(
+    contract = VerificationContract(
         goal_digest=requirement_set.goal_digest, requirement_set_digest=requirement_set.digest,
         requirement_contract_digest=requirement_set.contract_digest, base_revision=base_revision,
         project_language=project_language, entries=tuple(entries), authorities=authorities,
         dispositions=dispositions.identity() if dispositions is not None else None,
     )
+    contract.semantic_states()  # S5: every entry classifies now, or the compiler fails here, before any model call
+    return contract
 
 
 def _disposition_binding(claim: str, entry: Any, digest: str) -> ClaimBinding:

@@ -4781,7 +4781,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # PRD-020: every original requirement's outcome, as the direct path
         # reports it (the verifier's verdict, or closed by evidence).
         try:
-            final_requirement_outcomes = deps.requirement_outcomes(obligation_ledger, requirement_set)
+            final_requirement_outcomes = deps.requirement_outcomes(obligation_ledger, requirement_set, contract=verification_contract)
             aggregated["requirements"] = {
                 **requirement_set.to_dict(),
                 "outcomes": {rid: outcome.value for rid, outcome in final_requirement_outcomes.items()},

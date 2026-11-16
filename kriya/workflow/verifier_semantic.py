@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -100,12 +101,15 @@ class ExecutedVerifier:
 class VerifierDerivation:
     """What one gate's structured report says about run-authored verifier sources. ``complete`` False = the report establishes nothing (no subject).
     ``ambiguous``: executed identities declared by more than one run-authored file (never assigned to either). ``unreadable``: run-authored structural
-    files whose bytes could not be read, decoded or cleanly parsed, so what they declare is unknown."""
+    files whose bytes could not be read, decoded or cleanly parsed, so what they declare is unknown. ``unmapped`` (S5, GAP-A2-02): executed identities
+    that map to no run-authored file exactly and that a run-authored file may nevertheless declare (``_may_declare``); "no mapped file" is not the
+    fact "the run did not write this test"."""
 
     verifiers: Tuple[ExecutedVerifier, ...] = ()
     complete: bool = False
     ambiguous: Tuple[str, ...] = ()
     unreadable: Tuple[str, ...] = ()
+    unmapped: Tuple[str, ...] = ()
 
     @property
     def failing(self) -> Tuple[ExecutedVerifier, ...]:
@@ -114,7 +118,27 @@ class VerifierDerivation:
     @property
     def undetermined(self) -> bool:
         """An executed identity could belong to a run-authored file that cannot be told apart or read: no subject may be invented, and none ruled out."""
-        return bool(self.ambiguous or self.unreadable)
+        return bool(self.ambiguous or self.unreadable or self.unmapped)
+
+
+def _dotted_tail(longer: str, shorter: str) -> bool:
+    """``shorter`` is ``longer`` minus leading dotted segments (a runner rooted above or below the structural module root)."""
+    return longer != shorter and longer.endswith("." + shorter)
+
+
+def _may_declare(identity: str, callable_keys: Iterable[str], opaque_paths: Iterable[str]) -> bool:
+    """Could a run-authored file declare the executed ``identity`` although no callable of it carries that exact identity? Two measured causes
+    (A2 probes P5, P7): (1) the runner and the structural parser root the module differently (a ``src/`` layout), so one name is a dotted tail of
+    the other; (2) the file is in a language with no structural grammar, so nothing it declares is known, and its path spelled as a dotted name
+    ends with the identity's leading segments. Either makes the provenance UNKNOWN; it never makes the file a subject."""
+    if any(_dotted_tail(identity, key) or _dotted_tail(key, identity) for key in callable_keys):
+        return True
+    segments = identity.split(".")
+    for path in opaque_paths:
+        module = os.path.splitext(path)[0].split("/")
+        if any(segments[:size] == module[-size:] for size in range(1, min(len(segments) - 1, len(module)) + 1)):
+            return True
+    return False
 
 
 def normalize_path(path: str) -> str:
@@ -136,6 +160,8 @@ def derive_executed_verifiers(report: Optional[Mapping[str, Any]], authored: Map
     declared: Dict[str, List[str]] = {}
     sources: Dict[str, Tuple[bytes, str]] = {}
     unreadable: List[str] = []
+    callable_keys: List[str] = []   # every callable a parsed run-authored file declares, executed under that exact identity or not
+    opaque_paths: List[str] = []    # run-authored paths the structural parser has no grammar for
     for raw_path in sorted(authored):
         path = normalize_path(raw_path)
         data = authored[raw_path]
@@ -146,6 +172,7 @@ def derive_executed_verifiers(report: Optional[Mapping[str, Any]], authored: Map
             # file only to ask that question.
             structure = CandidateOverlay({path: data if data is not None else b""}).structures.get(path)
             if structure is None:
+                opaque_paths.append(path)
                 continue
             if data is None:
                 raise ValueError("unreadable")
@@ -157,9 +184,14 @@ def derive_executed_verifiers(report: Optional[Mapping[str, Any]], authored: Map
             continue
         sources[path] = (data, text)
         for symbol in structure.symbols:
+            if symbol.is_callable:
+                callable_keys.append(symbol.lookup_key)
             if symbol.is_callable and symbol.lookup_key in executed:
                 declared.setdefault(symbol.lookup_key, []).append(path)
     ambiguous = sorted(identity for identity, paths in declared.items() if len(set(paths)) > 1)
+    # S5 (GAP-A2-02): an executed identity with no exact mapping is NOT thereby a pre-existing test. Fail closed where a run-authored file may
+    # declare it; an identity no run-authored file can account for stays what it was (a repository test: the historical path).
+    unmapped = sorted(identity for identity in executed - set(declared) if _may_declare(identity, callable_keys, opaque_paths))
     by_file: Dict[str, List[str]] = {}
     for identity, paths in declared.items():
         if len(set(paths)) == 1:
@@ -168,7 +200,7 @@ def derive_executed_verifiers(report: Optional[Mapping[str, Any]], authored: Map
         ExecutedVerifier(path=path, sha256=hashlib.sha256(sources[path][0]).hexdigest(), source=sources[path][1],
                          identities=tuple(sorted(identities)), failed_identities=tuple(sorted(i for i in identities if i in failed)))
         for path, identities in sorted(by_file.items()))
-    return VerifierDerivation(verifiers=verifiers, complete=True, ambiguous=tuple(ambiguous), unreadable=tuple(unreadable))
+    return VerifierDerivation(verifiers=verifiers, complete=True, ambiguous=tuple(ambiguous), unreadable=tuple(unreadable), unmapped=tuple(unmapped))
 
 
 # ----------------------------------------------------------------------------- semantic authority and the next action
@@ -385,6 +417,7 @@ class UnitSemantics:
             if derivation.complete and any(isinstance(case, Mapping) for case in (result.get("test_execution") or {}).get("test_cases") or ()):
                 unknown.extend(f"ambiguous:{identity}" for identity in derivation.ambiguous)
                 unknown.extend(f"unreadable:{path}" for path in derivation.unreadable)
+                unknown.extend(f"unmapped:{identity}" for identity in derivation.unmapped)
             for verifier in derivation.verifiers:
                 known = merged.get(verifier.path)
                 merged[verifier.path] = verifier if known is None else ExecutedVerifier(
@@ -459,7 +492,7 @@ class UnitSemantics:
         if judged is not None:
             return judged
         if unknown:
-            return self._stop(REASON_SUBJECT_AMBIGUOUS if unknown[0].startswith("ambiguous:") else REASON_SUBJECT_UNREADABLE, "",
+            return self._stop(REASON_SUBJECT_UNREADABLE if unknown[0].startswith("unreadable:") else REASON_SUBJECT_AMBIGUOUS, "",
                               "a test gate executed cases, and whether they belong to a source this run wrote cannot be resolved ("
                               + ", ".join(unknown[:5]) + ")")
         failing = [verifier for verifier in verifiers if verifier.failed_identities]
@@ -489,7 +522,7 @@ class UnitSemantics:
         if judged is not None:
             return judged
         if unknown:
-            return self._stop(REASON_SUBJECT_AMBIGUOUS if unknown[0].startswith("ambiguous:") else REASON_SUBJECT_UNREADABLE, "",
+            return self._stop(REASON_SUBJECT_UNREADABLE if unknown[0].startswith("unreadable:") else REASON_SUBJECT_AMBIGUOUS, "",
                               "a test gate executed cases, and whether they belong to a source this run wrote cannot be resolved ("
                               + ", ".join(unknown[:5]) + ")")
         for verifier in verifiers:

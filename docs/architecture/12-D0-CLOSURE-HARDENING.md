@@ -827,3 +827,61 @@ an `MCPTool`'s never-started client (`test_s18_planned_tool_governance.py`, `tes
 
 **Not run (by the lightweight slice process).** The full suite, all of `tests/test_workflow.py`, the whole state-machine tier, an owner
 exact-SHA run, and the 22 section-15 mutants again (no later edit touched their branches).
+
+## 17. Slice S5: the sealed contract is the requirement truth; a generated test is evidence under it (C-01, R-01; 2026-11-16, implementation branch)
+
+**Invariant.** Authoritative semantic requirements exist and are sealed before Developer-written implementation or tests can define or
+verify them. A generated test may prove a requirement the contract binds; it never creates one, never closes one the contract holds, and is
+never an authoritative failure while its provenance is unknown.
+
+**Owner correction applied (2026-11-16): no new schema.** Section 6 specified `semantic_state` as a serialized field (compiler version 4 to
+5, one golden regeneration, an `AmbiguitySubject` approval kind, Planner rendering). The owner's S5 instruction narrowed it: derive from the
+existing contract, one authority, no separate patches in the prompt, the verifier and the Reviewer. What was built is the derived form.
+
+### 17.1 Reproducer and first wrong owner
+
+| Step | Fact | Label |
+|---|---|---|
+| Goal to contract | A general behaviour sentence seals as `AUTHORITY_REQUIRED` with no closer (A2 P8, P9) | `MEASURED` |
+| Developer request to generated test | The run writes a test; the gate executes it and it fails | scripted |
+| First wrong owner | `verifier_semantic.py::derive_executed_verifiers`: an executed identity that maps to no run-authored file exactly was read as "the run did not write this test" (A2 P5: a `src/` layout; P7: a language with no grammar) | `MEASURED`, `TRACED` |
+| Consequence | No semantic ruling; the failure is authoritative and the ordinary retry repairs towards the generated expectation | `MEASURED` pre-fix: mutant M01 restores the old line and the owner tests and the loop test fail |
+
+Prediction stated before the fix: the same scripted unit stops for review after one generation, with no retry and nothing applied.
+Post-fix: `test_a_failing_generated_test_of_unknown_provenance_stops_for_review_before_any_retry` (both modes) passes.
+
+### 17.2 What changed
+
+| Owner | Change |
+|---|---|
+| `verifier_semantic.py` | `VerifierDerivation.unmapped`, part of `undetermined`. An executed identity with no exact mapping is unmapped when a run-authored file may declare it (`_may_declare`): a parsed file declares a callable whose name is a dotted tail of the identity or the reverse (module-root difference), or a file with no grammar has a path that, spelled as a dotted name, ends with the identity's leading segments. It is never made a subject (no binding is invented). Both seams stop with the existing `VERIFIER_SEMANTIC_SUBJECT_AMBIGUOUS`; no new reason code. An identity no run-authored file can account for stays a repository test (the historical path) |
+| `contract_compilation.py` | `ContractEntry.semantic_state`, a derived property over the sealed status and bindings: `AMBIGUOUS`, `NOT_APPLICABLE`, `GENERAL_UNSPECIFIED` (a required claim with a residual), `SPECIFIED` (a behaviour claim bound only by an acceptance file, an approval, goal examples, an external command or a runtime observation), `STRUCTURAL`. An unclassified status or behaviour authority raises at compile time. **Not serialized, not in the digest; `CONTRACT_COMPILER_VERSION` stays 4; no contract goes stale; no golden changes.** `VerificationContract.semantic_states()` and `semantic_holds()` (`AMBIGUOUS`, `GENERAL_UNSPECIFIED`) |
+| `requirements.py` | The closure rule, at the one reader: `requirement_outcomes(..., contract=)` never returns `CLOSED_BY_EVIDENCE` or `HUMAN_ACCEPTED` for a requirement the contract holds; counter-evidence still makes it `VIOLATED`. `blocking_requirements(..., contract=)` |
+| Readers | `development_loop.py` (the `requirement.truth` event and the block decision), `terminal_gate_service.py` (both reads), `enforce_loop.py` (the run's final truth), `outcome.py` and `workflow.py` (the direct result) pass the run's contract. A structural test fails when one of those modules reads outcomes without it |
+
+### 17.3 Readings taken, and what S5 did not build
+
+| Item | State | Registry |
+|---|---|---|
+| Ambiguity, unattended or `block` | AS-IS typed `GoalAdmissionError` before any model call (pinned). Under `record` the entry is held open and nothing closes it | - |
+| Ambiguity, attended | No ask path exists ("where supported"): not built. The person rewords the goal or seals a disposition | `AMBIGUITY-ATTENDED-QUESTION-001` |
+| A person's verifier decision closing a general requirement as acceptance (C-01 UNKNOWN row) | Not built: it stays UNVERIFIED. It decides how many ordinary runs end applied-with-open-requirements after S6 | `GENERAL-REQUIREMENT-PERSON-ACCEPTANCE-CLOSURE-001` |
+| Section 6 items 5 and 6 (Planner rendering, contradiction with a `SPECIFIED` binding, INT-08, `GAP-A4-05`) | Not built | `PLANNER-SEMANTIC-STATE-AND-CRITERION-REFS-001` |
+| Ruling 17 (a model-inferred optional runtime check) | Semantic half pinned: it has no entry, so it opens and closes nothing. The gate half (a graded optional failure still fails the gate) is the result contract's | `OPTIONAL-RUNTIME-GRADED-FAILURE-GATE-S6` |
+| Unmapped tests are held, not mapped | An attended person cannot review them as a subject. Whether Kriya's own gate reports such identities for `src/` is not measured | `VERIFIER-SRC-LAYOUT-IDENTITY-MAPPING-001` |
+
+Known limits. The no-grammar rule reads a path; a test whose class name differs from its file name in such a language is not caught. The
+hold is a defence at the reader: no product writer of a closure record for a held requirement was found (`TRACED`), so it changes no
+measured run. The semantic fact S6 consumes: `VerificationContract.semantic_states()` and the outcomes read under the contract.
+
+### 17.4 Proof
+
+`tests/test_s5_semantic_contract_authority.py` (30 tests: the reproducer at the owner and on the real controller and unit, the six owner
+controls, the state table, the reader guard). Mutants 17 of 17 killed in a scratch copy (`~/kriya-evidence/s5-9afec0e/mutants_s5_run1.txt`;
+the real worktree status was identical before and after). Focused gate `gate_s5_run1.txt`: 889 passed, 3 failed, one class-C family (a
+test double of `requirement_outcomes` without the new keyword, `test_enforce_terminal_requirement_truth_001.py::_outcome_patches`; fixed at
+the shared helper), then the affected files again. It included `tests/architecture` and the kernel goldens (unchanged, none regenerated).
+`ruff` and `pylint` exit 0.
+
+**Not run (by the lightweight slice process).** The full suite, all of `tests/test_workflow.py`, the whole state-machine tier, an owner
+exact-SHA run; the whole focused gate was not rerun after the stub fix (affected files only).

@@ -847,7 +847,9 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                 ))
             # The typed requirement truth AS OF this closure, in the run's own events (persisted with the trace, so a stored run
             # shows the same truth as the live one): the LAST such event of a run is its final truth.
-            truth = requirement_truth(requirement_outcomes(resolved_obligation_ledger, requirement_set), requirement_set)
+            # S5: read under the sealed contract (a requirement the contract holds is never closed by a run-written record).
+            truth = requirement_truth(requirement_outcomes(resolved_obligation_ledger, requirement_set, contract=verification_contract),
+                                      requirement_set)
             state.record_event(RunEvent(
                 kind="requirement.truth", attempt=state.attempt_number, source="workflow.requirement_closure",
                 authority=EventAuthority.AUTHORITATIVE,
@@ -857,7 +859,7 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
             blocking = blocking_requirements(
                 resolved_obligation_ledger, requirement_set,
                 unknown_policy=autonomy_policy.requirement_unknown_policy,
-                unverified_policy=autonomy_policy.requirement_unverified_policy,
+                unverified_policy=autonomy_policy.requirement_unverified_policy, contract=verification_contract,
             )
             if blocking:
                 detail = "; ".join(
