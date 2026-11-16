@@ -148,13 +148,18 @@ def test_expected_result_line_is_what_the_goal_asks_for() -> None:
 def _gaps(tmp_path: Path, *, offline: bool, with_skill: bool, release_known: bool) -> list:
     skills = tmp_path / "skills"
     memory = tmp_path / "memory"
+    workspace = tmp_path / "workspace"   # the scenario's layout: work/skills beside work/workspace, so the skills are the operator's
     skills.mkdir()
     memory.mkdir()
+    workspace.mkdir()
     if with_skill:
         shutil.copytree(SKILL, skills / SKILL.name)
     if release_known:
         KnowledgeCache(str(memory), ttl_days=30).set_release_date("java", "org.apache.ignite:ignite-core", "2.18.0", IGNITE_218_RELEASED, "test")
-    report = KnowledgeGuard(skills_dir=str(skills), cutoff_date_str="2023-12-01", offline=offline, memory_dir=str(memory), cache_ttl_days=30).check_goal(GOAL, str(tmp_path))
+    engine = SkillEngine(str(skills), load_global=False, load_cwd=False, workspace_path=str(workspace))
+    engine.discover_and_load()
+    report = KnowledgeGuard(skills_dir=str(skills), cutoff_date_str="2023-12-01", offline=offline, memory_dir=str(memory), cache_ttl_days=30,
+                            coverage=engine.covers_library).check_goal(GOAL, str(workspace))
     return [(g["library"], g["version"]) for g in report.gaps]
 
 

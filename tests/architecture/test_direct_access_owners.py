@@ -159,9 +159,7 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.core.inference_runtime": (1, "I3", "openai SDK import outside the adapter module: ONE selection site"),
         "kriya.core.llm": (1, "I3", "openai SDK import outside the adapter module: ONE selection site"),
     },
-    "skill_dir_reads": {
-        "kriya.tools.knowledge": (1, "J2", "skills directory read through the SkillRegistry when the guard moves"),
-    },
+    "skill_dir_reads": {},  # C-06 (S4): the knowledge guard asks the Skills owner (SkillEngine.covers_library); it lists no directory
     "tool_registry": {
         "kriya.cli": (5, "K2", "ToolRegistry.execute / catalog (cli tools list/execute)"),
         # S18 (OI-127): the stage_planning / enforce_loop / shadow_mode entries (1 each, removal slice K1) are REMOVED:

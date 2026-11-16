@@ -298,30 +298,55 @@ def test_the_gate_library_roots_are_the_shipped_library_only_for_a_bound_default
     assert not is_project_skill_overlay(unbound) and SkillEngine.gate_library_roots(unbound) == []
 
 
-def _guard(cfg):
+def _guard(cfg, root=None):
+    """The gate as a run builds it: the project's roots (S3) and, with ``root``, the Skills owner's coverage answer for that project (S4)."""
+    coverage = None
+    if root is not None:
+        engine = SkillEngine.from_config(cfg, workspace_path=root)
+        engine.discover_and_load()
+        coverage = engine.covers_library
     return KnowledgeGuard(skills_dir=cfg.paths.skills, cutoff_date_str="2023-12-01", offline=True,
-                          library_dirs=SkillEngine.gate_library_roots(cfg))
+                          library_dirs=SkillEngine.gate_library_roots(cfg), coverage=coverage)
 
 
 def _gaps(cfg, root):
-    return [gap["library"] for gap in _guard(cfg).check_goal(IGNITE_GOAL, root).gaps]
+    return [gap["library"] for gap in _guard(cfg, root).check_goal(IGNITE_GOAL, root).gaps]
 
 
-def test_a_scaffold_in_one_project_does_not_close_another_projects_knowledge_gate(two_projects):
-    """A5 P8, inverted. MEASURED before S3: project B's gap list went from ['org.apache.ignite:ignite-core'] to [] after project A scaffolded."""
+def _trusted_skill(skills_root, folder="widget-core"):
+    """A skill that names the probe library and holds one rule its root's owner authored."""
+    path = os.path.join(str(skills_root), folder)
+    os.makedirs(path)
+    with open(os.path.join(path, "skill.yaml"), "w", encoding="utf-8") as handle:
+        handle.write("name: widget-core\ndescription: d\ntags: [widget-core]\n")
+    with open(os.path.join(path, "rules.txt"), "w", encoding="utf-8") as handle:
+        handle.write("Always close the WidgetPool.\n")
+    return path
+
+
+def test_what_one_project_holds_in_its_overlay_does_not_close_another_projects_knowledge_gate(two_projects):
+    """A5 P8, inverted. MEASURED before S3: project B's gap list went from ['org.apache.ignite:ignite-core'] to [] after project A scaffolded.
+    S4 (C-06): a scaffold closes nobody's gate, A's included; what closes A's is a skill with a trusted rule, and that stays A's."""
     a, b, cfg_a, cfg_b = two_projects
     assert _gaps(cfg_a, a) == [IGNITE] and _gaps(cfg_b, b) == [IGNITE]
     target = _guard(cfg_a).generate_skill_template(IGNITE, "2.16.0")
     assert os.path.dirname(target) == cfg_a.paths.skills  # the scaffold is written to A's overlay, never to a library root
+    assert _gaps(cfg_a, a) == [IGNITE] and _gaps(cfg_b, b) == [IGNITE]
+    _trusted_skill(cfg_a.paths.skills)
     assert _gaps(cfg_a, a) == []
     assert _gaps(cfg_b, b) == [IGNITE]
 
 
 def test_a_library_root_counts_for_coverage_and_is_never_written(tmp_path):
-    library, overlay = tmp_path / "library", tmp_path / "overlay"
-    (library / "com.kriyaprobe.widgets-widget-core").mkdir(parents=True)
-    with_library = KnowledgeGuard(skills_dir=str(overlay), cutoff_date_str="2023-12-01", offline=True, library_dirs=[str(library)])
-    without = KnowledgeGuard(skills_dir=str(overlay), cutoff_date_str="2023-12-01", offline=True)
+    library, overlay, workspace = tmp_path / "library", tmp_path / "overlay", tmp_path / "project"
+    workspace.mkdir()
+    _trusted_skill(library)
+    engine = SkillEngine(str(overlay), load_global=False, load_cwd=False, workspace_path=str(workspace))
+    engine.skills_dirs.insert(0, str(library))  # a read-only root the engine loads beside the project's, as it loads the shipped library
+    engine.discover_and_load()
+    with_library = KnowledgeGuard(skills_dir=str(overlay), cutoff_date_str="2023-12-01", offline=True, library_dirs=[str(library)],
+                                  coverage=engine.covers_library)
+    without = KnowledgeGuard(skills_dir=str(overlay), cutoff_date_str="2023-12-01", offline=True, coverage=engine.covers_library)
     assert [gap["library"] for gap in without.check_goal(IGNITE_GOAL, str(tmp_path)).gaps] == [IGNITE]
     assert with_library.check_goal(IGNITE_GOAL, str(tmp_path)).gaps == []
     before = sorted(os.listdir(library))

@@ -1319,8 +1319,16 @@ class WorkflowController:
             if kernel is not None:
                 _log_phase_banner("KNOWLEDGE GUARD")
                 from kriya.config.resolution import global_store_directory
-                from kriya.skills.skill import SkillEngine as _GateSkillEngine
+                from kriya.skills.skill import SkillEngine
                 from kriya.tools.knowledge import KnowledgeGuard
+
+                # One registry load for the authoritative run, made BEFORE the knowledge gate: the gate asks this engine whether a library is
+                # covered (C-06: the Skills owner's answer about the skills loaded for this project, never a listing of the skills root).
+                # Individual subtasks project relevant skills from this shared engine; genuine skill writes still trigger their existing reloads.
+                shared_skill_engine = SkillEngine.from_config(
+                    kernel.config, workspace_path=workspace_path,
+                )
+                shared_skill_engine.discover_and_load()
                 knowledge_config = kernel.config.knowledge
                 cutoff = kernel.config.llm.knowledge_cutoff
                 if knowledge_config.training_cutoff != "2023-12-01":
@@ -1331,7 +1339,8 @@ class WorkflowController:
                     offline=knowledge_config.offline_mode,
                     memory_dir=global_store_directory(kernel.config.paths.state),  # C-05: the release cache is a declared global store
                     cache_ttl_days=knowledge_config.release_cache_ttl_days,
-                    library_dirs=_GateSkillEngine.gate_library_roots(kernel.config),
+                    library_dirs=SkillEngine.gate_library_roots(kernel.config),
+                    coverage=shared_skill_engine.covers_library,
                 )
                 goal_gap_report = guard.check_goal(goal, workspace_path)
                 resolved_coordinates = [gap["library"] for gap in goal_gap_report.gaps]
@@ -1356,14 +1365,6 @@ class WorkflowController:
                 )
                 legacy_kwargs["resolved_knowledge_coordinates"] = resolved_coordinates
 
-                # One registry load for the authoritative run. Individual
-                # subtasks project relevant skills from this shared engine;
-                # genuine skill writes still trigger their existing reloads.
-                from kriya.skills.skill import SkillEngine
-                shared_skill_engine = SkillEngine.from_config(
-                    kernel.config, workspace_path=workspace_path,
-                )
-                shared_skill_engine.discover_and_load()
                 legacy_kwargs["skill_engine_override"] = shared_skill_engine
             ownership_findings = audit_control_ownership(workspace_path)
             if ownership_findings:  # D2 M4: control state that is not provably this workspace's is refused, never adopted by stamping it

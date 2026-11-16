@@ -35,8 +35,14 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
     # GIT-MIDRUN-COMMITS-S3-001: while the run's engine shadows the skills root, the guard reads (and scaffolds into) the
     # engine's effective root, never the canonical directory inside the bound candidate repository.
     skills_root = deps.config.paths.skills
-    if ctx.skill_engine_override is not None:
-        skills_root = ctx.skill_engine_override.effective_skills_dir(skills_root)
+    # C-06: coverage is the Skills owner's answer about the skills LOADED for this project (the run's shared engine, or this unit's own load),
+    # never a listing of the skills root.
+    gate_engine = ctx.skill_engine_override
+    if gate_engine is not None:
+        skills_root = gate_engine.effective_skills_dir(skills_root)
+    else:
+        gate_engine = deps.SkillEngine.from_config(deps.config, workspace_path=workspace_path)
+        gate_engine.discover_and_load()
     guard = KnowledgeGuard(
         skills_dir=skills_root,
         cutoff_date_str=cutoff,
@@ -44,6 +50,7 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
         memory_dir=global_store_directory(deps.config.paths.state),  # C-05: the release cache is a declared global store
         cache_ttl_days=knowledge_config.release_cache_ttl_days,
         library_dirs=deps.SkillEngine.gate_library_roots(deps.config),
+        coverage=gate_engine.covers_library,
     )
 
     all_gap_report = guard.check_goal(goal, workspace_path)

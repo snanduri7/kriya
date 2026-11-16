@@ -193,10 +193,14 @@ def test_every_shipped_tool_declares_and_the_resolution_projects_it():
             assert decision.autonomy_mode == mode and decision.containment_backend == "none"
 
 
-def test_mcp_tools_are_governed_side_effects_and_stay_plannable():
-    from kriya.mcp.mcp import MCPTool
+def test_mcp_tools_are_governed_side_effects_and_stay_plannable(tmp_path):
+    """A tool of a server bound to a profile with NO write grant (C-04 ruling 11; the write-granted case is tests/test_s4_knowledge_truth.py)."""
+    from kriya.mcp.capability import resolve_mcp_capability_profile
+    from kriya.mcp.mcp import MCPClient, MCPTool
 
-    tool = MCPTool.__new__(MCPTool)
+    profile = resolve_mcp_capability_profile({"workspace_read": True}, workspace_root=str(tmp_path))
+    client = MCPClient("srv", "true", [], capability_profile=profile, containment_backend=object())
+    tool = MCPTool(client, {"name": "echo", "inputSchema": {"type": "object", "properties": {}}})
     for mode in (*MODES, None):
         decision = resolve_planned_tool_governance(tool, autonomy_mode=mode)
         assert decision.plannable and decision.governance is ToolGovernance.GOVERNED_SIDE_EFFECT

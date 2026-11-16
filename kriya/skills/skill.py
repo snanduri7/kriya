@@ -234,16 +234,26 @@ def load_rule_provenance(skill_source_path: str) -> List[Dict[str, Any]]:
     untracked content and is treated as already-trusted, not retroactively flagged
     unverified - only rules extracted since this tracking was added ever get a
     record."""
+    records = read_rule_provenance(skill_source_path)
+    return records if records is not None else []
+
+
+def read_rule_provenance(skill_source_path: str) -> Optional[List[Dict[str, Any]]]:
+    """`load_rule_provenance` that keeps the difference the trust decision needs (C-06, INT-07): ``[]`` when the skill has no provenance file,
+    None when it has one that cannot be read or is not a list of records. Never raises."""
     path = _rule_provenance_path(skill_source_path)
     if not os.path.exists(path):
         return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, list) else []
     except Exception as e:
-        logger.warning(f"Failed to read rule provenance at '{path}' (treating as empty): {e}")
-        return []
+        logger.warning(f"Failed to read rule provenance at '{path}' (its rules are not trusted): {e}")
+        return None
+    if not isinstance(data, list) or not all(isinstance(record, dict) for record in data):
+        logger.warning(f"Rule provenance at '{path}' is not a list of records (its rules are not trusted).")
+        return None
+    return data
 
 
 def record_rule_provenance(skill_source_path: str, rule_text: str, source: str) -> None:
@@ -268,7 +278,7 @@ def record_rule_provenance(skill_source_path: str, rule_text: str, source: str) 
         logger.warning(f"Failed to persist rule provenance (non-fatal): {e}")
 
 
-def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> Optional[bool]:
+def mark_rules_verified(skill_source_path: str, rule_texts: List[str], project: Optional[str] = None) -> Optional[bool]:
     """Flips verified=True for exactly the given rule texts that already have a
     provenance record - never creates a new record, since a rule with no record is
     pre-existing/untracked content that was never flagged unverified in the first
@@ -276,6 +286,11 @@ def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> Option
     that were part of the skill when that run's context was actually built (a
     snapshot taken before the retry loop starts), not whatever the skill's rules.txt
     happens to contain by the time verification finishes.
+
+    ``project`` (C-06, SKILLS-EXPLICIT-ROOT-IDENTITY-BINDING-001) is the identity of the project whose committed run earned the verification.
+    It is recorded in the rule's ``verified_for`` list, and a record that carries the list is trusted only by the projects in it
+    (`SkillEngine._trusted_rules`): what one project's run proved in a skills directory several projects name is not knowledge for the others.
+    A record another project already verified gains this project; a record with no list (shipped, or verified by an operator) is left as it is.
 
     Returns the commit outcome (`git_commit_if_tracked`) when it changed the provenance file, None when there was nothing to
     change or the write failed (logged)."""
@@ -285,9 +300,16 @@ def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> Option
     texts = set(rule_texts)
     changed = False
     for r in records:
-        if r.get("text") in texts and not r.get("verified", False):
+        if r.get("text") not in texts:
+            continue
+        if r.get("verified") is not True:
             r["verified"] = True
             r["verified_at"] = date.today().isoformat()
+            if project:
+                r["verified_for"] = [project]
+            changed = True
+        elif project and isinstance(r.get("verified_for"), list) and project not in r["verified_for"]:
+            r["verified_for"] = [*r["verified_for"], project]
             changed = True
     if not changed:
         return None
@@ -407,6 +429,7 @@ class Skill(BaseModel):
     tags: List[str] = Field(default_factory=list, description="Associated keywords/tags.")
     instructions: str = Field(default="", description="Detailed instructions in markdown format.")
     rules: List[str] = Field(default_factory=list, description="Strict coding rules/standards for this skill.")
+    trusted_rules: List[str] = Field(default_factory=list, description="C-06: the subset of `rules` Kriya trusts for THIS project, decided by the Skills owner at load (`SkillEngine._trusted_rules`), never by a reader of the folder. Every other rule is unverified.")
     examples: Dict[str, str] = Field(
         default_factory=dict, 
         description="Dictionary mapping example file basenames to their contents."
@@ -507,6 +530,7 @@ class SkillEngine:
         self.skills_dir = supplied_dir
         self.canonical_skills_dir = supplied_dir
         self._shadow: Optional[RunShadow] = None
+        self._project_identity: Optional[str] = None      # resolved on first use (`project_identity`); "" = could not be established
         self._skills: Dict[str, Skill] = {}
         self._held_verifications: Dict[str, HeldSkillVerification] = {}
         # W3-1: declines of THIS run about a workspace-owned skill (its skill.yaml is project bytes, not authority); dropped with
@@ -536,6 +560,72 @@ class SkillEngine:
         if getattr(getattr(config, "skills", None), "load_global", False) is not True or not is_project_skill_overlay(config):
             return []
         return [get_global_skills_dir()]
+
+    # -- knowledge truth (C-06) ---------------------------------------------------------------------------------------
+    # Storage presence is not knowledge. What a skill folder holds becomes knowledge only through the two decisions below, made here and
+    # nowhere else: which of its rules are trusted for this project, and whether a library is covered by a loaded skill with a trusted rule.
+
+    @property
+    def project_identity(self) -> Optional[str]:
+        """The identity of the project this engine works for (its workspace's authority root); None when it cannot be established."""
+        if self._project_identity is None:
+            try:
+                from kriya.context.workspace_identity import workspace_identity
+
+                self._project_identity = workspace_identity(self.workspace_path) or ""
+            except Exception as error:  # noqa: BLE001 - an unidentifiable workspace trusts no project-bound verification; never a default identity
+                logger.debug(f"No project identity for '{self.workspace_path}': {error}")
+                self._project_identity = ""
+        return self._project_identity or None
+
+    def _trusted_rules(self, folder_path: str, rules: List[str]) -> List[str]:
+        """C-06: the rules of the skill in ``folder_path`` that are trusted for this project. The ONE trust decision.
+
+        * A skill inside the workspace is project-supplied bytes: none of its rules is trusted, whatever its files say (the rule-level B3;
+          SKILL-RULE-PROVENANCE-PROJECT-SUPPLIED-001). A passing run of THIS run still promotes them run-locally (`reclassify_held_rules`).
+        * A provenance file that cannot be read trusts nothing (INT-07).
+        * A rule WITH a record was written by a run: trusted only when the record says a run verified it (a literal true) and, where the
+          record names the projects that verified it, this project is one of them.
+        * A rule with NO record in a skill Kriya or the operator owns was authored by that owner: trusted. Every rule a run writes gets a
+          record (`create_skill`, `record_rule_provenance`), so a run cannot produce such a rule."""
+        if not rules or not self._skill_verification_is_authoritative(folder_path):
+            return []
+        records = read_rule_provenance(folder_path)
+        if records is None:
+            return []
+        by_text = {record.get("text"): record for record in records}
+        trusted = []
+        for rule in rules:
+            record = by_text.get(rule)
+            if record is None or (record.get("verified") is True and self._verification_binds(record)):
+                trusted.append(rule)
+        return trusted
+
+    def _verification_binds(self, record: Dict[str, Any]) -> bool:
+        """Whether a verified record's verification holds for this project: no ``verified_for`` list (shipped, or an operator's), or this
+        project in it. A list that is not a list, or an engine with no project identity, binds nothing."""
+        if "verified_for" not in record:
+            return True
+        projects = record["verified_for"]
+        return isinstance(projects, list) and self.project_identity is not None and self.project_identity in projects
+
+    def covers_library(self, aliases: Iterable[str], roots: Iterable[str]) -> bool:
+        """C-06: THE answer to "does this project hold knowledge of this library": a LOADED skill, under one of ``roots`` (the skills roots
+        that count for the caller's gate), whose name or tags name one of ``aliases`` (token equality, `mentions_term`) AND that holds at
+        least one trusted rule. A folder, an empty skill, a scaffold, a skill that failed to load and a skill with only unverified rules
+        are all "not covered". Read-only."""
+        wanted = [alias for alias in aliases if isinstance(alias, str) and alias.strip()]
+        counted = [self.canonical_path(os.path.abspath(root)) for root in roots]
+        for skill in self._skills.values():
+            if not skill.trusted_rules or not skill.source_path:
+                continue
+            durable = self.canonical_path(skill.source_path)
+            if not any(path_relation(root, durable) is PathRelation.WITHIN for root in counted):
+                continue
+            labels = [skill.name, *(tag for tag in skill.tags if isinstance(tag, str))]
+            if any(mentions_term(label, alias) for label in labels for alias in wanted):
+                return True
+        return False
 
     # -- the run-local shadow (GIT-MIDRUN-COMMITS-S3-001) -------------------------------------------------------------
     # While a shadow is active this engine's effective skills root is a run-local copy under the Kriya state directory:
@@ -663,6 +753,7 @@ class SkillEngine:
                         tags=meta.get("tags", []),
                         instructions=instructions,
                         rules=rules,
+                        trusted_rules=self._trusted_rules(folder_path, rules),
                         examples=examples,
                         supported_versions=meta.get("supported_versions", "*"),
                         verified=claimed_verified and self._skill_verification_is_authoritative(folder_path),
@@ -774,6 +865,12 @@ class SkillEngine:
         self._write_skill_file(os.path.join(skill_path, "skill.yaml"), yaml.safe_dump(metadata, default_flow_style=False))
         self._write_skill_file(os.path.join(skill_path, "instructions.md"), instructions)
         self._write_skill_file(os.path.join(skill_path, "rules.txt"), rules_text)
+        created_rules = [line.strip() for line in rules_text.splitlines() if line.strip() and not line.strip().startswith("#")]
+        if created_rules:
+            # C-06: a rule this entry writes is unverified until a committed run proves it; without a record it would read as authored by
+            # the owner of the skills root and be trusted (and could close the knowledge gate) on the next load.
+            self._write_skill_file(_rule_provenance_path(skill_path), json.dumps(
+                [{"text": rule, "verified": False, "source": "skill_creation", "added_at": date.today().isoformat()} for rule in created_rules], indent=2))
         logger.info(f"Created skill '{name}' at {skill_path}")
         if commit_message is not None:
             git_commit_if_tracked(skill_path, commit_message)
@@ -919,7 +1016,7 @@ class SkillEngine:
                         "error": "skill.yaml was updated but its Git commit failed; the repository holds an uncommitted change",
                     })
                 if skill.source_path and item.rule_texts is not None:
-                    if mark_rules_verified(skill.source_path, list(item.rule_texts)) is False:
+                    if mark_rules_verified(skill.source_path, list(item.rule_texts), project=self.project_identity) is False:
                         failures.append({
                             "operation": "skill_verification_commit", "skill": item.skill_name,
                             "error": "the rule provenance was updated but its Git commit failed; "

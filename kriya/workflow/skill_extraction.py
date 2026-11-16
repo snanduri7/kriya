@@ -308,23 +308,23 @@ def _skill_staleness_warning(skill: Any, goal_lib: str, goal_ver: str) -> Option
 
 
 def _split_rules_by_verification(skill: Any) -> Tuple[List[str], List[str]]:
-    """Splits a skill's rules into (trusted, unverified) using its per-rule
-    provenance file (kriya/skills/skill.py::load_rule_provenance). A rule with no
-    provenance record - the vast majority of existing content, predating this
-    tracking - is treated as already-trusted, not retroactively flagged; only rules
-    extracted since this tracking existed, and not yet proven by a passing Runtime
-    Verification run, come back as unverified."""
+    """Splits a skill's rules into (trusted, unverified), in rule order. C-06: a projection of the Skills owner's decision, made when the
+    skill was loaded (`SkillEngine._trusted_rules`: the skill's location, its provenance records and the project the run works for); this
+    function reads no file and decides nothing. A rule the owner did not trust is unverified - a workspace skill's rules, a rule a run
+    wrote and no committed run has verified, a rule another project's run verified, every rule of a skill whose provenance cannot be read.
+
+    A `Skill` that was not loaded from a folder (no ``source_path``: built in memory, never by the engine) has no owner decision; its
+    rules are returned as trusted, as before."""
     if not skill.source_path:
         return list(skill.rules), []
-    from kriya.skills.skill import load_rule_provenance
-    provenance = {p.get("text"): p for p in load_rule_provenance(skill.source_path)}
+    remaining = list(skill.trusted_rules)
     trusted, unverified = [], []
     for r in skill.rules:
-        rec = provenance.get(r)
-        if rec and not rec.get("verified", False):
-            unverified.append(r)
-        else:
+        if r in remaining:
+            remaining.remove(r)
             trusted.append(r)
+        else:
+            unverified.append(r)
     return trusted, unverified
 
 

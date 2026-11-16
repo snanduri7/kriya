@@ -272,7 +272,7 @@ async def test_a_passing_run_keeps_one_repository_identity_until_the_terminal_ap
 
     with patch("kriya.workflow.state.GenerationState.record_gate_outcome", spy_record), \
             patch.object(development_loop, "apply_terminal_candidate", spy_apply):
-        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path))
+        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path), knowledge_risk_confirmed=True)
 
     assert res["quality_gates_passed"] is True
     types = [t for t, _ in observed]
@@ -293,7 +293,7 @@ async def test_a_failed_skill_persistence_does_not_rewrite_the_passing_verificat
     kernel, llm = _run_inputs(tmp_path)
 
     with patch.object(SkillEngine, "mark_verified", return_value=False):
-        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path))
+        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path), knowledge_risk_confirmed=True)
 
     assert res["quality_gates_passed"] is True
     assert res["post_commit_persistence_errors"] == [{
@@ -324,7 +324,7 @@ async def test_a_run_that_ends_failed_with_a_promotion_still_pending_persists_no
 
     with patch.object(development_loop, "apply_terminal_candidate", late_gate_failure), \
             patch.object(workflow_module, "final_review", final_review_with_pending):
-        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path))
+        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path), knowledge_risk_confirmed=True)
 
     assert res["quality_gates_passed"] is False and res["failure_category"]      # it ended as a failed run
     assert _head(tmp_path) == initial and "verified" not in _yaml_text(folder)
@@ -339,7 +339,7 @@ async def test_a_controller_owned_run_holds_its_verification_for_the_controller_
     shared = _engine(tmp_path)
 
     res = await WorkflowEngine(kernel, llm).run_generation_workflow(
-        goal=GOAL, workspace_path=str(tmp_path), skill_engine_override=shared)
+        goal=GOAL, workspace_path=str(tmp_path), skill_engine_override=shared, knowledge_risk_confirmed=True)
 
     assert res["quality_gates_passed"] is True
     assert _head(tmp_path) == initial and "verified" not in _yaml_text(folder)       # nothing persisted by the subtask run
@@ -358,7 +358,7 @@ async def test_a_run_that_never_reaches_a_committed_candidate_promotes_nothing(t
         raise RuntimeError("terminal commit blew up")
 
     with patch.object(development_loop, "apply_terminal_candidate", failing_apply):
-        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path))
+        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path), knowledge_risk_confirmed=True)
 
     # The runtime verification DID pass before the commit failed; the old behavior had already persisted the skill by now.
     assert res["quality_gates_passed"] is False

@@ -303,8 +303,9 @@ def resolve_planned_tool_governance(tool: Any, *, autonomy_mode: Optional[str],
         return decide(None, TOOL_GOVERNANCE_INVALID, "its planned-call declaration is not a ToolGovernance value.")
     if declared not in PLANNABLE_TOOL_GOVERNANCE:
         return decide(declared, TOOL_OPERATOR_ONLY,
-                      "it runs commands or builds whose effects Kriya cannot keep out of the run's evidence, so only "
-                      "an operator may run it (`kriya tools execute`); a planned step never does.")
+                      "its effect is outside the run's candidate transaction (a command or build whose effects Kriya cannot keep "
+                      "out of the run's evidence, or a tool that holds a write grant), so only an operator may run it "
+                      "(`kriya tools execute`); a planned step never does.")
     return decide(declared, None, "plannable")
 
 

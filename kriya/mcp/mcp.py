@@ -759,7 +759,17 @@ class MCPTool(BaseTool):
     @property
     def planned_governance(self) -> ToolGovernance:
         """S18: every call (planned or operator) passes TOOL-002's durable, identity-bound operator approval and TOOL-003's
-        capability containment in _run below."""
+        capability containment in _run below.
+
+        C-04 (S4, owner ruling 11): a tool of a server whose BOUND capability profile holds a write grant (the workspace, or any additional
+        write path) is OPERATOR_ONLY for a planned call. Such a call would write the owner's files in place, outside the candidate
+        transaction, and a capability grant is not a mutation approval. The fact is read from the profile this tool's client was bound
+        to before it started, never from what the server says about the tool (its name, description or schema). A profile that cannot
+        be read raises here, which the one governance resolution turns into TOOL_GOVERNANCE_INVALID: not plannable. `kriya tools execute`
+        (the operator) never consults this declaration and is unchanged."""
+        profile = self.client.capability_profile
+        if profile.workspace_write is not False or len(profile.additional_write_paths) != 0:
+            return ToolGovernance.OPERATOR_ONLY
         return ToolGovernance.GOVERNED_SIDE_EFFECT
 
     def authorize_model_invocation(self, args: BaseModel, invocation: Any) -> BaseModel:

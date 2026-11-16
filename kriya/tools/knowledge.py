@@ -5,7 +5,7 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 
@@ -491,13 +491,18 @@ class GapReport:
 class KnowledgeGuard:
     """Subsystem checking for missing skills and model cutoff temporal mismatches."""
     def __init__(self, skills_dir: str, cutoff_date_str: str, offline: bool = False, memory_dir: Optional[str] = None, cache_ttl_days: int = 30,
-                 library_dirs: Sequence[str] = ()) -> None:
-        # C-05 (S3). ``skills_dir`` is the project's skills root: read for coverage, and the only root a scaffold is written to.
+                 library_dirs: Sequence[str] = (),
+                 coverage: Optional[Callable[[Sequence[str], Sequence[str]], bool]] = None) -> None:
+        # C-05 (S3). ``skills_dir`` is the project's skills root: it counts for coverage, and it is the only root a scaffold is written to.
         # ``library_dirs`` are read-only roots that count for coverage beside it (the shipped library, for a project whose skills root is its
         # own overlay; kriya/skills/skill.py::gate_library_roots). ``memory_dir`` is the directory of the release cache, a declared GLOBAL
         # store (public registry dates; kriya/config/resolution.py::global_store_directory), never a project's ``paths.memory``.
+        # C-06 (S4). ``coverage`` is the Skills owner's answer (``SkillEngine.covers_library``): the guard names the library and the roots
+        # that count and ASKS; it never lists a directory, so a folder, a scaffold or an unverified rule cannot close the gate. A guard that
+        # was given no owner to ask knows of no coverage: every library is a gap (fail closed).
         self.skills_dir = os.path.abspath(skills_dir)
         self.library_dirs = tuple(os.path.abspath(d) for d in library_dirs if os.path.abspath(d) != self.skills_dir)
+        self._coverage = coverage
         self.cutoff_date = parse_iso_datetime(cutoff_date_str) or datetime(2023, 12, 1, tzinfo=timezone.utc)
         self.offline = offline
         self.cache = None
@@ -520,24 +525,18 @@ class KnowledgeGuard:
 
         for lib, ver in libs:
             # 1. Structural Gap Check (Missing Skills)
-            skill_found = False
-            coverage_roots = [root for root in (self.skills_dir, *self.library_dirs) if os.path.isdir(root)]
-            if coverage_roots:
-                aliases = [lib]
-                if ":" in lib:
-                    aliases.extend(lib.split(":"))
-                for k, v in COMMON_ALIASES.items():
-                    if f"{v[0]}:{v[1]}" == lib:
-                        aliases.append(k)
-                if "ignite" in lib.lower():
-                    aliases.extend(["apache-ignite", "ignite"])
-                if "artemis" in lib.lower():
-                    aliases.extend(["activemq-artemis", "artemis"])
-
-                for folder in (name for skills_root in coverage_roots for name in os.listdir(skills_root)):
-                    if any(a.lower().replace(":", "-").replace("/", "-") in folder.lower() for a in aliases):
-                        skill_found = True
-                        break
+            aliases = [lib]
+            if ":" in lib:
+                aliases.extend(lib.split(":"))
+            for k, v in COMMON_ALIASES.items():
+                if f"{v[0]}:{v[1]}" == lib:
+                    aliases.append(k)
+            if "ignite" in lib.lower():
+                aliases.extend(["apache-ignite", "ignite"])
+            if "artemis" in lib.lower():
+                aliases.extend(["activemq-artemis", "artemis"])
+            # C-06: the Skills owner decides; `is True` so that a double that answers with a truthy object is not coverage.
+            skill_found = self._coverage is not None and self._coverage(aliases, (self.skills_dir, *self.library_dirs)) is True
 
             if ver == "unspecified":
                 # No version was mentioned for this library, so there's nothing to check

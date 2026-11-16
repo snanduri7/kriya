@@ -635,3 +635,53 @@ first wrong owner, prove with focused tests, one to three negative controls and 
 exact-revision owner run is risk-triggered (a cross-cutting runtime authority, integration the focused tests cannot
 cover, earlier hidden fallout at the same boundary, security or result truth, a milestone, final certification), not a
 ritual. The next full integrated suite is the final certification.
+
+## 14. Slice S4, step 1: knowledge truth and the planned-MCP write rule (C-06, R-06; C-04 ruling 11; 2026-11-16, implementation branch)
+
+Base `ed85a88`. Lightweight routine (section 13): two reproducers, the first wrong owner, one root correction, focused proof.
+
+**Reproduced (`MEASURED` at `ed85a88`, `~/kriya-evidence/s4-ed85a88/reproducers_pre_fix_ed85a88.txt`).** R1: an empty folder whose name
+contains the artifact id (A4 P5), Kriya's own scaffold (A4 P11) and project A's scaffold in an explicit skills directory two projects name
+(A5 P8) each left NO knowledge gap. R2: a planned call to a tool of an MCP server whose bound capability profile holds `workspace_write`
+was plannable (`GOVERNED_SIDE_EFFECT`).
+
+**First wrong owner (`TRACED`).** `KnowledgeGuard.check_goal` listed the skills roots and matched folder names: storage presence was read as
+knowledge. `MCPTool.planned_governance` declared every MCP tool a governed side effect without reading the profile its client was bound to.
+
+**Invariant.** Storage presence is not knowledge. A capability grant is not a mutation approval.
+
+| Decision | Owner after S4 step 1 | Proof |
+|---|---|---|
+| Is a library covered? | `SkillEngine.covers_library`: a LOADED skill, under a root that counts for the gate (S3's roots, unchanged), whose name or tags name the library and that holds at least one trusted rule. `KnowledgeGuard` asks through `coverage`; it lists nothing. No owner to ask, or an answer that is not the boolean true: a gap | `tests/test_s4_knowledge_truth.py`: empty folder, both scaffolds, tag mismatch, root not counted, no owner; the unit stage and the enforce entry; mutants C1-C3, G1-G5 |
+| Which rules are trusted? | `SkillEngine._trusted_rules`, once, at load (`Skill.trusted_rules`); `_split_rules_by_verification` projects it and reads no file | Workspace skill (A4 P8 inverted), unverified record, literal true only, unreadable provenance (INT-07); mutants T1-T7, X1 |
+| Whose verification is it? | `mark_rules_verified(project=...)` records the verifying project in `verified_for`; a record with the list is trusted only by the projects in it. The shared directory is not stamped, moved or rewritten beyond the record Kriya already writes | Two projects, one explicit skills directory (A5 P8 inverted for scaffolds AND for run-verified rules); mutants W2-W4, T4, T6, T7 |
+| Can a run create a trusted rule? | No: `create_skill` writes an unverified record for every rule it creates (the analyzer's model-derived conventions were record-less, hence trusted on the next load) | Mutant W1 |
+| May a planned step call a write-granted MCP tool? | No: `MCPTool.planned_governance` reads the bound profile; the one resolution answers `TOOL_OPERATOR_ONLY`; the executor recheck refuses before the TOOL-002 decision or any dispatch. Read-only MCP stays plannable; `kriya tools execute` is unchanged | Three tests; mutants M1-M3 |
+
+**Negative controls and mutants.** 23 of 23 killed (`mutants_s4_run1.txt`), run in a scratch copy of the product, tests and shipped skills;
+the runner asserts the copy imports its own `kriya` and that the real worktree's status is unchanged.
+
+**Behaviour changes (deliberate).** (1) A folder, a scaffold or an unverified rule no longer clears the knowledge gate; a run that used to
+pass on one now reports the gap (CLI: confirm or `--ack-knowledge-gap`; Desktop: the run stops). (2) A skill inside the workspace never
+clears the gate and its rules render under "Unverified Rules" until a passing run of the same run promotes them run-locally. (3) Rules
+the analyzer bootstraps render as unverified until a committed run verifies them. (4) A rule one project's run verified in a shared
+explicit skills directory is unverified for another project. (5) A planned step that names a tool of a write-granted MCP server is
+refused (`TOOL_OPERATOR_ONLY`).
+
+**Scenario 04 (owner ruling 12): migrated.** Its knowledge is the shipped `ignite-java17` skill in the operator's skills directory beside
+the workspace, whose rules are trusted under the new rule; `tests/test_demo_v2_spring_ignite.py` now asks the Skills owner in that layout.
+No live run was made.
+
+**Readings taken (for the owner's review).** (1) "Tags name it" is read as the skill's declared name or tags, by token equality
+(`mentions_term`). (2) X-17's "whichever root" is corrected to the workspace case (`07` C-06). (3) No shipped-skills manifest: the
+coverage rule closes the scaffold symptom. (4) Global promotion of learned knowledge is not built: no current runtime path needs it;
+`LEARNED-KNOWLEDGE-GLOBAL-PROMOTION-001` stays an explicit future capability.
+
+**Stale test contracts corrected (class C, each pinned the measured defect).** A folder or a `skill.yaml` alone as coverage
+(`test_knowledge.py` two tests, `test_s3_project_state_stores.py` two tests, `test_skill_verification_deferral.py` five runs that now
+state the person's acceptance); an MCP tool built with no client (`test_s18_planned_tool_governance.py`).
+
+**Left in S4 (C-04, not started).** The one skill-write entry and the end of mid-run Git commits on the direct and milestone shapes
+(`BYP-A4-07`; the shipped library is still writable by `_write_skill_extraction` and `record_rule_provenance` for a foreign workspace);
+the project-authority path class in the write gate (A5 P5); the MCP server's workspace binding to the run's authority root; INT-06 (a
+direct resume opens the gate from a checkpoint's existence); the relevance rule (one selection per run).

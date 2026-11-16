@@ -101,6 +101,17 @@ def test_npm_adapter_success():
         rel_date = adapter.get_release_date("express", "4.18.2")
         assert rel_date == datetime(2024, 3, 15, 12, 0, tzinfo=timezone.utc)
 
+def _operator_engine(skills_dir, tmp_path):
+    """The Skills owner over ``skills_dir`` for a project elsewhere (a skills root outside the workspace is the operator's)."""
+    from kriya.skills.skill import SkillEngine
+
+    workspace = tmp_path / "project"
+    workspace.mkdir(exist_ok=True)
+    engine = SkillEngine(str(skills_dir), load_global=False, load_cwd=False, workspace_path=str(workspace))
+    engine.discover_and_load()
+    return engine
+
+
 def test_knowledge_guard_gaps(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
@@ -128,11 +139,12 @@ def test_knowledge_guard_no_gaps(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
     
-    # Pre-populate skill to remove structural gap
+    # Pre-populate skill to remove structural gap (C-06: a loaded skill that names the library and holds a trusted rule; the guard asks the engine)
     (skills_dir / "spring-boot-3.2.0").mkdir()
+    (skills_dir / "spring-boot-3.2.0" / "rules.txt").write_text("Use constructor injection.\n")
     (skills_dir / "spring-boot-3.2.0" / "skill.yaml").write_text("name: spring-boot")
     
-    kg = KnowledgeGuard(str(skills_dir), "2025-01-01")  # Cutoff is after release
+    kg = KnowledgeGuard(str(skills_dir), "2025-01-01", coverage=_operator_engine(skills_dir, tmp_path).covers_library)  # Cutoff is after release
     
     with patch("httpx.Client") as MockClient:
         mock_client = MockClient.return_value.__enter__.return_value
@@ -477,8 +489,9 @@ def test_knowledge_guard_bare_mention_no_gap_with_skill(tmp_path):
     skills_dir.mkdir()
     (skills_dir / "qpid").mkdir()
     (skills_dir / "qpid" / "skill.yaml").write_text("name: qpid\ntags: [qpid]")
+    (skills_dir / "qpid" / "rules.txt").write_text("Use the AMQP 1.0 client.\n")
 
-    kg = KnowledgeGuard(str(skills_dir), "2023-12-01", offline=True)
+    kg = KnowledgeGuard(str(skills_dir), "2023-12-01", offline=True, coverage=_operator_engine(skills_dir, tmp_path).covers_library)
     report = kg.check_goal("Build a broker using Redhat qpid MRG in server mode")
 
     assert not report.has_gaps
