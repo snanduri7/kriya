@@ -621,3 +621,17 @@ run list still attributes through the evidence manifest (`GUI-RUN-ATTRIBUTION-00
 the root into one store keys rows differently (`INDEX-SUBDIRECTORY-RELATIVE-PATHS-001`, pre-existing, same project).
 (5) A project whose `paths.state` lies inside its workspace has its "global" stores inside that workspace: more
 isolated, never less. (6) Not exercised against a live model in this slice.
+
+## 13. Verification record: S1, S2, S3 (owner, 2026-11-16)
+
+| Slice | Commit | Status | Evidence (`MEASURED`, outside the repository under `~/kriya-evidence/`) |
+|---|---|---|---|
+| S1 runtime identity and production admission (C-09) | `b3a93dd` | VERIFIED / CLOSED | `s1-confirm-b3a93dd/run2`, owner run on a clean checkout of exactly `b3a93dd`: ruff 0; pylint 0; `state_machine` tier 1790 passed; `tests/test_workflow.py` 843 passed; architecture 233 passed; S1 identity and adjacent 632 passed, 1 skipped; goldens 276 passed; RESULT PASS. `s1-confirm-b3a93dd/run` is kept and is NOT evidence for S1: the command carried no directory or revision check and ran in the S0 worktree at `c0d3774` (its S1 pass shows "no tests ran"); the pinned script that replaced it refuses a wrong revision |
+| S2 prompt and web trust boundary (C-10) | `57c966e` | VERIFIED / CLOSED | `s2-confirm-57c966e/run`, owner run on a clean checkout of exactly `57c966e` (2026-11-16T04:06:52Z): ruff 0; pylint 0; `state_machine` tier 1790 passed; `tests/test_workflow.py` 843 passed; architecture 233 passed; S1 identity and adjacent 632 passed, 1 skipped; S2 trust and adjacent 182 passed; goldens 276 passed; RESULT PASS |
+| S3 project-state namespace (C-05) | `a6fa956` | VERIFIED / CLOSED on product proof (owner ruling 2026-11-16: a slice closes on its invariants, guards, focused integration and mutants, not on every historical test) | Section 12. Carried: `CERTIFICATION-MECHANICAL-CLEANUP-S3-001` (proven class C test debt, due before final certification). No exact-revision owner run was made on `a6fa956`: the owner gate ran on the working tree before the shared fixture fixes |
+
+From S4 onward the per-slice routine is the lighter one ruled on 2026-11-16: characterize with one reproducer, fix the
+first wrong owner, prove with focused tests, one to three negative controls and targeted mutants, commit. An
+exact-revision owner run is risk-triggered (a cross-cutting runtime authority, integration the focused tests cannot
+cover, earlier hidden fallout at the same boundary, security or result truth, a milestone, final certification), not a
+ritual. The next full integrated suite is the final certification.
