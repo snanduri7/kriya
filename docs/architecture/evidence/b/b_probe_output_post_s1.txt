@@ -1,0 +1,30 @@
+Traceback (most recent call last):
+  File "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-implementation/docs/architecture/evidence/b/b_probe.py", line 85, in <module>
+    body()
+    ~~~~^^
+  File "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-implementation/docs/architecture/evidence/b/b_probe.py", line 29, in p1
+    cfg = strict_config(
+        llm={"model": "shared-model:1", "context_window": 32768, "temperature": 0.2},
+        agent_llms={"reviewer": {"llm": {"model": "shared-model:1", "context_window": 65536, "temperature": 0.7,
+                                         "inference_runtime": "ollama_native", "extra_body": {"top_p": 0.5}}}},
+    )
+  File "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-implementation/tests/_strict_doubles.py", line 92, in strict_config
+    return AppConfig(**data)
+  File "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-implementation/.venv/lib/python3.14/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+pydantic_core._pydantic_core.ValidationError: 1 validation error for AppConfig
+  Value error, MODEL_BINDING_ALIAS_CONFLICT: llm and agent_llms.reviewer.llm both bind model 'shared-model:1' but differ in extra_body, context_window, inference_runtime; a model name resolves to exactly one binding, so give one of them a distinct alias (an Ollama tag copy) or identical settings [type=value_error, input_value={'llm': {'model': 'shared...onfig-li_3bjsf/memory'}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/value_error
+
+=== P1 two bindings of one model name
+PROBE_SETUP_FAILED ValidationError: 1 validation error for AppConfig
+  Value error, MODEL_BINDING_ALIAS_CONFLICT: llm and agent_llms.reviewer.llm both bind model 'shared-model:1' but differ in extra_body, context_window, inference_runtime; a model name resolves to exactly one binding, so give one of them a distinct alias (an Ollama tag copy) or identical settings [type=value_error, input_value={'llm': {'model': 'shared...onfig-li_3bjsf/memory'}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/value_error
+
+=== P2 scope of the generation clock
+outside a run: None
+a nested mutating boundary is the same run: True
+two claims in one run return the same start: True | a claim inside a nested unit boundary returns the same start: True
+a second top-level run (a resume is one) has a new run id: True | and a new clock: True
+
+scratch: /var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-b-probe-au309rqy

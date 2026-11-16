@@ -632,6 +632,22 @@ runtime fingerprint, the inference settings, Kriya's protocol adapter or the qua
 records written before inference settings were part of the identity (policy `kriya-qualification/2`) are stale and
 must be re-qualified. A record is also stale when the **qualification policy settings** change.
 
+**One model name, one binding.** A model name is the alias every part of Kriya resolves a binding by. Two bindings
+that name the same model (`llm`, an `llm_chain` entry, an `agent_llms` role's `llm` or chain) must share their
+`base_url`, `extra_body`, `context_window`, `reasoning`, `capabilities`, `context_policy` and `inference_runtime`;
+otherwise the configuration is refused at load (`MODEL_BINDING_ALIAS_CONFLICT`). Give the second binding its own alias
+(an Ollama tag copy) or identical settings. `temperature` and `max_tokens` may differ. A call that names a model no
+binding carries is refused before anything is sent (`MODEL_BINDING_UNKNOWN`).
+
+**Production admission.** Under `runtime_profile: production` the run itself decides admission; `kriya doctor
+--production` is a preflight of the same decision, not a substitute for it. `kriya generate`, `kriya fix` and proposal
+execution refuse to start (`MODEL_BINDING_NOT_QUALIFIED`, exit 1, nothing sent) unless every role's every model, for
+each inference identity the role uses (a differing `retry_temperature` included), is QUALIFIED for its exact runtime.
+Every request is checked again when it is dispatched, against the identity actually sent, so an override or a larger
+context tier is never covered by another identity's record; a larger tier needs its own qualification record there
+(an operator-declared tier is not used). `KRIYA_MODEL_RUNTIME_PROBE=0` makes every runtime non-exact, so production
+refuses it. Outside production the same assessment is recorded on the run (`model.admission`) and never refuses.
+
 The served identity must stay the same for the whole run (QUALIFICATION-ARTIFACT-STABILITY-001): `kriya model
 qualify` re-observes the runtime fingerprint at the start, before and after every case and at the close, and the
 record seals those observations (`identity_stability`). If the provider changes what the tag serves while the run is

@@ -19,6 +19,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from _admission import qualify_dispatched
 from _fake_inference_runtime import FakeRuntimeAdapter
 
 from kriya.config import AppConfig
@@ -88,8 +89,16 @@ def _prompt_of(tokens):
     return "x" * int(tb.DEFAULT_BYTES_PER_TOKEN * tokens)
 
 
+def _admitted(config):
+    """C-09 (S1): production dispatches only a QUALIFIED identity, so a
+    production case first qualifies the one it sends (tests/_admission.py)."""
+    if config.runtime_profile == "production":
+        qualify_dispatched(config)
+    return config
+
+
 def _send(config, tokens, **kwargs):
-    return asyncio.run(LLMClient(config).complete_result("system", _prompt_of(tokens), **kwargs))
+    return asyncio.run(LLMClient(_admitted(config)).complete_result("system", _prompt_of(tokens), **kwargs))
 
 
 # --- the one rule ----------------------------------------------------------------------------------
@@ -279,7 +288,7 @@ def test_the_tool_call_path_holds_the_served_window_against_the_identity_too(obs
                                                "parameters": {"type": "object", "properties": {}}}}]
     config = _observing_config()
     config.llm.capabilities.native_tool_calls = True
-    result = asyncio.run(LLMClient(config).complete_with_tools_result(
+    result = asyncio.run(LLMClient(_admitted(config)).complete_with_tools_result(
         [{"role": "system", "content": "system"}, {"role": "user", "content": _prompt_of(20000)}], tools))
     assert result.status is CompletionStatus.OK and result.error is None
     assert result.budget["context_window"] == CEILING
@@ -292,7 +301,7 @@ def test_a_served_window_that_is_not_the_requested_one_is_still_a_violation_afte
     identity - a runtime found loaded at another window is refused."""
     if observing.capabilities.per_request_context_window:
         pytest.skip("a per-request runtime serves what the request carries; the mismatch control is the server-configured shape")
-    config = _observing_config()
+    config = _admitted(_observing_config())
     llm = LLMClient(config)
     calls = {"n": 0}
     original = observing.observe_served_context_state

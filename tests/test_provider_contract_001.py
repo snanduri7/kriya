@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from _admission import qualify_dispatched
 from _fake_inference_runtime import FakeRuntimeAdapter
 
 from kriya.config import AppConfig
@@ -255,8 +256,10 @@ def test_a_larger_served_window_is_refused_before_inference_only_under_productio
     ok = asyncio.run(LLMClient(_fake_config()).complete_result("s", "u"))
     assert ok.status is CompletionStatus.OK and ok.budget["context_window"] == 8192
     fake.requests.clear()
+    production = _fake_config(production=True)
+    qualify_dispatched(production)  # C-09 (S1): an admitted identity; the served window is still refused
     with pytest.raises(ProviderContractError) as refused:
-        asyncio.run(LLMClient(_fake_config(production=True)).complete_result("s", "u"))
+        asyncio.run(LLMClient(production).complete_result("s", "u"))
     assert refused.value.reason_code == RUNTIME_CONTEXT_IDENTITY_MISMATCH
     assert fake.requests == []
 

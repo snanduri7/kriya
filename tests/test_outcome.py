@@ -29,6 +29,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent / "state_machine"))
 import _kernel_golden as kg  # noqa: E402 - needs the sys.path entry above  # pylint: disable=wrong-import-position
 
+from kriya.core.model_qualification import run_admission  # noqa: E402
 from kriya.core.provider_contract import PROVIDER_PROMPT_TRUNCATED  # noqa: E402
 from kriya.core.state_paths import trace_db_path  # noqa: E402
 from kriya.workflow.contract_lifecycle import CONTRACT_REGISTRY_CORRUPT  # noqa: E402
@@ -157,6 +158,7 @@ def _deps(**overrides):
         logger=MagicMock(spec=logging.Logger), config=AppConfig(), new_state=GenerationState,
         egress_authority_details=lambda _cfg: {"channels": []}, primary_model_runtime_details=runtime_details,
         role_independence_details=lambda _cfg: {"roles": {}},
+        model_admission_details=run_admission,
         trace_events=lambda state: [event.to_dict() for event in state.run_events],
         static_analysis_fields=static_analysis_result_fields,
         required_verification_evidence=_build_required_verification_evidence,
@@ -294,7 +296,8 @@ def test_the_run_state_opens_with_its_identity_events_in_order_and_logs_a_missin
     deps = _deps(egress_authority_details=unavailable)
     state = asyncio.run(open_run_state(deps, error_context=None, engineering_route=None, process_profile=None))
     assert [event.kind for event in state.run_events] == [
-        "evidence.attempt_store", "model.runtime", "model.role_independence"]
+        "evidence.attempt_store", "model.runtime", "model.role_independence",
+        "model.admission"]  # C-09 (S1, ruling 7): the run's own admission decision
     assert state.error_context == ""
     deps.logger.warning.assert_called_once_with("Could not record the run's egress authority: egress table unreadable")
     complete = asyncio.run(open_run_state(_deps(), error_context="ctx", engineering_route=None, process_profile=None))

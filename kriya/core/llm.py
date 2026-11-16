@@ -188,8 +188,18 @@ def _evidence_call(prompt_kind: str):
 class LLMClient:
     """Wrapper around OpenAI-compatible API client for local LLM generation."""
     
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, *, purpose: str = "run") -> None:
+        from kriya.core.model_admission import CLIENT_PURPOSES
+
+        if purpose not in CLIENT_PURPOSES:
+            raise ValueError(f"LLMClient purpose must be one of {sorted(CLIENT_PURPOSES)}, got {purpose!r}")
         self.config = config
+        # C-09 (S1, ruling 7): a "run" client dispatches only an admitted
+        # identity under production (_admit). The qualification run and the
+        # doctor's connectivity probe say so explicitly; the sites allowed to
+        # are pinned by tests/test_s1_runtime_identity_admission.py.
+        self.purpose = purpose
+        self._admitted: set = set()
         self._clients: Dict[Any, AsyncOpenAI] = {}
         self.client = self._client_for(config.llm.base_url, config.llm.api_key)
         self.model = config.llm.model
@@ -494,42 +504,61 @@ class LLMClient:
     # ------------------------------------------------------------------
 
     def _binding(self, model: str) -> Dict[str, Any]:
-        """Config for ``model``: primary llm, an llm_chain entry or an
-        agent_llms binding (the first exact, case-folded match), including
-        its own sampling settings (``temperature``, ``extra_body``): a call to
-        a model executes with that model's settings, never the primary's,
+        """Config for ``model``: the one binding that names it (the primary
+        llm, an llm_chain entry or an agent_llms binding), including its own
+        sampling settings (``temperature``, ``extra_body``): a call to a
+        model executes with that model's settings, never the primary's,
         unless the caller overrides them (MODEL-EVIDENCE-HARDENING-001:
-        qualified inference identity == executed inference identity)."""
-        from kriya.core.model_runtime import binding_output_tokens
+        qualified inference identity == executed inference identity).
 
-        target = (model or "").casefold()
+        C-09 (S1): resolved by the single owner
+        ``model_runtime.require_binding``. A name no binding carries raises
+        UnknownModelBindingError (MODEL_BINDING_UNKNOWN) before any provider
+        contact - it never executes on the primary's settings; bindings that
+        share a name share their identity (configuration load,
+        MODEL_BINDING_ALIAS_CONFLICT)."""
+        from kriya.core.model_runtime import binding_output_tokens, require_binding
+
         cfg = self.config
-        if cfg.llm.model.casefold() == target:
-            return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
+        candidate = require_binding(cfg, model)
+        if candidate is cfg.llm:
+            return {"base_url": cfg.llm.base_url, "api_key": cfg.llm.api_key,
+                    "context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
                     "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens,
                     "temperature": self.temperature, "extra_body": cfg.llm.extra_body or None,
                     "inference_runtime": cfg.llm.inference_runtime}
-        candidates = list(cfg.llm_chain)
-        for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
-            role_cfg = getattr(cfg.agent_llms, role, None)
-            if role_cfg is None:
-                continue
-            if role_cfg.llm is not None:
-                candidates.append(role_cfg.llm)
-            candidates.extend(role_cfg.llm_chain)
-        for candidate in candidates:
-            if candidate.model.casefold() == target:
-                own_temperature = getattr(candidate, "temperature", None)
-                return {"context_window": candidate.context_window, "reasoning": candidate.reasoning,
-                        "context_policy": candidate.context_policy,
-                        "max_tokens": binding_output_tokens(cfg, candidate),
-                        "temperature": own_temperature if own_temperature is not None else self.temperature,
-                        "extra_body": getattr(candidate, "extra_body", None) or None,
-                        "inference_runtime": getattr(candidate, "inference_runtime", None)}
-        return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
-                "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens,
-                "temperature": self.temperature, "extra_body": cfg.llm.extra_body or None,
-                "inference_runtime": cfg.llm.inference_runtime}
+        own_temperature = getattr(candidate, "temperature", None)
+        return {"base_url": candidate.base_url, "api_key": getattr(candidate, "api_key", None) or cfg.llm.api_key,
+                "context_window": candidate.context_window, "reasoning": candidate.reasoning,
+                "context_policy": candidate.context_policy,
+                "max_tokens": binding_output_tokens(cfg, candidate),
+                "temperature": own_temperature if own_temperature is not None else self.temperature,
+                "extra_body": getattr(candidate, "extra_body", None) or None,
+                "inference_runtime": getattr(candidate, "inference_runtime", None)}
+
+    def _admit(self, model: str, fingerprint: Any, settings: Any) -> None:
+        """C-09 (S1, ruling 7): production admission of the exact identity
+        this request dispatches (the fingerprint of the endpoint and window
+        called, the settings on the wire), before any inference request.
+        ModelAdmissionError (MODEL_BINDING_NOT_QUALIFIED) unless QUALIFIED;
+        no decision outside production or for a qualification/preflight client."""
+        from kriya.core.model_admission import PURPOSE_RUN
+        from kriya.core.model_qualification import admit_dispatch
+        from kriya.core.role_metrics import current_model_role
+
+        if self.purpose != PURPOSE_RUN:
+            return
+        admit_dispatch(self.config, role=current_model_role(), model=model, fingerprint=fingerprint,
+                       settings=settings, admitted=self._admitted)
+
+    def _dispatch_client(self, base_url: str, api_key: str, *, overridden: bool) -> AsyncOpenAI:
+        """The transport of a call to (base_url, api_key): the primary's own
+        client (``self.client``) for the primary's endpoint and key with no
+        override, else the per-endpoint client."""
+        primary = (self.config.llm.base_url, self.config.llm.api_key)
+        if not overridden and (base_url, api_key) == primary:
+            return self.client
+        return self._client_for(base_url, api_key)
 
     def _runtime(self, model: str) -> InferenceRuntimePort:
         """INF-001: the runtime adapter ``model``'s binding selects (cached
@@ -886,7 +915,15 @@ class LLMClient:
 
         # MA4.3 - audit-only, always runs regardless of egress_policy, and can
         # never affect the unconditional enforcement immediately below.
-        url_to_check = base_url_override or self.config.llm.base_url
+        # C-09 (S1): the call's one binding, resolved before anything else
+        # (pure configuration; an unknown name is refused here). Everything
+        # the caller does not override - endpoint, key, reasoning flag,
+        # sampling, window, adapter - is this binding's own, never the
+        # primary's.
+        model = model_override or self.model
+        own = self._binding(model)
+        url_to_check = base_url_override or own["base_url"]
+        default_api_key = api_key_override or own["api_key"]
         self._audit_llm_network_access(url_to_check)
 
         # Validate egress policy (unchanged - the sole enforcement path)
@@ -896,28 +933,13 @@ class LLMClient:
                     f"Egress violation: Request to external API '{redact_text(url_to_check)}' blocked under 'local_only' policy."
                 )
 
-        model = model_override or self.model
-        client = self.client
+        client = self._dispatch_client(url_to_check, default_api_key,
+                                       overridden=bool(base_url_override or api_key_override))
 
-        if base_url_override or api_key_override:
-            client = self._client_for(base_url_override or self.config.llm.base_url,
-                                      api_key_override or self.config.llm.api_key)
+        is_reasoning = reasoning_override if reasoning_override is not None else bool(own["reasoning"])
 
-        if reasoning_override is not None:
-            is_reasoning = reasoning_override
-        else:
-            is_reasoning = self.config.llm.reasoning
-            if model_override:
-                for fb in self.config.llm_chain:
-                    if fb.model == model_override:
-                        is_reasoning = fb.reasoning
-                        break
-
-        own = self._binding(model)
         temperature = temperature_override if temperature_override is not None else own["temperature"]
-        base_max_tokens = (
-            max_tokens_override if max_tokens_override is not None else self._binding(model)["max_tokens"]
-        )
+        base_max_tokens = max_tokens_override if max_tokens_override is not None else own["max_tokens"]
         # A reasoning identity's reasoning reserve is added in _dispatch_budget,
         # where its measured limits are known.
         max_tokens = base_max_tokens
@@ -950,17 +972,16 @@ class LLMClient:
         self.last_completion = None
         self._require_time_left()
         runtime = self._runtime(model)
-        fingerprint = await self._runtime_fingerprint(
-            model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
-        )
+        fingerprint = await self._runtime_fingerprint(model, url_to_check, default_api_key, extra_body)
         plan = self._provider_plan(runtime, extra_body=extra_body, temperature=temperature,
                                    is_reasoning=is_reasoning, declared_window=own["context_window"],
                                    fingerprint=fingerprint)
         # The executed inference identity (the settings the provider receives).
         settings = request_settings(temperature=temperature, reasoning=is_reasoning, extra_body=extra_body,
                                     runtime=runtime)
+        self._admit(model, fingerprint, settings)
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-        api_key = api_key_override or self.config.llm.api_key
+        api_key = default_api_key
         served = (await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)).window
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=None,
@@ -1223,7 +1244,12 @@ class LLMClient:
             split_reasoning,
         )
 
-        url_to_check = base_url_override or self.config.llm.base_url
+        # C-09 (S1): as complete_result - the binding first, its own endpoint
+        # and key unless the caller overrides them.
+        model = model_override or self.model
+        own = self._binding(model)
+        url_to_check = base_url_override or own["base_url"]
+        default_api_key = api_key_override or own["api_key"]
         self._audit_llm_network_access(url_to_check)
 
         if self.config.autonomy.egress_policy == "local_only":
@@ -1232,7 +1258,6 @@ class LLMClient:
                     f"Egress violation: Request to external API '{redact_text(url_to_check)}' blocked under 'local_only' policy."
                 )
 
-        model = model_override or self.model
         from kriya.core.model_capabilities import (
             ModelCapabilityError,
             capabilities_for_model,
@@ -1244,12 +1269,9 @@ class LLMClient:
                 f"Model '{model}' is configured without reliable native tool calling. "
                 "Use the ordinary operation-specific generation path instead."
             )
-        client = self.client
-        if base_url_override or api_key_override:
-            client = self._client_for(base_url_override or self.config.llm.base_url,
-                                      api_key_override or self.config.llm.api_key)
+        client = self._dispatch_client(url_to_check, default_api_key,
+                                       overridden=bool(base_url_override or api_key_override))
 
-        own = self._binding(model)
         temperature = temperature_override if temperature_override is not None else own["temperature"]
         max_tokens = max_tokens_override if max_tokens_override is not None else own["max_tokens"]
         if extra_body_override is not None:
@@ -1265,10 +1287,8 @@ class LLMClient:
         self.last_call_metrics = None
         self.last_completion = None
         self._require_time_left()
-        fingerprint = await self._runtime_fingerprint(
-            model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
-        )
-        api_key = api_key_override or self.config.llm.api_key
+        fingerprint = await self._runtime_fingerprint(model, url_to_check, default_api_key, extra_body)
+        api_key = default_api_key
         runtime = self._runtime(model)
         plan = self._provider_plan(runtime, extra_body=extra_body, temperature=temperature,
                                    is_reasoning=bool(own["reasoning"]), declared_window=own["context_window"],
@@ -1278,6 +1298,7 @@ class LLMClient:
         # floor of its own).
         settings = request_settings(temperature=temperature, reasoning=bool(own["reasoning"]), extra_body=extra_body,
                                     runtime=runtime)
+        self._admit(model, fingerprint, settings)
         served = (await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)).window
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=tools,

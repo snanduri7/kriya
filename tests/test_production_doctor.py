@@ -523,6 +523,27 @@ def test_every_role_qualified_for_its_exact_runtime_passes(tmp_path):
     assert "reason_code" not in check.evidence
 
 
+def test_the_doctor_and_the_run_admission_agree_on_one_fixture(tmp_path):
+    """C-09 (S1, ruling 7): the doctor is a preflight of the decision the run
+    itself makes - one enumeration, one assessment, the same entries."""
+    import json
+
+    from kriya.core import model_qualification as model_admission
+
+    cfg = _production_cfg(tmp_path)
+    for qualified in (False, True):
+        if qualified:
+            _qualify_all_roles(cfg)
+        check = _checks(_run(tmp_path, cfg=cfg))["model.qualification"]
+        with _healthy_boundaries():
+            decision = model_admission.run_admission(cfg, workspace_root=str(tmp_path))
+        # Field for field (the doctor's report is JSON: tuples are lists there).
+        assert json.loads(json.dumps(decision["roles"])) == json.loads(json.dumps(check.evidence["roles"]))
+        assert decision["qualification_policy_digest"] == check.evidence["qualification_policy_digest"]
+        assert decision["admitted"] is qualified and decision["enforced"] is True
+        assert (check.status is CheckStatus.PASS) is qualified
+
+
 def test_a_fully_qualified_healthy_deployment_is_production_ready(tmp_path):
     """PRD-014 makes readiness reachable: with every role's exact runtime
     qualified, nothing blocks."""

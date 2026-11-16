@@ -396,3 +396,95 @@ do not have the header's width), `ACCEPTANCE-ENVIRONMENT-ERROR-FLAG-NO-READER-00
 **A finding for S8, measured here:** `is_candidate_finding` is a deny-list, and before this slice it classed the environment stop
 as a statement about the candidate. S0 fixed the environment types only; the general fail-closed allow-list stays S8's predicate
 split.
+
+**S0 certification record (owner run, 2026-11-15; written here at the S1 checkpoint, 2026-11-16).** Two claims, kept apart.
+
+- *S0 delta.* The S0 runtime delta is certified at `c0d3774`: the owner ran `scripts/certify_s0_core.sh` on that exact
+  snapshot in an environment built from `requirements.txt`; result PASS (`ruff`, `pylint`; state-machine 1,786, workflow 843,
+  S0 invariants 272, architecture 192, real-Docker serial 94; 2026-11-15T14:47Z to 15:30Z; evidence
+  `~/kriya-evidence/s0-cert-c0d3774/core/`). `3b7bee6` contains test-only contract-alignment changes on top of it,
+  validated by focused reruns (the six test IDs and `tests/test_gate_orchestrator.py`); product and runtime code are
+  unchanged from `c0d3774`. The full core did **not** run at `3b7bee6`, and by owner ruling is not re-run for it.
+- *Overall baseline.* The one diagnostic sweep (`ebc5b92`, 31 failed of 22,036) ran in an off-lock environment, so it is
+  not the canonical whole-repository result. Its 31 reds are all classified: 25 class B, one root
+  (`TEST-DOCKER-PIN-INERT-OFF-LOCK-001`, closed; 16 of them not individually re-run on the lock), and 6 class C in four
+  families (`SWEEP-S0-SIX-BASELINE-WORKFLOW-REDS-001`, closed: F1/F3 stale after `9323129`, F2/F4 stale after `3722d9d`,
+  corrected at `3b7bee6`). No class A. Owner ruling on F1/F3: any run-authored or run-modified test stays subject to
+  semantic review; no exemption for compile-only adaptations. A lock-environment full sweep has not run; it is
+  non-blocking for S1 and S2 and owner-run when wanted.
+
+## 10. Slice S1: runtime identity and production admission (C-09, R-09; 2026-11-16, implementation branch)
+
+**Reproduced first (`MEASURED`, probe B-P1 at `3b7bee6`).** `llm` and `agent_llms.reviewer.llm` naming one model with
+different settings loaded; `LLMClient._binding` returned the primary's 32,768 window, default adapter and no `extra_body`,
+while `role_binding_for_model` (what qualification and the doctor assess) returned the Reviewer's 65,536, `ollama_native`
+and `top_p`. After the fix the same probe configuration is refused at load.
+
+**Root owner (`CONFIRMED` by trace and by mutant M1/M2).** Not the call sites: the name-to-binding resolution itself. A
+model name is the alias every owner resolves by (`LLMClient._binding`, `binding_object`, `_binding_for`,
+`kriya_protocol_identity`, the capability profile, the doctor's per-name runtime cache), and nothing made that name
+unambiguous or required it to be known.
+
+| Contract clause (`07` C-09) | Implemented | Proof |
+|---|---|---|
+| Same name, different identity: configuration error at load | `config.binding_alias_conflicts` over every binding; identity fields now include `inference_runtime` (`MODEL_BINDING_ALIAS_CONFLICT`) | B-P1 inverted; each field alone; non-primary pair; positive controls; mutants M2, M3 |
+| Unknown name refused, typed, before provider contact | `model_runtime.require_binding` -> `UnknownModelBindingError` (`MODEL_BINDING_UNKNOWN`); the primary fallback is gone | Three entry points, no request, no probe; mutant M1 |
+| Requested identity == dispatched identity | The binding is resolved first; endpoint, key and reasoning flag default to its own | Call naming only the model: its endpoint, its settings digest; mutants M9, M10 |
+| Production admission by the run, before the engine is built | `model_qualification.admit_run` from `cli._workflow_config` on the routed configuration: every role, model and inference identity | Primary, chain entry, another role's identity, retry identity each refused alone; fully qualified admitted; mutants M6, M7, M12 |
+| Dispatch-time clause (ruling 7) | `LLMClient._admit` -> `admit_dispatch` on the fingerprint and settings actually sent, both completion paths | Same name at another temperature or `extra_body` refused; fallback on its own record only; FAIL, STALE, non-exact refused; mutants M4, M5, M8 |
+| Outside production: recorded, never refused | `enforced()`; `model.admission` run event on every run | Same configuration starts; event asserted; mutant M15 |
+| The doctor and the admission agree | The doctor's check calls `assess_role_bindings` | One fixture, field for field; mutant M14 |
+| `KRIYA_MODEL_RUNTIME_PROBE=0` under production refused | A non-exact runtime is never QUALIFIED | Run and dispatch cases |
+
+Fifteen targeted mutants, fifteen killed. The stop condition did not fire: `tests/test_inf001_runtime_parity.py` (wire and
+runtime digest) is unchanged and green, so no qualification record goes stale.
+
+**Model name and canonical identity (owner caution, 2026-11-16).** Current configuration requires model-name uniqueness
+across distinct bindings because lookup is name-keyed. Canonical runtime identity is the full qualified binding identity,
+not the human/model-name string alone: the chain is requested binding -> exact provider, model, endpoint and options ->
+exact qualification -> exact dispatch, and the admission decisions bind to the runtime fingerprint digest and the
+inference-settings digest, never to the name. The binding schema has no key separate from `model` (`TRACED`: `LLMConfig`,
+`FallbackModelConfig`), and `model` is also the name sent on the wire. Serving one model through two differently
+configured bindings therefore needs a second served name at the provider (an Ollama tag copy; a second served-model name
+on another runtime is `INFERRED`, not verified here). Registered as a future compatibility constraint, not redesigned
+now: `MODEL-BINDING-EXPLICIT-IDENTIFIER-001` (same served model on multiple runtimes requires an explicit binding
+identifier before vLLM production support).
+
+**Module shape, and a defect of my own first version (reported, not folded in).** The first S1 tree put every admission
+function in a new `kriya/core/model_admission.py` and imported it from `run_lifecycle.py`. The wider gate refused it:
+the module was unclassified, and it drew `run_lifecycle` (a kernel owner module) and six more workflow modules into an
+import cycle (`kriya.core` 10 -> 11, `kriya.workflow` 60 -> 67). Fixed at the owner before the commit:
+`model_admission.py` is a leaf (reason code, client purposes, typed refusal, enforcement predicate; public, PROVIDER); the
+decisions live beside the one assessment they use (`model_qualification.py`: `assess_role_bindings`, `run_admission`,
+`admit_run`, `admit_dispatch`); the run event is supplied through `StageDeps.model_admission_details` like its
+neighbours. Cycle counts are back at the baseline, and two allowlist entries the doctor no longer needs were deleted.
+
+**Goldens (class C, mechanical, reviewed).** The event is part of every run's stream, so all 41 kernel goldens were
+regenerated once after a leaf-by-leaf diff: 33 gain only the `model.admission` record and event, 5 are byte identical,
+and the three enforce scenarios additionally change the enforce row's `evidence.attempt_store` pointer (`seq_at_row`
+counts the added records, `TRACED`). Two gate-sequence goldens change one digest each. The four files the earlier delta
+pins chain through are kept in `tests/golden/kernel_pre_s1_model_admission/`, and S1's own delta is pinned by a test.
+
+**Readings, mine, standing until the owner corrects them.**
+
+- *The binding is still resolved by name, by one owner, not passed as an object by each caller.* The contract's own
+  second clause (one name, one identity, enforced at load) makes the name exact for every owner at once, including the five
+  that are not `LLMClient`; passing objects through every call site would have fixed one of them and left the rest.
+  `temperature` and `max_tokens` are not identity fields of the rule because the role choke point passes them per call.
+- *Exempt clients.* A qualification run and the doctor's served-window probe must call a binding that is not qualified
+  yet. They say so with `LLMClient(purpose=)`; the set of purposes is closed and the three construction sites are pinned.
+- *An operator-declared context tier is not dispatched under production.* A tier is another exact runtime; ruling 7
+  admits it only on a record. Outside production the declaration works as before.
+- *The dispatch check requires the capabilities of the role the call is attributed to* (`current_model_role`); an
+  unattributed call requires the base set. Role-complete coverage is the run admission's.
+
+**Limits, stated plainly.** (1) The decision is a run event, not yet a RunRecord annotation: the record's annotatable
+field set is S6's subject (`MODEL-ADMISSION-RUNRECORD-ANNOTATION-001`, P3, target S6). (2) Commands that are not workflow
+commands (`kriya query`, `kriya plan`, routing) have no run admission; under production each of their requests is still
+refused at dispatch. (3) A dispatch refusal inside a role's escalation chain moves to the next candidate, which is checked
+the same way; nothing is sent on an unqualified one. (4) Not exercised against a live model in this slice.
+
+**Contract-stale tests updated (class C, compact).** Two tests called an unbound model name (now bound in `llm_chain`);
+two pinned the run's opening events (now with `model.admission`), as do the goldens above; eighteen production-profile cases in three files
+dispatched an unqualified identity (they now qualify the identity they send, `tests/_admission.py`, and assert what they
+asserted before).

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kriya.config import AppConfig
+from kriya.config.config import FallbackModelConfig
 from kriya.core.llm import LLMClient, is_local_url
 
 
@@ -69,6 +70,8 @@ async def test_complete_uses_fallback_extra_body_not_the_primarys():
     primary's own tuning would silently leak onto the fallback call."""
     cfg = AppConfig()
     cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    # C-09 (S1): a call names a configured binding (an unbound name is MODEL_BINDING_UNKNOWN).
+    cfg.llm_chain = [FallbackModelConfig(model="qwen3.8:27b")]
     llm = LLMClient(cfg)
 
     mock_create = AsyncMock(return_value=_mock_response("ok"))
@@ -101,6 +104,7 @@ async def test_complete_empty_dict_extra_body_override_means_no_extra_body():
     context window (FALLBACK-CONTEXT-WINDOW-001), no sampling settings."""
     cfg = AppConfig()
     cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    cfg.llm_chain = [FallbackModelConfig(model="some-other-model")]  # C-09 (S1): a configured binding
     llm = LLMClient(cfg)
 
     mock_create = AsyncMock(return_value=_mock_response("ok"))

@@ -1115,7 +1115,36 @@ def _workflow_config(cfg: AppConfig, *, resume: bool = False, resume_id: Optiona
             for violation in violations:
                 click.secho(f"  - {violation}", fg="red", err=True)
             sys.exit(1)
-    return cfg
+    return _admit_model_bindings(cfg, workspace)
+
+
+def _admit_model_bindings(cfg: AppConfig, workspace: Optional[str]) -> AppConfig:
+    """C-09 (S1; owner ruling 7): the run owns production admission. Under
+    runtime_profile: production the command is refused (MODEL_BINDING_NOT_QUALIFIED)
+    unless every role's every dispatchable binding (the routed configuration's
+    primary, chains and role bindings, each inference identity) is QUALIFIED
+    for its exact runtime - before the engine is built or any model is called.
+    The decision travels with the configuration for the run's model.admission
+    event. Outside production nothing is assessed here (the run records it)."""
+    from kriya.core.model_qualification import ModelAdmissionError, admission_enforced, admit_run
+
+    if not admission_enforced(cfg):
+        return cfg
+    try:
+        decision = admit_run(cfg, workspace_root=workspace)
+    except ModelAdmissionError as refusal:
+        click.secho(f"[{refusal.reason_code}] model admission refused this run:", fg="red", err=True)
+        for item in refusal.details["unqualified"]:
+            identity = f" ({item['identity']} identity)" if item.get("identity") else ""
+            reasons = f": {'; '.join(item['reasons'])}" if item.get("reasons") else ""
+            click.secho(f"  - {item['role']}: {item['model']}{identity} is {item['status']}{reasons}", fg="red",
+                        err=True)
+        click.secho("Qualify each exact runtime with `kriya model qualify --model <model>`; nothing was sent to a "
+                    "model.", fg="red", err=True)
+        sys.exit(1)
+    admitted = cfg.model_copy(deep=True) if getattr(cfg, "_routing_plan", None) is None else cfg
+    admitted._model_admission = decision
+    return admitted
 
 
 @model_group.command(name="metrics")

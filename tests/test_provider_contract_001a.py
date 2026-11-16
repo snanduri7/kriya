@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from _admission import qualify_dispatched
 from _deadline_clock import freeze_budget_clock
 from _fake_inference_runtime import FakeRuntimeAdapter
 
@@ -462,6 +463,8 @@ def _observable_config(production):
     config.llm.inference_runtime = "fake-observable"
     if production:
         config.runtime_profile = "production"
+        # C-09 (S1): production dispatches only a QUALIFIED identity (tests/_admission.py).
+        qualify_dispatched(config)
     return config
 
 

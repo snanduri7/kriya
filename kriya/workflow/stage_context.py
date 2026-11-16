@@ -107,6 +107,7 @@ class StageDeps:
     egress_authority_details: Callable[[Any], Dict[str, Any]]    # PRD-012 outbound authority, for the run event
     primary_model_runtime_details: Callable[[Any], Awaitable[Dict[str, Any]]]   # PRD-013/014 runtime + qualification
     role_independence_details: Callable[[Any], Dict[str, Any]]   # PRD-018 role -> exact runtime
+    model_admission_details: Callable[[Any], Dict[str, Any]]     # C-09 (S1): the run's model admission decision
     trace_events: Callable[[RunState], List[Dict[str, Any]]]     # the engine's _trace_run_events (drains + metrics)
     static_analysis_fields: Callable[[Any], Dict[str, Any]]      # PRD-031A result fields
     required_verification_evidence: Callable[..., List[Dict[str, Any]]]   # workflow._build_required_verification_evidence

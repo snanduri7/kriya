@@ -119,6 +119,27 @@ async def open_run_state(
         ))
     except Exception as exc:
         deps.logger.warning(f"Could not record the run's role-runtime assignment: {exc}")
+    # C-09 (S1; owner ruling 7): the run's model admission - per role, each
+    # dispatchable binding's exact runtime digest, inference-settings digest
+    # and status, with the qualification policy digest. The decision a
+    # workflow command made before the engine was built travels on the
+    # configuration; a run started any other way assesses here. Evidence
+    # only: the refusal itself is the command's (kriya/cli.py
+    # _admit_model_bindings) and, for every request, LLMClient._admit.
+    try:
+        admission = getattr(deps.config, "_model_admission", None)
+        if admission is None:
+            admission = await asyncio.to_thread(deps.model_admission_details, deps.config)
+        state.record_event(RunEvent(
+            kind="model.admission", attempt=0, source="workflow.run_generation_workflow",
+            authority=EventAuthority.AUXILIARY,
+            message=("model admission: " + ("every dispatchable binding is QUALIFIED" if admission["all_qualified"]
+                                            else f"{len(admission['unqualified'])} binding identity(ies) not QUALIFIED")
+                     + ("" if admission["enforced"] else " (recorded; enforced only under runtime_profile: production)")),
+            details=admission,
+        ))
+    except Exception as exc:
+        deps.logger.warning(f"Could not record the run's model admission: {exc}")
     # PRD-019: the routes the workflow command applied (candidates,
     # rejections, final route), one event per routed role.
     routing_plan = getattr(deps.config, "_routing_plan", None)

@@ -459,9 +459,17 @@ def test_every_production_assessment_passes_the_configured_policy():
     """assess() defaults to the default policy; a production caller that
     omitted policy_digest would accept records made under another one."""
     calls = list(_production_calls("assess"))
-    assert len(calls) >= 8
+    # 7 since S1 (C-09): the doctor's call moved into model_qualification.assess_role_bindings, checked below.
+    assert len(calls) >= 7
     missing = [where for where, node in calls if "policy_digest" not in {kw.arg for kw in node.keywords}]
     assert missing == []
+    # The admission decisions live beside assess() (the module the scan above skips): each of their calls passes it too.
+    tree = ast.parse((_KRIYA / "core" / "model_qualification.py").read_text(encoding="utf-8"))
+    owners = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    for owner in ("assess_role_bindings", "admit_dispatch"):
+        own = [node for node in ast.walk(owners[owner])
+               if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "assess"]
+        assert len(own) == 1 and "policy_digest" in {kw.arg for kw in own[0].keywords}, owner
 
 
 def test_every_production_measured_limits_lookup_passes_its_config():

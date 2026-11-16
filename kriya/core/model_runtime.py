@@ -578,6 +578,35 @@ def binding_object(config: Any, model: str) -> Any:
     return next((candidate for candidate in candidates if candidate.model.casefold() == target), None)
 
 
+MODEL_BINDING_UNKNOWN = "MODEL_BINDING_UNKNOWN"
+
+
+class UnknownModelBindingError(RuntimeError):
+    """C-09 (S1): a generation call named a model no configured binding
+    names. Refused before any provider contact; a call is never executed on
+    another binding's settings because its own could not be found."""
+
+    reason_code = MODEL_BINDING_UNKNOWN
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+        super().__init__(
+            f"{MODEL_BINDING_UNKNOWN}: no configured model binding names {model!r} (llm, llm_chain, agent_llms). "
+            "Nothing was sent; bind the model in the configuration before calling it.")
+
+
+def require_binding(config: Any, model: str) -> Any:
+    """The one name-to-binding resolution of a generation call: the config
+    object that binds ``model`` (``binding_object``), or
+    UnknownModelBindingError. Configuration load guarantees that every
+    binding sharing a name shares its identity-relevant settings
+    (``config.binding_alias_conflicts``), so the first match is exact."""
+    binding = binding_object(config, model)
+    if binding is None:
+        raise UnknownModelBindingError(model)
+    return binding
+
+
 def binding_output_tokens(config: Any, binding: Any = None) -> int:
     """PRD-017: the output budget (max_tokens) a call to ``binding`` asks for
     before any reasoning floor and before PRD-016's per-call budgeting: the
@@ -609,21 +638,20 @@ def _all_bindings(config: Any) -> List[Any]:
 def _binding_for(config: Any, model: str) -> Dict[str, Any]:
     """The first binding of ``model`` (exact, case-folded); empty for a
     model no chat binding names (the embedding model)."""
-    target = (model or "").casefold()
-    if config.llm.model.casefold() == target:
+    candidate = binding_object(config, model)
+    if candidate is None:
+        return {}
+    if candidate is config.llm:
         return {"base_url": config.llm.base_url, "api_key": config.llm.api_key, "extra_body": config.llm.extra_body,
                 "context_window": config.llm.context_window,
                 "inference_runtime": getattr(config.llm, "inference_runtime", None)}
-    for candidate in _all_bindings(config)[1:]:
-        if candidate.model.casefold() == target:
-            return {
-                "base_url": candidate.base_url,
-                "api_key": getattr(candidate, "api_key", config.llm.api_key),
-                "extra_body": getattr(candidate, "extra_body", {}) or {},
-                "context_window": getattr(candidate, "context_window", None),
-                "inference_runtime": getattr(candidate, "inference_runtime", None),
-            }
-    return {}
+    return {
+        "base_url": candidate.base_url,
+        "api_key": getattr(candidate, "api_key", config.llm.api_key),
+        "extra_body": getattr(candidate, "extra_body", {}) or {},
+        "context_window": getattr(candidate, "context_window", None),
+        "inference_runtime": getattr(candidate, "inference_runtime", None),
+    }
 
 
 # --------------------------------------------------------------------------

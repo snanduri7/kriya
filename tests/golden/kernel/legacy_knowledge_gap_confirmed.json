@@ -166,6 +166,27 @@
     {
      "attempt": null,
      "content": {
+      "event": "sha256:35e1d186a5a1c966"
+     },
+     "event": "model.admission",
+     "kind": "mirror.event",
+     "payload": "sha256:48ab4a3028884492",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
       "event": "sha256:08e4d72cc574265a"
      },
      "event": "requirement.derived",
@@ -1463,6 +1484,13 @@
      "authority": "auxiliary",
      "details": "sha256:ce2159ab4ad8660b",
      "kind": "model.role_independence",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:4816e8314af8009c",
+     "kind": "model.admission",
      "source": "workflow.run_generation_workflow"
     },
     {

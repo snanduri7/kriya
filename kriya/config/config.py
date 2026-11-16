@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
@@ -1035,7 +1035,10 @@ _POLICY_ROLES = ("planner", "architect", "reviewer", "run_verifier", "skill_gap"
 
 # The settings a model binding's runtime identity and protocol depend on
 # (kriya/core/model_runtime.py, model_capabilities.py).
-_BINDING_IDENTITY_FIELDS = ("base_url", "extra_body", "context_window", "reasoning", "capabilities", "context_policy")
+# C-09 (S1): inference_runtime selects the adapter (the wire and the runtime
+# digest), so it is identity like the window it is served with.
+_BINDING_IDENTITY_FIELDS = ("base_url", "extra_body", "context_window", "reasoning", "capabilities", "context_policy",
+                            "inference_runtime")
 
 
 def _binding_identity(binding: Any) -> Dict[str, Any]:
@@ -1071,6 +1074,44 @@ def routing_alias_conflicts(config: Any) -> List[str]:
                     f"candidate {candidate.model!r} has the alias of {where} but different settings; model "
                     "bindings are resolved by alias, so give the candidate a distinct alias (an Ollama tag "
                     "copy) or identical settings")
+    return conflicts
+
+
+def _named_bindings(config: Any) -> List[Tuple[str, Any]]:
+    """Every configured generation binding with where it is configured: the
+    primary llm, llm_chain, then each agent_llms role's llm and llm_chain."""
+    named = [("llm", config.llm)]
+    named += [(f"llm_chain[{index}]", entry) for index, entry in enumerate(config.llm_chain)]
+    for role in _POLICY_ROLES:
+        role_cfg = getattr(config.agent_llms, role, None)
+        if role_cfg is None:
+            continue
+        if role_cfg.llm is not None:
+            named.append((f"agent_llms.{role}.llm", role_cfg.llm))
+        named += [(f"agent_llms.{role}.llm_chain[{index}]", entry) for index, entry in enumerate(role_cfg.llm_chain)]
+    return named
+
+
+def binding_alias_conflicts(config: Any) -> List[str]:
+    """C-09 (S1): bindings that share a model name (case-folded) but not
+    their identity-relevant settings. A model name is the one alias every
+    owner resolves a binding by (dispatch, runtime fingerprint, capability
+    profile, qualification, the doctor), so two different bindings under one
+    name would execute as one and be assessed as the other (measured: B-P1).
+    Each conflict names both places and the fields that differ."""
+    named = _named_bindings(config)
+    conflicts = []
+    for index, (where, binding) in enumerate(named):
+        for other_where, other in named[index + 1:]:
+            if binding.model.casefold() != other.model.casefold():
+                continue
+            mine, theirs = _binding_identity(binding), _binding_identity(other)
+            differing = [name for name in _BINDING_IDENTITY_FIELDS if mine[name] != theirs[name]]
+            if differing:
+                conflicts.append(
+                    f"{where} and {other_where} both bind model {binding.model!r} but differ in "
+                    f"{', '.join(differing)}; a model name resolves to exactly one binding, so give one of them a "
+                    "distinct alias (an Ollama tag copy) or identical settings")
     return conflicts
 
 
@@ -1720,6 +1761,15 @@ class AppConfig(BaseModel):
         conflicts = routing_alias_conflicts(self)
         if conflicts:
             raise ValueError("model_policy.routing.candidates: " + "; ".join(conflicts))
+        return self
+
+    @model_validator(mode="after")
+    def _bindings_sharing_a_model_name_must_share_identity(self) -> "AppConfig":
+        """C-09 (S1): MODEL_BINDING_ALIAS_CONFLICT - the routing-candidate
+        rule above, applied to every binding."""
+        conflicts = binding_alias_conflicts(self)
+        if conflicts:
+            raise ValueError("MODEL_BINDING_ALIAS_CONFLICT: " + "; ".join(conflicts))
         return self
 
     @model_validator(mode="after")

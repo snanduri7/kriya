@@ -108,8 +108,10 @@ MODULES: Dict[str, Module] = {
                      "kriya/core/provider_contract.py", "kriya/core/completion.py", "kriya/core/token_budget.py",
                      "kriya/core/inference_settings.py", "kriya/core/model_capabilities.py",
                      "kriya/core/role_metrics.py", "kriya/core/model_routing.py",
-                     "kriya/core/execution_environment.py"),
-        public=("kriya.core.inference_runtime", "kriya.core.provider_contract", "kriya.core.llm"),
+                     "kriya/core/execution_environment.py",
+                     "kriya/core/model_admission.py"),   # C-09 (S1): the admission contract, a leaf (codes, purposes, typed refusal)
+        public=("kriya.core.inference_runtime", "kriya.core.provider_contract", "kriya.core.llm",
+                "kriya.core.model_admission"),
         layer=2),
     "REPOSITORY": Module(
         owner_paths=("kriya/repository/",),

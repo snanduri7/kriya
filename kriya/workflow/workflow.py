@@ -522,6 +522,14 @@ def _record_post_generation_ownership_findings(
         ))
 
 
+def _model_admission_details(cfg: Any) -> Dict[str, Any]:
+    """C-09 (S1): the run's model admission decision, for a run whose
+    command did not already make it (kriya/cli.py _admit_model_bindings)."""
+    from kriya.core.model_qualification import run_admission
+
+    return run_admission(cfg)
+
+
 def _role_independence_details(cfg: Any) -> Dict[str, Any]:
     """PRD-018: each role's exact runtime, the roles grouped by shared
     runtime, and the independence policy with any violation."""
@@ -1829,6 +1837,7 @@ class WorkflowEngine:
             egress_authority_details=egress_authority_details,
             primary_model_runtime_details=_primary_model_runtime_details,
             role_independence_details=_role_independence_details,
+            model_admission_details=_model_admission_details,
             trace_events=self._trace_run_events, static_analysis_fields=static_analysis_result_fields,
             required_verification_evidence=_build_required_verification_evidence,
             deterministic_gate_evidence=deterministic_gate_evidence,

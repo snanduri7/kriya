@@ -75,6 +75,9 @@ from kriya.core.execution_environment import (
 from kriya.core.file_stamp import FileStamp, file_stamp, unchanged_since
 from kriya.core.inference_runtime import ChatRequest, runtime_adapter, runtime_for_binding
 from kriya.core.inference_settings import InferenceSettings, qualification_identity
+from kriya.core.model_admission import ADMISSION_SCHEMA, MODEL_BINDING_NOT_QUALIFIED
+from kriya.core.model_admission import ModelAdmissionError as ModelAdmissionError  # re-export: the callers of admit_run
+from kriya.core.model_admission import enforced as admission_enforced
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
 from kriya.core.provider_contract import (
     DEFAULT_BYTES_PER_TOKEN_CEILING,
@@ -463,6 +466,13 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
         source = None
         if assessment.status == QUALIFIED:
             source = TIER_SOURCE_QUALIFICATION_RECORD
+        elif (assessment.status == MISSING and size in declared
+              and getattr(config, "runtime_profile", None) == "production"):
+            # C-09 (S1, ruling 7): a tier is a different exact runtime; a
+            # production run dispatches it only on a qualification record,
+            # never on an operator's declaration.
+            notes.append(f"{size}: {MISSING} (the production runtime profile requires a qualification record; "
+                         "an operator-declared tier is not admitted)")
         elif assessment.status == MISSING and size in declared and not runtime_has_records(tier_runtime.digest):
             source = TIER_SOURCE_OPERATOR_DECLARED
         elif assessment.status == MISSING and size in declared:
@@ -657,9 +667,145 @@ def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, set
     return QualificationAssessment(QUALIFIED, fingerprint.digest)
 
 
+# --------------------------------------------------------------------------
+# C-09 (S1; owner ruling 7): production admission. Two decisions on the one
+# assessment above; the contract (reason code, typed refusal, enforcement
+# predicate) is the leaf kriya/core/model_admission.py.
+# - admit_run: before a workflow command starts, every role's every callable
+#   binding and every inference identity the role executes it with.
+#   assess_role_bindings is the enumeration the doctor's model.qualification
+#   check uses too, so the two cannot disagree on one configuration.
+# - admit_dispatch: at the single dispatch choke point (LLMClient._admit),
+#   the identity actually computed for the request. It covers whatever
+#   admit_run did not enumerate (a caller's overrides, a binding resolved
+#   later): a model name, a role label or an earlier decision is never the
+#   authority for a call.
+# A non-exact runtime (KRIYA_MODEL_RUNTIME_PROBE=0, a failed probe) is never
+# QUALIFIED, so production refuses it. Embeddings keep their own contract.
+# --------------------------------------------------------------------------
+
+def assess_role_bindings(config: Any, *, workspace_root: Optional[str] = None,
+                         runtimes: Optional[Dict[str, Any]] = None, fresh: bool = False
+                         ) -> Tuple[Dict[str, List[Dict[str, Any]]], set]:
+    """Every production role's every callable model, assessed for each
+    inference identity the role executes it with. Returns (entries per role,
+    the set of statuses seen). ``runtimes`` seeds already-resolved runtime
+    fingerprints by case-folded model name (the doctor's own primary probe);
+    a runtime that cannot be resolved is RUNTIME_NOT_EXACT, never qualified."""
+    from kriya.core import model_runtime
+    from kriya.core.inference_settings import role_inference_identities
+    from kriya.core.model_capabilities import is_campaign_named_model
+
+    policy_digest = policy_digest_for(config)
+    runtimes = dict(runtimes or {})
+    roles: Dict[str, List[Dict[str, Any]]] = {}
+    statuses: set = set()
+    for role, models in role_models(config).items():
+        entries: List[Dict[str, Any]] = []
+        for model in models:
+            key = model.casefold()
+            if key not in runtimes:
+                try:
+                    runtimes[key] = model_runtime.resolve_configured_model_runtime(config, model, fresh=fresh)
+                except Exception as error:  # an unreachable runtime is undeterminable, not qualified
+                    runtimes[key] = None
+                    entries.append({"model": model, "status": NOT_EXACT, "reasons": [str(error)]})
+                    statuses.add(NOT_EXACT)
+                    continue
+            runtime = runtimes[key]
+            if runtime is None:
+                entries.append({"model": model, "status": NOT_EXACT, "reasons": ["runtime could not be probed"]})
+                statuses.add(NOT_EXACT)
+                continue
+            # Every identity the role executes the model with (a Developer's
+            # differing retry temperature is its own; MODEL-EVIDENCE-HARDENING-001).
+            for label, settings in role_inference_identities(config, role, model):
+                assessment = assess(runtime, required_capabilities(config, role, model), settings=settings,
+                                    workspace_root=workspace_root, policy_digest=policy_digest)
+                statuses.add(assessment.status)
+                entries.append({"model": model, "identity": label, "inference_settings_digest": settings.digest,
+                                "campaign_named": is_campaign_named_model(model), **assessment.to_dict()})
+        roles[role] = entries
+    return roles, statuses
+
+
+def run_admission(config: Any, *, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+    """The admission decision of a run under ``config`` (never raises for an
+    unqualified binding; ``admit_run`` does). ``admitted`` is False only when
+    admission is enforced and a binding is not QUALIFIED. Each entry carries
+    the exact identity (runtime fingerprint digest, inference-settings
+    digest) with the qualification policy digest, so a later record can bind
+    to it."""
+    roles, _statuses = assess_role_bindings(config, workspace_root=workspace_root)
+    unqualified = [
+        {"role": role, "model": entry["model"], "identity": entry.get("identity"), "status": entry["status"],
+         "inference_settings_digest": entry.get("inference_settings_digest"),
+         "fingerprint_digest": entry.get("fingerprint_digest"), "reasons": list(entry.get("reasons") or ())}
+        for role, entries in roles.items() for entry in entries if entry["status"] != QUALIFIED
+    ]
+    is_enforced = admission_enforced(config)
+    return {
+        "schema": ADMISSION_SCHEMA, "enforced": is_enforced, "all_qualified": not unqualified,
+        "admitted": not (is_enforced and unqualified),
+        "reason_code": MODEL_BINDING_NOT_QUALIFIED if is_enforced and unqualified else None,
+        "qualification_policy_digest": policy_digest_for(config), "roles": roles, "unqualified": unqualified,
+    }
+
+
+def admission_refusal_message(decision: Dict[str, Any]) -> str:
+    lines = [f"{item['role']}: {item['model']}"
+             + (f" ({item['identity']} identity)" if item.get("identity") else "")
+             + f" is {item['status']}" + (f" - {'; '.join(item['reasons'])}" if item.get("reasons") else "")
+             for item in decision["unqualified"]]
+    return (f"{MODEL_BINDING_NOT_QUALIFIED}: the production runtime profile admits a run only when every model "
+            "binding it can dispatch is QUALIFIED for its exact runtime and inference settings; "
+            + "; ".join(lines)
+            + ". Qualify each with `kriya model qualify --model <model>`; nothing was sent to a model.")
+
+
+def admit_run(config: Any, *, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+    """The run's admission decision; ModelAdmissionError when it is enforced
+    and any dispatchable binding is not QUALIFIED."""
+    decision = run_admission(config, workspace_root=workspace_root)
+    if not decision["admitted"]:
+        raise ModelAdmissionError(admission_refusal_message(decision), decision)
+    return decision
+
+
+def admit_dispatch(config: Any, *, role: str, model: str, fingerprint: ModelRuntimeFingerprint,
+                   settings: InferenceSettings, admitted: set) -> None:
+    """Dispatch-time admission of the exact identity of one request.
+    ``admitted`` is the caller's own memo of identities already admitted
+    (an exact runtime digest, a settings digest, a role); a non-exact
+    runtime is never memoized and never admitted."""
+    if not admission_enforced(config):
+        return
+    key = (fingerprint.digest if fingerprint.exact else "", settings.digest, role)
+    if fingerprint.exact and key in admitted:
+        return
+    policy_digest = policy_digest_for(config)
+    assessment = assess(fingerprint, required_capabilities(config, role, model), settings=settings,
+                        policy_digest=policy_digest)
+    if assessment.status == QUALIFIED:
+        admitted.add(key)
+        return
+    details = {
+        "reason_code": MODEL_BINDING_NOT_QUALIFIED, "role": role, "model": model, "status": assessment.status,
+        "runtime_fingerprint": fingerprint.digest if fingerprint.exact else None,
+        "inference_settings_digest": settings.digest, "qualification_policy_digest": policy_digest,
+        "reasons": list(assessment.reasons),
+    }
+    raise ModelAdmissionError(
+        f"{MODEL_BINDING_NOT_QUALIFIED}: the production runtime profile dispatches only a QUALIFIED identity; "
+        f"{model} as called by {role} (inference settings {settings.digest[:19]}) is {assessment.status}"
+        + (f" - {'; '.join(assessment.reasons)}" if assessment.reasons else "")
+        + f". Qualify it with `kriya model qualify --model {model}`; nothing was sent to the model.",
+        details)
+
+
 # Measured limits that describe the runtime's tokenizer, not its sampling:
 # the same for every inference identity of one runtime.
-RUNTIME_SCOPED_LIMITS = ("bytes_per_token_floor", "non_ascii_bytes_per_token_floor", "bytes_per_token_ceiling")
+RUNTIME_SCOPED_LIMITS =("bytes_per_token_floor", "non_ascii_bytes_per_token_floor", "bytes_per_token_ceiling")
 # Runtime-scoped limits whose conservative value is the largest, not the smallest.
 _RUNTIME_SCOPED_CEILINGS = frozenset({"bytes_per_token_ceiling"})
 
@@ -1595,7 +1741,9 @@ async def run_qualification(
         )
     runtime = runtime_for_binding(_binding_for(config, model))
     require_verified_identity(config, model, fingerprint, settings, runtime)
-    llm = llm or LLMClient(config)
+    # C-09 (S1): a qualification client is exempt from production admission
+    # (it calls the binding in order to qualify it).
+    llm = llm or LLMClient(config, purpose="qualification")
 
     default_factory = qualification_client_factory(config, model)
 
@@ -1670,7 +1818,7 @@ def qualification_client_factory(config: Any, model: str) -> Callable[[float], A
         transport = probe_config.llm.transport
         transport.connect_timeout_seconds = transport.read_timeout_seconds = timeout
         transport.write_timeout_seconds = transport.pool_timeout_seconds = timeout
-        return LLMClient(probe_config)
+        return LLMClient(probe_config, purpose="qualification")
 
     return factory
 

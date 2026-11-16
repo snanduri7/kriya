@@ -1001,7 +1001,9 @@ def probe_served_context(cfg: AppConfig, model: str) -> Dict[str, Any]:
             return evidence
 
         async def load() -> Any:
-            llm = LLMClient(cfg)
+            # C-09 (S1): the doctor's served-window probe is a preflight, exempt
+            # from production admission (it runs before anything is qualified).
+            llm = LLMClient(cfg, purpose="preflight")
             try:
                 return await llm.complete_result("", "ok", model_override=model, base_url_override=base_url,
                                                  api_key_override=api_key, max_tokens_override=1)
@@ -1117,55 +1119,24 @@ def _check_qualification(ctx: _Context) -> DoctorCheck:
     exact runtime covering the capabilities Kriya uses with it. A model name
     is never a qualification. FAIL when a determinable runtime lacks it;
     UNAVAILABLE when a runtime cannot be identified exactly."""
-    from kriya.core.inference_settings import role_inference_identities
-    from kriya.core.model_capabilities import is_campaign_named_model
     from kriya.core.model_qualification import (
         MISSING,
-        NOT_EXACT,
         NOT_QUALIFIED,
         QUALIFIED,
         STALE,
-        assess,
+        assess_role_bindings,
         policy_digest_for,
         qualification_policy_of,
-        required_capabilities,
-        role_models,
     )
-    from kriya.core.model_runtime import resolve_configured_model_runtime
 
     policy_digest = policy_digest_for(ctx.cfg)
     runtimes: Dict[str, Any] = {}
     primary = ctx.runtime_probe.get("runtime")
     if primary is not None:
         runtimes[ctx.cfg.llm.model.casefold()] = primary
-    roles: Dict[str, Any] = {}
-    statuses = set()
-    for role, models in role_models(ctx.cfg).items():
-        entries = []
-        for model in models:
-            key = model.casefold()
-            if key not in runtimes:
-                try:
-                    runtimes[key] = resolve_configured_model_runtime(ctx.cfg, model, fresh=True)
-                except Exception as error:  # an unreachable runtime is undeterminable, not qualified
-                    runtimes[key] = None
-                    entries.append({"model": model, "status": NOT_EXACT, "reasons": [str(error)]})
-                    statuses.add(NOT_EXACT)
-                    continue
-            runtime = runtimes[key]
-            if runtime is None:
-                entries.append({"model": model, "status": NOT_EXACT, "reasons": ["runtime could not be probed"]})
-                statuses.add(NOT_EXACT)
-                continue
-            # Every identity the role executes the model with (a Developer's
-            # differing retry temperature is its own; MODEL-EVIDENCE-HARDENING-001).
-            for label, settings in role_inference_identities(ctx.cfg, role, model):
-                assessment = assess(runtime, required_capabilities(ctx.cfg, role, model), settings=settings,
-                                    workspace_root=ctx.workspace, policy_digest=policy_digest)
-                statuses.add(assessment.status)
-                entries.append({"model": model, "identity": label, "inference_settings_digest": settings.digest,
-                                "campaign_named": is_campaign_named_model(model), **assessment.to_dict()})
-        roles[role] = entries
+    # C-09 (S1): the enumeration and assessment the run's own admission uses
+    # (model_qualification.admit_run), so the doctor and a run cannot disagree.
+    roles, statuses = assess_role_bindings(ctx.cfg, workspace_root=ctx.workspace, runtimes=runtimes, fresh=True)
     if statuses == {QUALIFIED}:
         status, reason = CheckStatus.PASS, None
     elif statuses & {NOT_QUALIFIED, STALE, MISSING}:

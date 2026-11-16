@@ -22,7 +22,8 @@ from test_verification_contract_003_baseline import _workspace as _calc_workspac
 
 from kriya.core.state_paths import trace_db_path
 
-OPENING_EVENTS = ["egress.authority", "evidence.attempt_store", "model.runtime", "model.role_independence", "requirement.derived",
+# model.admission: C-09 (S1, ruling 7) - the run's own admission decision, recorded on every run
+OPENING_EVENTS = ["egress.authority", "evidence.attempt_store", "model.runtime", "model.role_independence", "model.admission", "requirement.derived",
                  "verification_contract.compiled"]
 # the row drains the PRD-018 role metrics last (run_lifecycle.trace_run_events)
 SHORT_ROW_KWARGS = ["run_id", "goal", "duration_sec", "attempts", "status", "files_modified", "failure_category",

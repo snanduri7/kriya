@@ -462,6 +462,23 @@ PRE_KAKB_DIR = kg.GOLDEN_DIR.parent / "kernel_pre_kakb_owner_search"
 KAKB_RERECORDED = ("enforce_verification_only_failed",)
 
 
+# S1 / C-09 (owner ruling 7, 2026-11-16): every run now records its model admission (one ``model.admission`` run event,
+# mirrored into the evidence store). All 41 goldens were regenerated ONCE from the S1 tree after a leaf-by-leaf diff
+# showed, for 38 scenarios, nothing but that added record and event (5 scenarios record no such run and are byte
+# identical), and for the three enforce scenarios additionally the enforce row's ``evidence.attempt_store`` pointer
+# (``seq_at_row``: the store's sequence number, one higher per added record). The four files the delta tests below
+# chain through are kept in PRE_S1_DIR; the S1 delta itself is pinned by the test that follows them.
+PRE_S1_DIR = kg.GOLDEN_DIR.parent / "kernel_pre_s1_model_admission"
+S1_KEPT = ("enforce_approval_refused", "enforce_success_with_verification_unit", "enforce_verification_only_failed",
+           "legacy_budget_stop")
+
+
+def _before_s1(name: str) -> Path:
+    """The golden as it stood before S1: the kept file, or the current one for a scenario whose reference was not kept."""
+    kept = PRE_S1_DIR / f"{name}.json"
+    return kept if kept.is_file() else kg.GOLDEN_DIR / f"{name}.json"
+
+
 def _extras(before: list, after: list) -> list:
     """The items of ``after`` that are not ``before``'s, when ``before`` is a subsequence of ``after`` (order kept);
     fails otherwise, so a removed, changed or reordered item can never pass as an addition."""
@@ -480,7 +497,7 @@ def test_an_enforce_golden_is_its_pre_r1_golden_plus_exactly_the_r1_additions(na
     before = json.loads((PRE_R1_DIR / f"{name}.json").read_text(encoding="utf-8"))
     # the golden as R1 left it: the current file, or - for a scenario a LATER accepted change re-recorded again - the
     # file that change replaced (the chain of references: pre-R1 -> R1 -> K-A/K-B -> current)
-    after_r1 = PRE_KAKB_DIR / f"{name}.json" if name in KAKB_RERECORDED else kg.GOLDEN_DIR / f"{name}.json"
+    after_r1 = PRE_KAKB_DIR / f"{name}.json" if name in KAKB_RERECORDED else _before_s1(name)   # ... -> S1 -> current
     after = json.loads(after_r1.read_text(encoding="utf-8"))
     truths, pointers = R1_ENFORCE_ROW_ADDITIONS[name]
     assert before != after and set(before) == set(after)
@@ -525,7 +542,7 @@ def test_the_reopen_golden_is_its_pre_kakb_golden_plus_exactly_the_review_transp
     removed or reordered anywhere else, and no other scenario's golden changed (41 scenarios regenerated, 1 differed)."""
     (name,) = KAKB_RERECORDED
     before = json.loads((PRE_KAKB_DIR / f"{name}.json").read_text(encoding="utf-8"))
-    after = json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    after = json.loads(_before_s1(name).read_text(encoding="utf-8"))   # as K-A/K-B left it (S1 re-recorded it since)
     assert sorted(path.stem for path in PRE_KAKB_DIR.glob("*.json")) == sorted(KAKB_RERECORDED)
     for key in set(before) - {"evidence", "run_events", "result"}:
         assert before[key] == after[key], key
@@ -556,6 +573,40 @@ def test_the_reopen_golden_is_its_pre_kakb_golden_plus_exactly_the_review_transp
     assert (values_after["status"], values_after["quality_gates_passed"]) == ("failed", False)       # still the same truthful failure
 
 
+@pytest.mark.parametrize("name", S1_KEPT)
+def test_a_golden_is_its_pre_s1_golden_plus_exactly_the_model_admission_event(name):
+    """S1's delta, pinned: one ``model.admission`` event per run that opens a generation state, mirrored once into the
+    evidence store; nothing removed, reordered or changed except the enforce row's store pointer, whose sequence number
+    counts the added records."""
+    assert sorted(path.stem for path in PRE_S1_DIR.glob("*.json")) == sorted(S1_KEPT)
+    before = json.loads((PRE_S1_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    after = json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    assert before != after and set(before) == set(after)
+    for key in set(before) - {"evidence", "run_events", "extra"}:
+        assert before[key] == after[key], key                       # identity, every RunRecord and the result: unchanged
+
+    def without_pointer(items, key):
+        """The store pointer's digest is allowed to differ: compared by position and kind, not by value."""
+        return [{k: v for k, v in item.items() if not (item.get(key) == "evidence.attempt_store" and k in ("content", "payload", "details"))}
+                for item in items]
+
+    added_records, added_events = [], []
+    for store_before, store_after in zip(before["evidence"], after["evidence"], strict=True):
+        assert {k: v for k, v in store_before.items() if k != "records"} == {k: v for k, v in store_after.items() if k != "records"}
+        added_records += _extras(without_pointer(store_before["records"], "event"), without_pointer(store_after["records"], "event"))
+    for row_before, row_after in zip(before["run_events"], after["run_events"], strict=True):
+        assert {k: v for k, v in row_before.items() if k != "events"} == {k: v for k, v in row_after.items() if k != "events"}
+        added_events += _extras(without_pointer(row_before["events"], "kind"), without_pointer(row_after["events"], "kind"))
+    assert added_records and {(record["kind"], record["event"]) for record in added_records} == {("mirror.event", "model.admission")}
+    assert {(event["kind"], event["authority"], event["attempt"]) for event in added_events} == {("model.admission", "auxiliary", 0)}
+    assert len(added_records) == len(added_events)                  # each event mirrored exactly once
+    # every other pointer-free difference is excluded above; the scenario's own event list gains only the new kind
+    kinds_before, kinds_after = before["extra"].get("event_kinds"), after["extra"].get("event_kinds")
+    if kinds_before is not None:
+        assert set(_extras(kinds_before, kinds_after)) == {"model.admission"}
+    assert {k: v for k, v in before["extra"].items() if k != "event_kinds"} == {k: v for k, v in after["extra"].items() if k != "event_kinds"}
+
+
 def test_the_pre_r1_reference_is_exactly_the_four_enforce_scenarios_and_no_longer_what_the_kernel_produces(tmp_path):
     """Negative control: the kept reference is not a second accepted golden - the kernel no longer produces it."""
     assert sorted(path.stem for path in PRE_R1_DIR.glob("*.json")) == sorted(R1_ENFORCE_ROW_ADDITIONS)
@@ -583,7 +634,7 @@ def test_the_budget_stop_golden_differs_from_its_pre_run9_form_only_in_the_attri
     (name,) = RUN9_BUDGET_RERECORDED
     assert sorted(path.stem for path in PRE_RUN9_BUDGET_DIR.glob("*.json")) == sorted(RUN9_BUDGET_RERECORDED)
     before = (PRE_RUN9_BUDGET_DIR / f"{name}.json").read_text(encoding="utf-8").splitlines()
-    after = _golden(name).splitlines()
+    after = _before_s1(name).read_text(encoding="utf-8").splitlines()   # as the correction left it (S1 re-recorded it since)
     assert len(before) == len(after)                                    # nothing added, removed or reordered
     changed = [(old.strip(), new.strip()) for old, new in zip(before, after, strict=True) if old != new]
     assert len(changed) == len(RUN9_BUDGET_DELTA)

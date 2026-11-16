@@ -254,9 +254,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.production_doctor", "kriya.core.attempt_evidence.reader"): ("N1", _N1),  # direction ADAPTER-CLI -> EVIDENCE
     ("kriya.production_doctor", "kriya.core.attempt_evidence.writer"): ("N1", _N1),  # direction ADAPTER-CLI -> EVIDENCE
     ("kriya.production_doctor", "kriya.core.inference_runtime"): ("N1", _N1),  # direction ADAPTER-CLI -> PROVIDER
-    ("kriya.production_doctor", "kriya.core.inference_settings"): ("N1", _N1),  # direction ADAPTER-CLI -> PROVIDER
     ("kriya.production_doctor", "kriya.core.logging_setup"): ("N1", _N1),  # non-public CONFIG module
-    ("kriya.production_doctor", "kriya.core.model_capabilities"): ("N1", _N1),  # direction ADAPTER-CLI -> PROVIDER
     ("kriya.production_doctor", "kriya.core.model_qualification"): ("N1", _N1),  # direction ADAPTER-CLI -> QUALIFICATION
     ("kriya.production_doctor", "kriya.core.model_runtime"): ("N1", _N1),  # direction ADAPTER-CLI -> PROVIDER
     ("kriya.production_doctor", "kriya.core.provider_contract"): ("N1", _N1),  # direction ADAPTER-CLI -> PROVIDER

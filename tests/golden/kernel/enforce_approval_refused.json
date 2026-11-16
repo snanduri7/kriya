@@ -184,6 +184,27 @@
     {
      "attempt": null,
      "content": {
+      "event": "sha256:a559d0b786272eed"
+     },
+     "event": "model.admission",
+     "kind": "mirror.event",
+     "payload": "sha256:48ab4a3028884492",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "structured"
+    },
+    {
+     "attempt": null,
+     "content": {
       "event": "sha256:944c6519b4e44131"
      },
      "event": "project_view.built",
@@ -833,7 +854,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:0eb1315a31e778dd"
+      "event": "sha256:93944468e5fa2463"
      },
      "event": "evidence.attempt_store",
      "kind": "mirror.event",
@@ -888,6 +909,7 @@
    "evidence.attempt_store",
    "model.runtime",
    "model.role_independence",
+   "model.admission",
    "project_view.built",
    "validation_baseline.policy",
    "attempt.started",
@@ -1393,6 +1415,13 @@
     },
     {
      "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:43ee158b4293b300",
+     "kind": "model.admission",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
      "authority": "advisory",
      "details": "sha256:871cddd00ce1cb10",
      "kind": "project_view.built",
@@ -1519,7 +1548,7 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:b765c7b94c9b755d",
+     "details": "sha256:ad528e512d09e0d7",
      "kind": "evidence.attempt_store",
      "source": "workflow_controller.enforce"
     }
