@@ -1060,8 +1060,14 @@ def legacy_stage_context_success(tmp_path: Path) -> Outcome:
                                      expansion_seed_reason="scripted", expansion_seed_files=["calc.py"])
 
     def index(cfg):
-        os.makedirs(cfg.paths.memory, exist_ok=True)
-        open(os.path.join(cfg.paths.memory, "vector_index.db"), "wb").close()
+        # C-05 (S3): "the index file present" means THIS project's index: claimed (stamped) for the run's workspace, as `kriya analyze`
+        # leaves it. An unstamped file in a directory outside the project is nobody's and is ignored (the retrieval would not run).
+        from _strict_doubles import for_project
+
+        from kriya.memory.project_store import claim_project_store
+
+        workspace = str(tmp_path / "ws")
+        claim_project_store(for_project(cfg, workspace), "vector_index.db", workspace)
     return _stage_run(tmp_path, skills=True, configure=index,
                       run_kwargs={"reference_context": STAGE_REFERENCE},
                       patches=[patch("kriya.workflow.workflow.retrieve_graph_context", AsyncMock(return_value=retrieval))])

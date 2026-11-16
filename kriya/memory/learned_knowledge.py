@@ -8,6 +8,16 @@ reads it through ``retrieve_learned_references`` below. It is a separate,
 lower-trust namespace: the code index (``vector_index.db``) never holds it and
 code retrieval never reads it.
 
+Scope (C-05, S3): a PROJECT store. ``learn`` takes a URL, a local file or free
+text, and a row records no scope and no approval, so nothing proves a taught
+chunk is meant for every project. The store is therefore the bound project's
+(kriya/memory/project_store.py: stamped with the project identity when
+``learn`` claims it; a reader is handed it only when the stamp is this
+project's). What was taught in one project is not shown to a model working in
+another, under the per-project default and under an explicit ``paths.memory``
+two projects share alike. Making a chunk available to every project is a
+governed promotion, which does not exist yet (S4).
+
 Trust: the result is reference data. Callers show it to a model only through
 ``fence_untrusted_reference`` and never join it to a goal, so it can never
 become requirement, mutation-scope, contract, expected-exit, approval,
@@ -22,12 +32,12 @@ were embedded by another model are excluded and counted. The run goes on
 without reference material - it is never an input to a correctness decision.
 """
 
-import os
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from kriya.core.llm import EgressViolationError
+from kriya.memory.project_store import claim_project_knowledge_store, project_store_path, project_store_status
 from kriya.memory.vector import LocalVectorStore
 
 LEARNED_KNOWLEDGE_DB = "web_knowledge.db"
@@ -37,9 +47,17 @@ LEARNED_REFERENCE_TOP_K = 5
 LEARNED_REFERENCE_MIN_SCORE = 0.4
 
 
-def learned_knowledge_db_path(cfg: Any) -> str:
-    """The learned-knowledge store ``kriya learn`` writes and every reader reads."""
-    return os.path.join(cfg.paths.memory, LEARNED_KNOWLEDGE_DB)
+def learned_knowledge_db_path(cfg: Any) -> Optional[str]:
+    """READ side: this project's learned-knowledge store, or None when it has none (nothing was taught here, or the file there is another
+    project's or cannot be attributed: reported once, never read). A configuration with no project identity raises
+    (``PROJECT_IDENTITY_MISSING``)."""
+    return project_store_path(cfg, LEARNED_KNOWLEDGE_DB)
+
+
+def claim_learned_knowledge_store(cfg: Any) -> str:
+    """WRITE side, for ``kriya learn`` only: this project's learned-knowledge store, created and stamped when absent. Raises
+    ``ProjectStateError`` for a store of another project or an unattributable one, which is left exactly as it was."""
+    return claim_project_knowledge_store(cfg, LEARNED_KNOWLEDGE_DB)
 
 
 @dataclass(frozen=True)
@@ -82,8 +100,14 @@ class LearnedRetrieval:
 async def retrieve_learned_references(cfg: Any, query: str) -> LearnedRetrieval:
     """The learned chunks relevant to ``query`` (the user's own words).
     Empty, with no reason, when nothing was ever learned."""
-    path = learned_knowledge_db_path(cfg)
-    if not query.strip() or not os.path.exists(path):
+    if not query.strip():
+        return LearnedRetrieval()
+    path, refusal = project_store_status(cfg, LEARNED_KNOWLEDGE_DB)
+    if refusal is not None:
+        # C-05: a store is there but it is not this project's (another project's, unattributable, unreadable). Nothing is read from it, and
+        # the operator is told why, exactly as for any other store that cannot be used.
+        return LearnedRetrieval(unavailable_reason=f"the store cannot be read for this project [{refusal.reason_code}]: {refusal}")
+    if path is None:
         return LearnedRetrieval()
     from kriya.memory.embedding import EmbeddingError, configured_client, run_deadline
 

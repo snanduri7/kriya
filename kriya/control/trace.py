@@ -9,6 +9,15 @@ from kriya.foundation.redaction import redact_text, redact_value
 from kriya.platform.private_store import ensure_private_file
 
 
+def _active_run_workspace_identity() -> Optional[str]:
+    """The identity of the workspace the active run holds its lease for, or None outside a run."""
+    from kriya.context.workspace_identity import workspace_identity
+    from kriya.control.run_coordinator import current_run_context
+
+    context = current_run_context()
+    return workspace_identity(context.workspace_path) if context is not None else None
+
+
 class TraceLogger:
     """Writes run and milestone-plan rows to traces.db. Each operation opens
     its own connection and closes it (RESOURCE-SQLITE-CLOSE-001): a logger is
@@ -90,6 +99,11 @@ class TraceLogger:
             # its enforce run (<run_id>.enforce, the terminal row), so per-
             # enforce-run outcomes can be derived from the unit rows.
             ("enforce_run_id", "TEXT"),
+            # C-05 (S3, class F): the history database is one per state directory and holds every project's runs, so each row
+            # records the identity of the workspace its run was for (kriya/context/workspace_identity.py). NULL: a row from
+            # before this column, or one written outside any run by a caller that named no project - unattributed, never
+            # assumed to be the current project's.
+            ("workspace_identity", "TEXT"),
         ):
             try:
                 cursor.execute(f"ALTER TABLE runs ADD COLUMN {col} {coltype}")
@@ -143,7 +157,13 @@ class TraceLogger:
         generation_metrics: dict = None,
         failure_report: list = None,
         enforce_run_id: Optional[str] = None,
+        workspace_identity: Optional[str] = None,
     ) -> None:
+        # C-05: the row's project. The caller's explicit identity when it gives one (a row written outside a run); otherwise the
+        # workspace the active run holds its lease for - the one authority of "which project is this run for", so no writer under a
+        # run can record another.
+        if workspace_identity is None:
+            workspace_identity = _active_run_workspace_identity()
         with self._connect() as conn:
             cursor = conn.cursor()
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -165,14 +185,16 @@ class TraceLogger:
                     run_id, timestamp, goal, duration_sec, attempts, status, files_modified,
                     retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops,
                     failure_category, milestone_group_id, milestone_index, milestone_total,
-                    run_events, evidence_records, generation_metrics, failure_report, enforce_run_id
+                    run_events, evidence_records, generation_metrics, failure_report, enforce_run_id,
+                    workspace_identity
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 run_id, timestamp, goal, duration_sec, attempts, status, files_str,
                 chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
                 failure_category, milestone_group_id, milestone_index, milestone_total,
-                events_json, evidence_json, generation_metrics_json, failure_report_json, enforce_run_id
+                events_json, evidence_json, generation_metrics_json, failure_report_json, enforce_run_id,
+                workspace_identity,
             ))
             conn.commit()
         from kriya.control.launch import note_trace_row  # a desktop launch links its own row; a no-op otherwise

@@ -536,3 +536,88 @@ commit).
 S2 removes is the page's standing as Kriya's own instruction or diagnostic and its reach into every non-Developer
 consumer. (2) A candidate the Developer writes after reading the page passes the same gates, review and approval as any
 other; nothing about the page relaxes them. (3) Not exercised against a live model in this slice.
+
+## 12. Slice S3: project-state namespace (C-05, R-05; 2026-11-16, implementation branch)
+
+**Reproduced first (`MEASURED`, A5 probes P1-P4 and P8 at `57c966e`).** Two unconfigured projects resolved the same
+`paths.memory` and `paths.skills` (the installation directory); project B read project A's index; indexing B deleted
+A's rows; A's scaffold closed B's knowledge gate. Preserved: `docs/architecture/evidence/a5/a5_probe_output.txt` and
+`a5_pre_fix_57c966e.txt` in the slice's evidence directory.
+
+**First wrong owner (`TRACED`).** The default anchor in `config/resolution.py`: the packaged relative `./memory` and
+`./skills` resolved against the installation directory for every project, and no store recorded whose it was, so every
+reader that built `<paths.memory>/<store>.db` by hand read whatever file was there.
+
+**Owners (owner rulings 2026-11-16).** CONFIG owns the identity and path policy (pure). RETRIEVAL owns the store
+mechanism (`memory/project_store.py`: the stamp and the only ways a path is handed out). STATE exposes a compatibility
+facade of CONFIG's names and applies the run-entry rule at its one boundary, `coordinated_mutation`: canonical run
+authority, then bind or validate the project identity exactly once, then downstream execution. The rule is not
+duplicated into the four entries.
+
+| Contract clause (`07` C-05) | Implemented | Proof |
+|---|---|---|
+| Code index and vector index live under the project state root; a reader never reads another identity's store | Unconfigured `paths.memory` = `<state>/projects/<identity>/memory`; `project_store_path` / `claim_project_store`; stamp table `project_state_owner`; refusals `PROJECT_STORE_FOREIGN`, `_UNATTRIBUTED`, `_UNREADABLE`, `PROJECT_SOURCE_FOREIGN` | `tests/test_s3_project_state_namespace.py`; A5 P1-P4 inverted; mutants R1-R7, R11-R14, S1-S7, C1-C3, A1, V1, W1 |
+| A run uses its own project's identity | `require_run_project` at `coordinated_mutation`: unbound is bound to the lease's workspace, a mismatch is `PROJECT_IDENTITY_MISMATCH` before any model call, never a rebind; the store API below a run still refuses an unbound configuration | Direct, enforce, plan-worktree and no-renderer tests; mutants R8-R10, E1-E4, L1 |
+| Forbidden bypass: a store opened by a path not derived from the identity | Every reader goes through the store API. Two readers still built the path by hand when the guard was written (`enforce_loop` and `stage_analysis`, the goal-facts block) and are fixed | `tests/architecture/test_project_store_openers.py` (two closed inventories and a planted negative control); mutants O1, O2 |
+| Release cache: a declared global store under a named location | `global_store_directory` = `<state>/global`; both guard constructions pass it | Location test; enforce-entry and direct-stage tests with a recording guard; schema pin; mutants G1-G3 |
+| Learned knowledge | A PROJECT store (premise corrected, below): `claim_learned_knowledge_store` for `kriya learn`, `project_store_status` for the reader, which tells the operator why a store was not used | Taught in A, read in A, absent in B; one explicit directory for two projects; refused `learn` writes, fetches and embeds nothing; unattributed legacy store; unbound configuration; mutants N1-N5 |
+| Skills: shipped library read-only, project overlay under the project state root | Unconfigured `paths.skills` = `<state>/projects/<identity>/skills`; the engine still loads the shipped library; the knowledge gate counts it through `SkillEngine.gate_library_roots` and `KnowledgeGuard(library_dirs=...)` and never writes it | Overlay, creation, explicit-directory and library tests; A5 P8 inverted for the default path (companion probe); mutants K2-K10 |
+| Run history: each row records the workspace identity | `runs.workspace_identity`: the active run's lease, or the writer's explicit value; an existing database gains the column | Under-run, outside-run, in-progress marker and legacy-schema tests; mutants H1-H4 |
+| Migration: ignore and report | `legacy_shared_memory_stores`, shown by `kriya doctor`; nothing is read, adopted, migrated or deleted | Listing and doctor tests; mutants Y1-Y3 |
+| The same selected root has the same identity on every surface | CLI, Desktop resolution, a directory inside the repository, direct entry, enforce entry and a carried configuration agree on identity, root, `paths.memory` and `paths.skills` | Equivalence test |
+
+**Learned knowledge: the contract premise was wrong, and what S3 decided.** `06` R-05 class B and the first wording of
+C-05 called it operator-taught public documentation, global by nature. `TRACED` (`cli.py::learn`): the one writer also
+takes a local file and free text, and a row records no scope, no project and no approval. It is operator-taught and
+never run-derived, but nothing in a record shows a chunk is meant for every project. S3 decides namespace and identity
+only, so the store is bound to the project that taught it; a governed global namespace is S4's
+(`LEARNED-KNOWLEDGE-GLOBAL-PROMOTION-001`). **Behaviour change:** before S3 a project on the packaged default shared
+one learned store with every other project; now material taught in one project must be taught again in another.
+
+**Project root semantics (D-001, not changed by S3).** In a root that is no repository, ordinary directories are the
+project's; a nested independent repository and a Kriya-owned tree are foreign and pruned from an index walk; a run
+started on its own from `A/src`, with no root selected, is its own project. S3 does not claim that every working
+directory inside such a tree has one identity.
+
+**Class C and golden updates.** `tests/test_workflow.py`: 135 tests called `run_attempt` below the run entry with an
+unbound configuration (`MEASURED`, owner run, one family, no `PROJECT_IDENTITY_MISMATCH`); the file now reaches it
+through one stand-in for the run entry that applies `require_run_project`. Learn/ask, stage and analyzer fixtures bind
+with `for_project`. `tests/golden/config/{resolution_forms,kup_config_forms}.json` regenerated twice, each time after
+a leaf-by-leaf diff and a reverse probe that reproduces the previous goldens byte for byte with only that default put
+back (memory: 2026-11-16 step 1; skills: 32 path leaves, 32 digests of the same cases, 4 KUP configuration
+fingerprints). `environment_homes.json` unchanged. The kernel golden files are unchanged: one scenario fixture now
+claims its index for the run's workspace instead of planting an unstamped file outside the project, and the isolation
+test asserts the stricter result (a run of a project with no index creates nothing under `paths.memory`).
+
+**Gates (`MEASURED`, working tree on `57c966e`).** `tests/test_workflow.py` 843 passed. S3 tests 33 + 22 passed, store
+openers 3 passed. Mutants 59/59 killed, each by its intended test (`mutants_s3c_run2.txt`). Run 1 of that batch is
+void and kept: one mutant wrote a scaffold into the worktree's shipped skills directory, which made later mutants fail
+for the wrong reason, and it showed that the enforce-entry test ran in legacy mode and never reached the controller's
+own guard; the test now runs in enforce mode and the runner stops on any stray file. A5 probe re-run unchanged plus a
+companion that measures the default path (`a5-post-s3/`). Kernel golden tests 73 passed. ruff 0, pylint 0.
+
+**Owner gate and closure (`MEASURED`, 2026-11-16).** One owner run over 466 test targets on the pinned tree: 370 red of
+15,072, A5 probes 6/6 and 11/11. 335 were one class C family (`PROJECT_IDENTITY_MISSING`: a test builds a bare
+`AppConfig()` and calls below a binding point; the product builds a configuration only in `load_config`, which binds
+it). Shared fix: one opt-in harness stand-in in `tests/conftest.py` for a closed file list, which binds an UNBOUND
+configuration where the test's project is known (a hand-built `AttemptContext`, a direct `index_repository`, a CLI
+command given a bare configuration) and never touches a bound one. The rest: tests that analyzed another project from
+the checkout directory (settled refusal; they now run inside the project), the trace-row and configuration-fingerprint
+expectations (two goldens regenerated: the new column and one fingerprint, nothing else), and three small families
+recorded as `CERTIFICATION-MECHANICAL-CLEANUP-S3-001`. S3 closes on product proof (owner ruling): that gate was sized
+to find every stale fixture and cost about three hours; it is not the model for later slices.
+
+**`kriya fix -w <dir>` (`MEASURED`).** Configuration of project A with an independent workspace B is refused at the run
+entry before any model call; from B's own directory the run starts. One product correction came out of measuring it:
+the command worded the refusal as "Repair attempts completed but compilation/tests still fail"; it now prints
+`[REFUSED] PROJECT_IDENTITY_MISMATCH` with the reason (display only).
+
+**Limits.** (1) An explicit `paths.skills` outside the project that two projects name is still one shared directory:
+`MEASURED` by the unchanged A5 P8, which still shows B's gate closed there
+(`SKILLS-EXPLICIT-ROOT-IDENTITY-BINDING-001`, S4, with the one skill-write entry). (2) Skills that earlier runs left
+in the installation directory are still read as shipped: there is no manifest to tell them apart
+(`SKILLS-LEGACY-INSTALL-SCAFFOLDS-001`, S4). (3) The history column is written, not yet read: the workspace-scoped
+run list still attributes through the evidence manifest (`GUI-RUN-ATTRIBUTION-001`). (4) Indexing a subdirectory and
+the root into one store keys rows differently (`INDEX-SUBDIRECTORY-RELATIVE-PATHS-001`, pre-existing, same project).
+(5) A project whose `paths.state` lies inside its workspace has its "global" stores inside that workspace: more
+isolated, never less. (6) Not exercised against a live model in this slice.

@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, patch
 
+from _strict_doubles import for_project
 from click.testing import CliRunner
 
 from kriya.cli import main
@@ -17,7 +18,8 @@ def test_learn_warns_when_embedding_generation_fails(tmp_path):
 
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
-    failing = AsyncMock(side_effect=EmbeddingUnavailableError("embedding server unavailable"))
+    for_project(cfg, tmp_path)  # C-05 (S3): what load_config does; learned knowledge is a project store
+    failing =AsyncMock(side_effect=EmbeddingUnavailableError("embedding server unavailable"))
     runner = CliRunner()
 
     with patch("kriya.memory.vector.OllamaEmbeddingClient.get_embeddings", new=failing), \
@@ -36,6 +38,7 @@ def test_learn_warns_when_embedding_generation_fails(tmp_path):
 def test_learn_no_warning_on_successful_embeddings(tmp_path):
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
+    for_project(cfg, tmp_path)
 
     async def mock_get_embeddings(texts):
         return [[0.1, 0.2, 0.3] for _ in texts]

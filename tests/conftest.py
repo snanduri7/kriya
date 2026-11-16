@@ -319,6 +319,88 @@ def _checkout_memory_isolated(request, tmp_path_factory, monkeypatch):
     yield
 
 
+# C-05 (S3): tests that reach product code BELOW the two places a configuration gets its project. The product binds a configuration exactly
+# twice: `load_config` (for the directory it resolves in) and the run entry (`coordinated_mutation`, for the workspace the run holds its lease
+# for); below them the store API refuses a configuration with no identity (PROJECT_IDENTITY_MISSING), by design. The product never builds a
+# bare `AppConfig()` (TRACED: one construction site, `load_config`), but these files do, and then call below those two places: they hand-build
+# an `AttemptContext`, call `RepositoryAnalyzer.index_repository` directly, or replace `kriya.cli.load_config` with a bare configuration.
+# MEASURED (owner gate 2026-11-16): 335 failures in these files, one family. Rather than ~100 per-fixture edits, the harness stands in for the
+# missing binding at the three points where the test's project is KNOWN, and only for a configuration that carries no identity (a bound one is
+# never touched, so a real run's own binding and its refusals are unaffected):
+#   - an `AttemptContext` built by hand   -> its `workspace_path` (what the run entry binds: the run's workspace);
+#   - `index_repository(cfg)` called bare -> the analyzer's root (what `kriya analyze` run in that project has from `load_config`);
+#   - a CLI command given a bare config   -> the working directory (what `load_config` binds).
+# A file not listed here gets no stand-in. The S3 suites are deliberately NOT listed: they assert the refusal itself.
+BELOW_PROJECT_BINDING_FILES = frozenset({
+    "test_scenario04_replay.py", "test_analyze_command.py", "test_b2a_acceptance_oracle.py", "test_b4_policy_denial_terminal.py",
+    "test_backend_readiness_004_rows.py", "test_backend_readiness_v2_developer_context.py", "test_backend_readiness_v2_goal_facts.py",
+    "test_backend_readiness_v2_localization.py", "test_candidate_transaction.py", "test_candidate_verification_binding.py",
+    "test_code_intel_developer_t0.py", "test_code_intel_index_correctness.py", "test_code_intel_planner_grounding.py",
+    "test_code_intel_retrieval.py", "test_code_intel_retry_t0.py", "test_d1_operation_mode_authority.py",
+    "test_d2_validator_attribution_authority.py", "test_d3_diagnosis_mismatch_scope.py", "test_d3_runtime_prerequisite.py",
+    "test_d4_runtime_entrypoint_ownership.py", "test_d5_runtime_resource_grounding.py", "test_d5b_recovery_evidence.py",
+    "test_d6_runtime_artifacts.py", "test_dev_inv_001_investigation.py", "test_developer_prompt_fit_001.py", "test_e14_characterization.py",
+    "test_embedding_contract_001.py", "test_full_file_final_newline.py", "test_gate_orchestrator.py", "test_generate_json_contract.py",
+    "test_generation_service.py", "test_indexing.py", "test_learn_egress_policy.py", "test_logging_location.py",
+    "test_managed_service_hitl_fail_closed.py", "test_planner_target_consistency.py", "test_prd019_milestone_route_resume.py",
+    "test_prd020_milestone_requirements.py", "test_prd020_mutation_scope.py", "test_prd023_contract_classification.py",
+    "test_prd024_baseline_auto_policy.py", "test_prd027_retrieval_defects.py", "test_prd027_score_normalization_001.py",
+    "test_prd028_authority_escalation.py", "test_prd033_current_lineage.py", "test_prompt_budget_fit_001ab.py",
+    "test_prompt_budget_fit_001c.py", "test_prompt_fit_role_chain_001.py", "test_proposal_promotion.py", "test_prv17_preflight.py",
+    "test_production_doctor.py",
+    "test_prv17_stage_contract_architecture.py", "test_repair_003_f1_residual_self_correction_rerun_environment_stop.py",
+    "test_repair_orchestrator.py", "test_runtime_stdin_rerun_binding.py", "test_runtime_verification.py",
+    "test_s19q1_content_filter_refusal.py", "test_toolchain_host_probe_authority_001.py", "test_wave8_analyzer_skill_owner.py",
+})
+
+
+def _bind_if_unbound(config, project):
+    """Bind ``config`` to ``project`` only when it is a real configuration that carries no project identity yet."""
+    from kriya.config.config import AppConfig
+    from kriya.config.resolution import bind_project_identity
+
+    if isinstance(config, AppConfig) and not getattr(config, "_project_identity", None) and isinstance(project, (str, os.PathLike)):
+        bind_project_identity(config, os.fspath(project))
+
+
+@pytest.fixture(autouse=True)
+def _stand_in_for_the_project_binding(request, monkeypatch):
+    if request.path.name not in BELOW_PROJECT_BINDING_FILES:
+        yield
+        return
+    import click
+
+    import kriya.cli as cli
+    from kriya.analyzer.analyzer import RepositoryAnalyzer
+    from kriya.workflow import attempt
+
+    built = attempt.AttemptContext.__init__
+
+    def context_of_a_run(self, *args, **kwargs):
+        built(self, *args, **kwargs)
+        _bind_if_unbound(getattr(getattr(self, "kernel", None), "config", None), getattr(self, "workspace_path", None))
+
+    index = RepositoryAnalyzer.index_repository
+
+    async def index_of_this_project(self, cfg, *args, **kwargs):
+        _bind_if_unbound(cfg, self.root_path)
+        return await index(self, cfg, *args, **kwargs)
+
+    command = cli.main.callback
+
+    def command_in_this_directory(*args, **kwargs):
+        result = command(*args, **kwargs)
+        context = click.get_current_context(silent=True)
+        if context is not None and isinstance(context.obj, dict):
+            _bind_if_unbound(context.obj.get("config"), os.getcwd())
+        return result
+
+    monkeypatch.setattr(attempt.AttemptContext, "__init__", context_of_a_run)
+    monkeypatch.setattr(RepositoryAnalyzer, "index_repository", index_of_this_project)
+    monkeypatch.setattr(cli.main, "callback", command_in_this_directory)
+    yield
+
+
 _TEST_HOST = {"os": "linux", "architecture": "x86_64", "memory_bytes": 64 * (1 << 30), "cpu_model": None,
               "gpus": [], "gpu_backend": None}
 

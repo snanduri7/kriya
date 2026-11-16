@@ -1,11 +1,11 @@
-import os
 from unittest.mock import AsyncMock, patch
 
+from _strict_doubles import for_project
 from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.config import AppConfig
-from kriya.memory.learned_knowledge import learned_knowledge_db_path
+from kriya.memory.learned_knowledge import claim_learned_knowledge_store
 from kriya.memory.vector import LocalVectorStore
 from kriya.workflow.untrusted_context import UNTRUSTED_REFERENCE_BEGIN, UNTRUSTED_REFERENCE_END
 
@@ -22,8 +22,8 @@ def test_ask_command_performs_rag_search(tmp_path):
     repo.mkdir()
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
-    os.makedirs(cfg.paths.memory, exist_ok=True)
-    store = LocalVectorStore(learned_knowledge_db_path(cfg))
+    for_project(cfg, tmp_path)  # C-05 (S3): what load_config does; learned knowledge is a project store
+    store = LocalVectorStore(claim_learned_knowledge_store(cfg))
     store.add_learned_knowledge(
         "Apache Ignite 2.18.0 features high-performance clustering.", [0.5] * 384,
         model_name=cfg.embedding.model, dimensions=384,

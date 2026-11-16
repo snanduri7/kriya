@@ -321,6 +321,7 @@ class RunService:
                 attempts=0,
                 status="in_progress",
                 files_modified=[],
+                workspace_identity=getattr(cfg, "_project_identity", None),  # C-05: written between runs; the project the configuration is bound to
             )
         except Exception as trace_ex:
             logger.warning(f"Failed to mark run '{run_id}' in_progress: {trace_ex}")

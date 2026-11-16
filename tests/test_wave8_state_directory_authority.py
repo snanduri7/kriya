@@ -18,7 +18,10 @@ from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow import acceptance_jvm
 
 PACKAGE = Path(sp.__file__).resolve().parents[1]
-OWNERS = {"kriya/core/state_paths.py", "kriya/config/environment.py"}   # the authority and the module that reads the raw environment
+# S3 (C-05, owner ruling 2026-11-16): the AUTHORITY is CONFIG's kriya/config/resolution.py (ambient_state_directory, state_directory_for);
+# kriya/core/state_paths.py no longer decides anything - it is listed only because it re-exports the authority's names (PARTIAL_FACADES) and
+# composes resolve_state_directory from them; kriya/config/environment.py is the module that reads the raw environment.
+OWNERS = {"kriya/config/resolution.py", "kriya/core/state_paths.py", "kriya/config/environment.py"}
 FORBIDDEN_NAMES = {"environment_state_dir", "default_state_directory", "default_state_dir"}
 
 

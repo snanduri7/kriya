@@ -30,6 +30,7 @@ from kriya.control.run_coordinator import (
     annotate_run,
     coordinated_mutation,
     owning_run_work_unit,
+    project_refusal_payload,
 )
 from kriya.core.kernel import Kernel
 from kriya.core.llm import InferenceDeadlineError, LLMClient
@@ -876,12 +877,17 @@ async def _ensure_repository_indexed(cfg: Any, workspace_path: str) -> bool:
     today with an empty graph, never be blocked by this."""
     try:
         from kriya.analyzer.graph import DependencyGraph
-        graph_db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
-        probe = DependencyGraph(graph_db_path)
-        try:
-            already_indexed = probe.has_indexed_files()
-        finally:
-            probe.close()
+        from kriya.memory.project_store import project_store_path
+
+        # C-05 (S3): "already indexed" is asked of THIS project's store only; another project's index is no index here.
+        graph_db_path = project_store_path(cfg, "dependency_graph.db")
+        already_indexed = False
+        if graph_db_path is not None:
+            probe = DependencyGraph(graph_db_path)
+            try:
+                already_indexed = probe.has_indexed_files()
+            finally:
+                probe.close()
         if already_indexed:
             return True
         logger.info(
@@ -889,7 +895,14 @@ async def _ensure_repository_indexed(cfg: Any, workspace_path: str) -> bool:
             "one-time repository index before generation starts (autonomy."
             "auto_index_missing_dependency_graph is enabled)."
         )
-        await RepositoryAnalyzer(workspace_path).index_repository(cfg)
+        # C-05 (S3): the project's durable index is built from the project's OWN workspace. A unit of an enforce plan runs in the plan worktree,
+        # which is its own authority root and therefore not this project's source by itself; whose it is is decided by the active run's lease
+        # (STATE: an explicitly authorized candidate resolves to the run's workspace), never by where the worktree lies. Anything else that is
+        # not the project's is refused by the store's writer (PROJECT_SOURCE_FOREIGN) and nothing is written.
+        from kriya.control.run_coordinator import candidate_workspace_root
+
+        source_root = candidate_workspace_root(workspace_path) or workspace_path
+        await RepositoryAnalyzer(source_root).index_repository(cfg)
         return True
     except Exception as index_ex:
         logger.warning(
@@ -2165,6 +2178,12 @@ class WorkflowEngine:
         the workspace's prior commit state is uncertain (see
         kriya/control/commit_state.py). No model call has happened."""
         return assessment.to_payload(run_id=arguments.get("trace_id_override"))
+
+    def project_refusal_result(self, refusal: Any, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """C-05 (S3): the structured result when the run-entry project rule refuses this engine's configuration (it is bound to another project
+        than the run's; kriya/control/run_coordinator.py::_refuse_foreign_project). No model call, no store and no candidate has happened."""
+        return project_refusal_payload(refusal, goal=arguments.get("goal"), workspace_path=arguments.get("workspace_path"),
+                                       run_id=arguments.get("trace_id_override"))
 
     def _membership_authority_stop(self, error: BoundTreeError, state: GenerationState, run_trace: Optional[Any], goal: str, workspace_path: str,
                                    trace_id: Optional[str], *, stage: str) -> Dict[str, Any]:

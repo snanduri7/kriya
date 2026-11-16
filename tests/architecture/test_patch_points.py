@@ -59,6 +59,10 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E14 characterization (tests/test_e14_characterization.py, written before the moves): +1 site, the dynamic proof that a patch of this
     # name reaches both the CandidateDeps and the GenerationDeps field.
     (A, '_code_intelligence_for'): P(3, A, ((A, 2),), ()),
+    # C-05 (S3): 1 site, tests/conftest.py::_stand_in_for_the_project_binding - for a closed list of files that hand-build an AttemptContext
+    # below the run entry, construction also binds an UNBOUND configuration to the context's workspace (what the run entry does). The class's
+    # own constructor still runs first and unchanged; a bound configuration is never touched.
+    (A, 'AttemptContext.__init__'): P(1, A, None, ()),
     # E6 characterization: +1 site (tests/test_fallback_decision.py records which request profiles a fallback decision
     # resolves, through this name: the selection, the call-time substitution and the model entry look it up here).
     # E6: 4 -> 3 lookups: the selection's and the substitution's loads moved to fallback_decision and read
@@ -470,8 +474,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # ENFORCE-VERIFIER-REPLAY-TEST-DEFECT-NEVER-REPAIRED-001 (tests/test_verifier_repair_authorization_001.py: the repair unit observed at the documented seam,
     # and the checkpoint save observed to prove the repair writes none): W 104 -> 106.
     # VERIFIER-SEMANTIC-AUTHORITY-001 (WS3-C slice 2): W 106 -> 109, three run_generation_workflow sites in tests/test_verifier_semantic_loop_001.py.
-    assert totals == {A: 110, W: 109, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
-    assert len(PATCH_POINTS) == 134  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
+    # C-05 (S3): A 110 -> 111, one new row (AttemptContext.__init__: the one harness stand-in in tests/conftest.py for hand-built contexts).
+    assert totals == {A: 111, W: 109, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    assert len(PATCH_POINTS) == 135  # S3: +1 row (A.AttemptContext.__init__, the conftest stand-in); W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)

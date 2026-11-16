@@ -64,7 +64,10 @@ def _state(*written, attempt_number=2):
 def _kernel(tmp_path):
     memory = tmp_path / "memory"
     memory.mkdir(exist_ok=True)
-    return strict_kernel(strict_config(paths={"memory": str(memory)}))
+    from _strict_doubles import for_project
+
+    # C-05 (S3): below the run entry; the project is the directory that holds this test's memory and workspace
+    return strict_kernel(for_project(strict_config(paths={"memory": str(memory)}), tmp_path))
 
 
 def _ctx(tmp_path, **fields):

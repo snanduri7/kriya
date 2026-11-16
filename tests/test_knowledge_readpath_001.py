@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from _milestone_proof_harness import CHAIN, CHAIN_OUTPUTS, FakeEngine, _milestone, _run, _workspace
-from _strict_doubles import strict_kernel
+from _strict_doubles import for_project, strict_kernel
 from click.testing import CliRunner
 from test_auth_goal_contamination_001 import (
     TRACKED,
@@ -28,6 +28,7 @@ from kriya.config import AppConfig
 from kriya.memory import learned_knowledge
 from kriya.memory.learned_knowledge import (
     LEARNED_REFERENCE_MIN_SCORE,
+    claim_learned_knowledge_store,
     learned_knowledge_db_path,
     retrieve_learned_references,
 )
@@ -77,7 +78,7 @@ def _config(tmp_path):
     cfg.paths.memory = str(tmp_path / "memory")
     cfg.logging.file_enabled = False
     cfg.logging.run_file_enabled = False
-    return cfg
+    return for_project(cfg, tmp_path)  # C-05 (S3): learned knowledge is a project store; these calls sit below load_config / a run entry
 
 
 def _learn(cfg, spy, *texts):
@@ -191,8 +192,7 @@ def test_the_workflow_itself_never_queries_a_knowledge_store(tmp_path):
 # --- the store contract --------------------------------------------------------
 
 def _store_with(cfg, rows):
-    os.makedirs(cfg.paths.memory, exist_ok=True)
-    store = LocalVectorStore(learned_knowledge_db_path(cfg))
+    store = LocalVectorStore(claim_learned_knowledge_store(cfg))
     for text, embedding, model_name in rows:
         store.add_learned_knowledge(text, embedding, model_name=model_name, dimensions=len(embedding),
                                     provenance_url=f"src:{text[:8]}", fetch_date="2026-09-27 10:00:00")
@@ -250,7 +250,7 @@ def test_an_undecodable_row_is_skipped_and_the_rest_still_served(tmp_path):
 def test_a_corrupt_store_contributes_nothing_and_says_why(tmp_path):
     cfg = _config(tmp_path)
     os.makedirs(cfg.paths.memory)
-    with open(learned_knowledge_db_path(cfg), "wb") as handle:
+    with open(os.path.join(cfg.paths.memory, learned_knowledge.LEARNED_KNOWLEDGE_DB), "wb") as handle:
         handle.write(b"this is not a sqlite database" * 100)
     retrieval = _retrieve(cfg, QUESTION)
     assert retrieval.references == ()
@@ -261,7 +261,8 @@ def test_a_missing_store_is_simply_empty_and_is_never_created(tmp_path):
     cfg = _config(tmp_path)
     spy = _EmbeddingSpy()
     assert _retrieve(cfg, QUESTION, spy) == learned_knowledge.LearnedRetrieval()
-    assert not os.path.exists(learned_knowledge_db_path(cfg)) and spy.queries == []
+    assert learned_knowledge_db_path(cfg) is None and spy.queries == []
+    assert not os.path.exists(os.path.join(cfg.paths.memory, learned_knowledge.LEARNED_KNOWLEDGE_DB))
 
 
 def test_an_unusable_query_vector_is_reported_not_scored(tmp_path):

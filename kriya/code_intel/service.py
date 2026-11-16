@@ -79,9 +79,13 @@ def discover_source_files(root: str) -> List[str]:
     result = subprocess.run(git_argv(["git", "ls-files", "--cached", "--others", "--exclude-standard"]), cwd=root,
                             capture_output=True, text=True, env=git_environment(child_environment()))
     if result.returncode != 0:
+        from kriya.config.resolution import foreign_root_within
+
         found = []
+        foreign_root = foreign_root_within(root)  # C-05 (S3): another repository/root nested here is never listed (git's own listing omits it too)
         for dirpath, dirs, files in os.walk(root):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            dirs[:] = [d for d in dirs if not d.startswith(".")
+                       and not foreign_root(os.path.relpath(os.path.join(dirpath, d), root))]
             found.extend(os.path.relpath(os.path.join(dirpath, f), root) for f in files)
         candidates = found
     else:
@@ -99,7 +103,9 @@ class CodeIntelligenceService:
 
     @classmethod
     def for_config(cls, cfg, workspace_root: str) -> "CodeIntelligenceService":
-        return cls(workspace_root, os.path.join(cfg.paths.memory, "dependency_graph.db"))
+        from kriya.memory.project_store import claim_project_store
+
+        return cls(workspace_root, claim_project_store(cfg, "dependency_graph.db", workspace_root))  # C-05: the project's own store, stamped
 
     def close(self) -> None:
         self.store.close()

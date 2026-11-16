@@ -1735,6 +1735,11 @@ class AppConfig(BaseModel):
     # configuration, recorded by the run as model.route events. Not a
     # configuration field.
     _routing_plan: Any = PrivateAttr(default=None)
+    # C-05 (S3): the project this configuration was resolved for - the authority root and its workspace identity. Set by load_config() (or
+    # kriya/core/state_paths.py::bind_project_identity); never a configuration field, so no file can name it. None = unbound: a project-derived
+    # store refuses to open (PROJECT_IDENTITY_MISSING), it never falls back to a shared location.
+    _project_identity: Optional[str] = PrivateAttr(default=None)
+    _project_root: Optional[str] = PrivateAttr(default=None)
 
     def model_copy(self, *, update: Optional[Dict[str, Any]] = None, deep: bool = False) -> "AppConfig":
         """S16a: an ``autonomy`` replaced through ``update`` (pydantic validates nothing there) carries a valid mode."""
@@ -1852,6 +1857,10 @@ def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = N
             raise ConfigAuthorityError(remaining)
 
     cfg = AppConfig(**state.config_dict)
+    # C-05 (S3): the configuration is the project's whose authority root it was resolved in; every project-derived store is keyed by this identity.
+    from kriya.config.resolution import bind_project_identity
+
+    bind_project_identity(cfg, state.workspace_root)
 
     # Enforce baseline sensitive paths inheritance
     baseline_sensitive = [

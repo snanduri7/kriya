@@ -13,14 +13,28 @@ config.config <-> config.resolution, which tests/architecture/test_cycles.py for
 """
 import logging
 import os
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
 
-from kriya.config.environment import KRIYA_DIRECTORY_NAME, expand_user, kriya_install_dir
+from kriya.config.environment import (
+    KRIYA_DIRECTORY_NAME,
+    Environment,
+    default_state_dir,
+    expand_user,
+    kriya_install_dir,
+)
+from kriya.config.environment import state_dir as environment_state_dir
 from kriya.context.working_directory import current_directory
-from kriya.context.workspace_identity import authority_root
+from kriya.context.workspace_identity import (
+    authority_root,
+    belongs_to_root,
+    canonical_workspace,
+    reaches_root,
+    workspace_identity,
+)
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
 
 # The logger keeps the name the resolution logged under before D3 (kriya.config.config).
@@ -56,6 +70,309 @@ def require_workspace_local_state_under_kriya_dir(resolved: str, workspace_root:
         f"paths.state {original!r} resolves inside the workspace ({target}) but not beneath "
         f"{kriya_dir}/; use e.g. '.kriya/state', or a directory outside the workspace."
     )
+
+
+# ------------------------------------------------------------------ the state directory (moved from kriya/core/state_paths.py, S3)
+
+ENV_STATE_DIR = "KRIYA_STATE_DIR"
+
+STATE_DIR_SOURCE_ENV = "env"
+STATE_DIR_SOURCE_CONFIG = "config"
+STATE_DIR_SOURCE_DEFAULT = "default"
+
+def default_state_directory(environment: Optional[Environment] = None) -> str:
+    """``~/.kriya/state``, computed at call time (tests point HOME elsewhere)."""
+    return default_state_dir(environment)
+
+
+def _absolute(value: str, origin: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise StateDirectoryError(f"{origin} must be a non-empty directory path.")
+    expanded = expand_user(value)
+    if not os.path.isabs(expanded):
+        raise StateDirectoryError(
+            f"{origin} must be an absolute path here (got {value!r}); Kriya never resolves "
+            "a state directory against the current working directory."
+        )
+    return os.path.realpath(expanded)
+
+
+def ambient_state_directory(environment: Optional[Environment] = None) -> str:
+    """The state directory for code with NO ``AppConfig`` in scope (a gate cache, a JVM acceptance staging root, a model-runtime record store):
+    ``KRIYA_STATE_DIR`` (absolute, ``~`` expanded; a relative value is refused, never resolved against the working directory) else ``~/.kriya/state``.
+    WAVE8 OI-02: this is the ONE place the environment/default location is decided; ``resolve_state_directory`` composes it and no other module reads
+    ``KRIYA_STATE_DIR`` or the default location itself (tripwire: tests/test_wave8_state_directory_authority.py). Code that HAS a configuration asks
+    ``resolve_state_directory(cfg)``, which also honours ``paths.state``. Raises ``StateDirectoryError``. Pure."""
+    env_value = environment_state_dir(environment)
+    if env_value:
+        return _absolute(env_value, ENV_STATE_DIR)
+    return os.path.realpath(default_state_directory(environment))
+
+
+def state_directory_for(configured: Optional[str], environment: Optional[Environment] = None) -> Tuple[str, str]:
+    """(directory, source) for a ``paths.state`` VALUE, precedence env > config > default. Pure. The one composition ``resolve_state_directory``
+    and the configuration resolution (which has no ``AppConfig`` yet) share."""
+    if environment_state_dir(environment):
+        return ambient_state_directory(environment), STATE_DIR_SOURCE_ENV
+    if configured is not None:
+        # load_config() already made this absolute (anchored at the config
+        # file's directory); a directly built AppConfig must do the same.
+        return _absolute(configured, "paths.state"), STATE_DIR_SOURCE_CONFIG
+    return ambient_state_directory(environment), STATE_DIR_SOURCE_DEFAULT
+
+
+# ------------------------------------------------------------------ project state namespace (C-05 / R-05, slice S3)
+#
+# Project-derived mutable or semantic state (the code index: ``dependency_graph.db`` with the structural tables, ``vector_index.db``) belongs to ONE
+# project: the authority root the configuration was resolved for (``kriya/context/workspace_identity.py``, AUTH-A5-01). That identity is bound to the
+# ``AppConfig`` once, by ``load_config`` (or explicitly, ``bind_project_identity``), and carried by it, so the namespace never changes with the
+# directory a unit happens to operate in (direct, enforce, Project Setup, resume, Desktop and CLI all load the configuration from the project's
+# directory).
+#
+# CONFIG owns the POLICY, all of it pure: the identity binding, where the state lives, whether a source directory or a recorded store owner is this
+# project's, and the closed refusal table. The store MECHANISM (the SQLite stamp, opening and claiming a store file) is RETRIEVAL's,
+# ``kriya/memory/project_store.py``, which asks the verdicts below; CONFIG never imports it and never opens a store.
+#
+# Location: the packaged default of ``paths.memory`` is ``<state>/projects/<identity>/memory``; an explicit ``paths.memory`` is used as written.
+# Either way every store FILE carries the identity it was built for, and a reader is handed a store only when that stamp is this project's. There is
+# no fallback to an unkeyed store: absence, a foreign stamp and an unattributable legacy store are all "no index for this project".
+#
+# Ownership is decided by the canonical repository/root authority (D-001, ``authority_root``), NEVER by filesystem containment: a directory is this
+# project's source only when its own authority root IS the project's. An independent repository nested inside the project, a link that resolves into
+# another project and a Kriya-managed sandbox (its own authority root) are all not this project's source here; the run that owns a sandbox resolves
+# it to the run's workspace through STATE's lease (``control.run_coordinator.candidate_workspace_root``) before it asks.
+
+PROJECT_STATE_PARENT = "projects"
+PROJECT_MEMORY_DIRECTORY = "memory"
+
+PROJECT_IDENTITY_MISSING = "PROJECT_IDENTITY_MISSING"
+PROJECT_IDENTITY_MISMATCH = "PROJECT_IDENTITY_MISMATCH"
+PROJECT_STORE_FOREIGN = "PROJECT_STORE_FOREIGN"
+PROJECT_STORE_UNATTRIBUTED = "PROJECT_STORE_UNATTRIBUTED"
+PROJECT_STORE_UNREADABLE = "PROJECT_STORE_UNREADABLE"
+PROJECT_SOURCE_FOREIGN = "PROJECT_SOURCE_FOREIGN"
+
+# The closed table of project-state refusals; the message is rendered from it only (tripwire: tests/test_s3_project_state_namespace.py).
+PROJECT_STATE_REFUSALS = {
+    PROJECT_IDENTITY_MISSING: (
+        "this configuration carries no project identity, so no project-derived store may be opened with it. A configuration gets its identity "
+        "from load_config(), or explicitly from bind_project_identity(cfg, <workspace>); Kriya never selects a default or shared store instead."
+    ),
+    PROJECT_IDENTITY_MISMATCH: (
+        "this configuration is bound to the project at {root!r}, but the run is for the project at {run!r}. A run never uses another project's "
+        "configuration identity, and never rebinds one: load the configuration from the run's own project directory. Nothing was read, "
+        "written or sent to a model."
+    ),
+    PROJECT_STORE_FOREIGN: (
+        "the store at {path!r} was built for project {actual!r}, not this project ({expected!r}). It is never read or rewritten for another "
+        "project; point paths.memory at a directory of this project's own, or remove the setting to use the per-project default."
+    ),
+    PROJECT_STORE_UNATTRIBUTED: (
+        "the store at {path!r} records no project and its location does not establish that it is this project's ({root!r}), so Kriya cannot "
+        "tell whose it is. It is ignored, never adopted. Move or delete it and run `kriya analyze` to rebuild this project's index."
+    ),
+    PROJECT_STORE_UNREADABLE: "the store at {path!r} could not be inspected for its project ({detail}); it is treated as not this project's.",
+    PROJECT_SOURCE_FOREIGN: (
+        "the directory {source!r} is not part of this project ({root!r}): its repository root is not this project's, so its content is never "
+        "written into this project's stores. Run Kriya from inside that directory's own project to index it."
+    ),
+}
+
+
+class ProjectStateError(RuntimeError):
+    """A project-derived store may not be used for this project (``reason_code`` is one of ``PROJECT_STATE_REFUSALS``)."""
+
+    def __init__(self, reason_code: str, **details: object) -> None:
+        self.reason_code = reason_code
+        self.details = details
+        super().__init__(PROJECT_STATE_REFUSALS[reason_code].format(**details))
+
+
+def project_state_root(state_directory: str, identity: str) -> str:
+    """``<state>/projects/<identity>``: the one directory a project's Kriya-located derived state lives under. Pure."""
+    if not isinstance(identity, str) or not identity:
+        raise ProjectStateError(PROJECT_IDENTITY_MISSING)
+    return os.path.join(state_directory, PROJECT_STATE_PARENT, identity)
+
+
+# The identity form of a path under a project's state root: ``<kriya-project-state>/<path below <state>/projects/<identity>>``. The default
+# ``paths.memory`` resolves to an absolute path that names the state directory and the project's identity (a hash of where the workspace is); the SAME
+# configuration for a project somewhere else, or with the state directory somewhere else, is the same semantic configuration ("the per-project
+# default"), so a configuration identity (kriya/control/checkpoint.py::canonical_identity_config) must not hash either location - exactly as it does
+# not hash the checkout root (``<kriya-install>``). Which project a record belongs to is bound separately, by its workspace ownership stamp.
+PROJECT_STATE_IDENTITY_TOKEN = "<kriya-project-state>"
+_PROJECT_IDENTITY_COMPONENT = re.compile(r"[0-9a-f]{64}")
+
+
+def project_state_identity_former(configured_state: Any, environment: Optional[Environment] = None) -> Callable[[Any], Optional[str]]:
+    """For the configuration whose ``paths.state`` VALUE is ``configured_state``: a function giving the identity form of a path that lies under
+    ``<state>/projects/<identity>/`` (the root itself is the bare token), or None for every other value - a non-path, a relative path, a path
+    anywhere else, a state directory that cannot be resolved. Pure."""
+    try:
+        parent: Optional[str] = os.path.realpath(os.path.join(state_directory_for(configured_state, environment)[0], PROJECT_STATE_PARENT))
+    except StateDirectoryError:
+        parent = None
+
+    def form(path: Any) -> Optional[str]:
+        if parent is None or not isinstance(path, str) or not os.path.isabs(path):
+            return None
+        candidate = os.path.normpath(path)
+        if path_relation(parent, candidate) is not PathRelation.WITHIN:
+            return None
+        identity, _, below = os.path.relpath(os.path.realpath(candidate), parent).partition(os.sep)
+        if not _PROJECT_IDENTITY_COMPONENT.fullmatch(identity):
+            return None
+        return f"{PROJECT_STATE_IDENTITY_TOKEN}/{below}" if below else PROJECT_STATE_IDENTITY_TOKEN
+
+    return form
+
+
+def default_project_memory_directory(configured_state: Optional[str], workspace_root: str,
+                                     environment: Optional[Environment] = None) -> str:
+    """Where an UNCONFIGURED ``paths.memory`` resolves for the project at ``workspace_root`` (an authority root)."""
+    state_directory = state_directory_for(configured_state, environment)[0]
+    return os.path.join(project_state_root(state_directory, workspace_identity(workspace_root)), PROJECT_MEMORY_DIRECTORY)
+
+
+PROJECT_SKILLS_DIRECTORY = "skills"
+
+
+def default_project_skills_directory(configured_state: Optional[str], workspace_root: str,
+                                     environment: Optional[Environment] = None) -> str:
+    """Where an UNCONFIGURED ``paths.skills`` resolves for the project at ``workspace_root``: the project's skill OVERLAY, the root its runs and
+    its ``kriya skills`` commands write. The shipped library (``<install>/skills``) is a second, read-only root, never this one."""
+    state_directory = state_directory_for(configured_state, environment)[0]
+    return os.path.join(project_state_root(state_directory, workspace_identity(workspace_root)), PROJECT_SKILLS_DIRECTORY)
+
+
+def is_project_skill_overlay(cfg) -> bool:
+    """Whether ``cfg.paths.skills`` is the bound project's own overlay (the per-project default). False for an explicit skills directory, for a
+    configuration with no project identity and for a state directory that cannot be resolved. Pure."""
+    identity = getattr(cfg, "_project_identity", None)
+    skills = getattr(getattr(cfg, "paths", None), "skills", None)
+    if not isinstance(identity, str) or not identity or not isinstance(skills, str) or not os.path.isabs(skills):
+        return False
+    try:
+        state_directory = state_directory_for(getattr(cfg.paths, "state", None))[0]
+    except StateDirectoryError:
+        return False
+    overlay = os.path.join(project_state_root(state_directory, identity), PROJECT_SKILLS_DIRECTORY)
+    return os.path.realpath(skills) == os.path.realpath(overlay)
+
+
+# Stores that are GLOBAL by declaration: they hold nothing derived from a project and carry no project's authority, so every project of this
+# state directory shares them. One today: the release cache (``knowledge_cache.db``: public registry release dates keyed by ecosystem, package and
+# version, fetched from fixed registry hosts, refreshed by TTL). Learned knowledge is NOT one: ``kriya learn`` takes a local file or free text and
+# its rows record no scope or approval, so nothing proves a row is meant for every project; it is a project store (kriya/memory/project_store.py)
+# until a governed promotion exists (S4).
+GLOBAL_STATE_PARENT = "global"
+
+
+def global_store_directory(configured_state: Optional[str], environment: Optional[Environment] = None) -> str:
+    """``<state>/global``: the one named location of the declared global stores. Never a project's directory and never ``paths.memory``. Pure."""
+    return os.path.join(state_directory_for(configured_state, environment)[0], GLOBAL_STATE_PARENT)
+
+
+def bind_project_identity(cfg, workspace_path: str) -> None:
+    """Bind ``cfg`` to the project ``workspace_path`` belongs to (its authority root). ``load_config`` does this for the directory the configuration
+    was resolved in; a caller that deliberately points a configuration at ANOTHER project (a certification fixture) does it explicitly."""
+    cfg._project_root = authority_root(workspace_path)
+    cfg._project_identity = workspace_identity(workspace_path)
+
+
+def project_identity(cfg) -> str:
+    """The identity ``cfg`` was bound to. Missing: ``ProjectStateError(PROJECT_IDENTITY_MISSING)`` - never a default."""
+    identity = getattr(cfg, "_project_identity", None)
+    if not isinstance(identity, str) or not identity:
+        raise ProjectStateError(PROJECT_IDENTITY_MISSING)
+    return identity
+
+
+def _bound_project(cfg) -> Tuple[str, str]:
+    """(identity, root) of the project ``cfg`` is bound to; a configuration missing either proves nothing (``PROJECT_IDENTITY_MISSING``)."""
+    identity = project_identity(cfg)
+    root = getattr(cfg, "_project_root", None)
+    if not isinstance(root, str) or not root:
+        raise ProjectStateError(PROJECT_IDENTITY_MISSING)
+    return identity, root
+
+
+def require_run_project(cfg, run_workspace: str) -> None:
+    """The RUN-ENTRY rule (owner decision 2026-11-16, option 1). ``run_workspace`` is the workspace of the run that holds the lease (STATE's
+    ``RunContext.workspace_path``: the run's own workspace, never a candidate sandbox and never a unit's directory). A configuration that carries
+    no identity is bound to that run's project, once; one that is already bound is accepted only when it is bound to that same project and is
+    otherwise refused (``PROJECT_IDENTITY_MISMATCH``) - it is never rebound. This is the boundary of a run, not a default: the store API below a
+    run still refuses a configuration with no identity."""
+    bound = getattr(cfg, "_project_identity", None)
+    if not isinstance(bound, str) or not bound:
+        bind_project_identity(cfg, run_workspace)
+        return
+    if bound != workspace_identity(run_workspace):
+        raise ProjectStateError(PROJECT_IDENTITY_MISMATCH, root=getattr(cfg, "_project_root", None), run=run_workspace)
+
+
+def _belongs_to(root: str, directory: object) -> bool:
+    """Whether the canonical authority (D-001, ``belongs_to_root``) says ``directory`` is part of the project rooted at ``root``. Aliases (a link,
+    a case or normalization variant) resolve to what they name before the question is asked. A directory that cannot be resolved is not the
+    project's."""
+    if not isinstance(directory, str) or not directory:
+        return False
+    try:
+        return belongs_to_root(root, directory)
+    except (OSError, ValueError):
+        return False
+
+
+def require_project_source(cfg, source_root: str) -> None:
+    """Raise ``ProjectStateError`` unless ``source_root`` is part of the project ``cfg`` is bound to, by the canonical root authority: the project
+    root itself, an ordinary directory of it, or an alias of either. This holds for a project that is a repository and for one that is not (a
+    greenfield directory: its ordinary subdirectories are the project's). Lying beneath the project root proves nothing - an independent
+    repository nested in it, a link into another project and a Kriya-managed sandbox are their own roots and are refused
+    (``PROJECT_SOURCE_FOREIGN``). Pure."""
+    _identity, root = _bound_project(cfg)
+    if not _belongs_to(root, source_root):
+        raise ProjectStateError(PROJECT_SOURCE_FOREIGN, source=source_root, root=root)
+
+
+def foreign_root_within(source_root: str) -> Callable[[str], bool]:
+    """For a walk of ``source_root``: a predicate over a directory's path RELATIVE to it, true when that directory is not part of the same root
+    as ``source_root`` by the canonical authority (``reaches_root``: an independent repository or submodule nested in it, a Kriya-owned
+    directory - in a repository and outside one alike). A walk that fills a project store prunes such a directory: its files are another
+    root's, and lying beneath the source does not make them this project's. An ordinary subdirectory is kept. Pure."""
+    canonical = canonical_workspace(source_root)
+
+    def foreign(relative_directory: str) -> bool:
+        return not reaches_root(canonical, os.path.normpath(os.path.join(canonical, relative_directory)))
+
+    return foreign
+
+
+def _proven_by_location(cfg, path: str, identity: str) -> bool:
+    """An unstamped store is this project's only when WHERE it is proves it: its directory belongs to this project by the canonical authority (only
+    this project's configuration places a store in its own repository), or it lies under this identity's project state root (a path derived from
+    the identity itself)."""
+    target = os.path.realpath(path)
+    root = getattr(cfg, "_project_root", None)
+    if isinstance(root, str) and root and _belongs_to(root, os.path.dirname(target)):
+        return True
+    try:
+        state_root = os.path.realpath(project_state_root(state_directory_for(getattr(cfg.paths, "state", None))[0], identity))
+    except StateDirectoryError:
+        return False
+    return path_relation(state_root, target) is PathRelation.WITHIN
+
+
+def require_store_owner(cfg, path: str, recorded_owner: Optional[str]) -> None:
+    """The ownership VERDICT for an existing store at ``path`` whose stamp reads ``recorded_owner`` (None: it carries none). Raises
+    ``ProjectStateError`` unless the store is this project's: another identity is ``PROJECT_STORE_FOREIGN``; no stamp is accepted only where the
+    location proves the project (``PROJECT_STORE_UNATTRIBUTED`` otherwise). Pure: the caller (RETRIEVAL) read the stamp."""
+    identity, root = _bound_project(cfg)
+    if recorded_owner is None:
+        if not _proven_by_location(cfg, path, identity):
+            raise ProjectStateError(PROJECT_STORE_UNATTRIBUTED, path=path, root=root)
+        return
+    if recorded_owner != identity:
+        raise ProjectStateError(PROJECT_STORE_FOREIGN, path=path, actual=recorded_owner, expected=identity)
 
 
 # ------------------------------------------------------------------ removed fields (moved from kriya/config/config.py, D3)
@@ -549,6 +866,19 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
             if isinstance(e, (LogDirectoryError, StateDirectoryError, RemovedConfigFieldError)):
                 raise  # already typed and names the field
             raise ValueError(f"Failed to load configuration at {config_path}: {e}") from e
+
+    # C-05 (S3): an UNCONFIGURED paths.memory is this project's own directory under the state directory, never one directory every project shares
+    # (the packaged "./memory" used to resolve to <install>/memory for all of them). An explicit paths.memory is kept as written; either way each
+    # store file is bound to the project by its recorded identity (the project-state namespace above).
+    _paths = config_dict.get("paths")
+    _user_paths = user_data.get("paths")
+    if isinstance(_paths, dict) and not (isinstance(_user_paths, dict) and "memory" in _user_paths):
+        _paths["memory"] = default_project_memory_directory(_paths.get("state"), workspace_root)
+    # The same for an UNCONFIGURED paths.skills: the project's own skill overlay, never the shipped library every project reads (the packaged
+    # "./skills" used to resolve to <install>/skills, so one project's scaffolds and learned skills were every project's). The shipped library
+    # stays a separate read-only root (skills.load_global). An explicit paths.skills is kept as written.
+    if isinstance(_paths, dict) and not (isinstance(_user_paths, dict) and "skills" in _user_paths):
+        _paths["skills"] = default_project_skills_directory(_paths.get("state"), workspace_root)
 
     # --- runtime_profile expansion (dict-level, BEFORE AppConfig/authority) ---
     # Applied before AppConfig construction so authority resolution below

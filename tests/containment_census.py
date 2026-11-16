@@ -570,6 +570,9 @@ EXCEPTIONS: Dict[str, Tuple[str, str]] = {'tests/state_machine/test_sm_attempt_m
  'tests/test_s1_toolbox_authority.py::test_a_planned_read_inside_the_workspace_still_works[guardrails]': ('S', 'M'),
  'tests/test_s1_toolbox_authority.py::test_a_planned_read_inside_the_workspace_still_works[human-in-the-loop]': ('S', 'M'),
  'tests/test_s3_execution_views.py::test_the_declaration_pins_only_a_tree_that_was_not_a_work_tree_when_the_validator_was_built': ('S', 'M'),
+ # C-05 (S3): the enforce entry up to its knowledge-gap stop, with the real owner (the controller's egress report runs before the guard); the same
+ # shape and class as tests/test_workflow.py::test_workflow_traces_knowledge_gap.
+ 'tests/test_s3_project_state_stores.py::test_the_enforce_entry_gives_the_guard_the_global_cache_and_the_projects_roots': ('N', 'F'),
  'tests/test_s4_1_managed_service_view.py::test_real_oci_a_fresh_cache_contained_service_builds_in_the_view_runs_there_and_leaves_the_worktree_untouched': ('N',
                                                                                                                                                             'C'),
  'tests/test_s4_1_managed_service_view.py::test_real_oci_an_ignored_module_cannot_make_a_broken_contained_service_pass_and_nothing_survives': ('N', 'C'),

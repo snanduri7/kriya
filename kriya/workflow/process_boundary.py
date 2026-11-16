@@ -376,8 +376,15 @@ def find_ungrounded_java_child_process_tests(
     return findings
 
 
+NO_PROJECT_INDEX = ":memory:"
+
+
 def _dependency_graph_db_path(ctx: AttemptCtx) -> str:
-    return os.path.join(ctx.kernel.config.paths.memory, "dependency_graph.db")
+    """C-05 (S3): this project's dependency graph, or ``:memory:`` when it has none (absent, another project's, unattributable): an opener then
+    gets an empty in-memory graph - the same answers as an empty index - and never creates or reads a store file that is not this project's."""
+    from kriya.memory.project_store import project_store_path
+
+    return project_store_path(ctx.kernel.config, "dependency_graph.db") or NO_PROJECT_INDEX
 
 
 def _extract_class_names_best_effort(deps: ProcessBoundaryDeps, db_path: str, filepath: str, content: str) -> List[str]:

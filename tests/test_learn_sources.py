@@ -1,6 +1,7 @@
 import os
 from unittest.mock import AsyncMock, patch
 
+from _strict_doubles import for_project
 from click.testing import CliRunner
 
 from kriya.cli import main
@@ -11,6 +12,7 @@ def test_learn_command_multiple_sources(tmp_path):
     # Setup paths configuration
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
+    for_project(cfg, tmp_path)  # C-05 (S3): what load_config does; learned knowledge is a project store
     
     # Create local temp documentation file to index
     doc_file = tmp_path / "ignite_docs.txt"

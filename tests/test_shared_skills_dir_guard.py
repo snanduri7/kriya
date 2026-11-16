@@ -59,6 +59,10 @@ def test_analyze_refuses_a_new_skill_when_skills_dir_resolves_to_shared_install(
     # Never the repository's own ./memory (the packaged default resolves
     # there): this test indexes a temporary project.
     cfg.paths.memory = str(tmp_path / "memory")
+    # C-05 (S3): what the real load_config does for the project it resolves in (this test replaces it with `cfg`).
+    from _strict_doubles import for_project
+
+    for_project(cfg, project_dir)
 
     async def mock_extract(*args, **kwargs):
         return {"description": "test", "instructions": "# test", "rules": ["rule"]}

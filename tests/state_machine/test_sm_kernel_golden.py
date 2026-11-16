@@ -317,7 +317,14 @@ def test_scenarios_resolve_memory_in_an_isolated_working_directory(request, tmp_
     cwd = Path(outcome.working_directory).resolve()
     checkout = Path(request.config.rootpath).resolve()
     assert checkout not in cwd.parents and cwd != checkout and cwd != tmp_path.resolve()
-    assert os.listdir(cwd / "memory") != []   # the run opened (created) its sqlite stores in THIS ./memory
+    # C-05 (S3): a run of a project that has no index creates NO store under paths.memory any more. TRACED: what it used to create here was the
+    # release cache (KnowledgeCache creates knowledge_cache.db eagerly; it is now the declared global store under <state>/global) and an empty
+    # dependency graph (a reader of a project with no index now gets an in-memory graph, never a new file). The isolation this test is about
+    # still holds and is stricter: nothing is created in the working directory's ./memory, and nothing in the checkout's.
+    assert os.listdir(cwd / "memory") == []
+    from kriya.config.resolution import global_store_directory
+
+    assert os.path.isfile(os.path.join(global_store_directory(None), "knowledge_cache.db"))  # where the run's one shared store went
     assert kg.MEMORY_RESOLVING <= set(kg.SCENARIOS)
     assert kg.render(kg.capture(outcome, tmp_path, "legacy_budget_stop")) == _golden("legacy_budget_stop")
 

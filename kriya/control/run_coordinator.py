@@ -23,6 +23,7 @@ from functools import wraps
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
 from kriya.config.environment import child_environment
+from kriya.config.resolution import ProjectStateError, require_run_project
 from kriya.context.workspace_identity import authority_root, workspace_identity
 from kriya.control.commit_state import (
     REASON_RESULT_CONTRADICTS_RUN_RECORD,
@@ -595,21 +596,54 @@ def _use_or_begin(
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def _config_fingerprint(arguments: dict) -> Optional[str]:
-    """The resume checkpoint's own config fingerprint, from the entry
-    point's engine (``self.kernel``/``self.workflow_engine.kernel``/``we``)."""
-    from kriya.control.checkpoint import compute_config_fingerprint
-
+def _run_configuration(arguments: dict) -> Any:
+    """The configuration the entry point runs with, from its engine (``self.kernel``/``self.workflow_engine.kernel``/``we``), or None."""
     for value in arguments.values():
         for owner in (value, getattr(value, "workflow_engine", None)):
             config = getattr(getattr(owner, "kernel", None), "config", None)
-            dump = getattr(config, "model_dump", None)
-            if callable(dump):
-                try:
-                    payload = dump()
-                except Exception:
-                    return None
-                return compute_config_fingerprint(payload) if isinstance(payload, dict) else None
+            if callable(getattr(config, "model_dump", None)):
+                return config
+    return None
+
+
+def _config_fingerprint(arguments: dict) -> Optional[str]:
+    """The resume checkpoint's own config fingerprint, from the entry point's configuration."""
+    from kriya.control.checkpoint import compute_config_fingerprint
+
+    config = _run_configuration(arguments)
+    if config is None:
+        return None
+    try:
+        payload = config.model_dump()
+    except Exception:
+        return None
+    return compute_config_fingerprint(payload) if isinstance(payload, dict) else None
+
+
+def project_refusal_payload(refusal: ProjectStateError, *, goal: Any = None, workspace_path: Any = None, run_id: Optional[str] = None) -> Dict[str, Any]:
+    """The structured result of a run refused by the run-entry project rule: failed, nothing written, the refusal's own closed reason code."""
+    return {"status": "failed", "quality_gates_passed": False, "files": [], "reason_codes": [refusal.reason_code], "error": str(refusal),
+            "goal": goal, "workspace_path": workspace_path, "run_id": run_id}
+
+
+def _refuse_foreign_project(function: Callable[..., Any], arguments: dict, context: RunContext) -> Any:
+    """C-05 (S3, owner decision 2026-11-16): the RUN-ENTRY project rule, at the one boundary every mutating entry point passes. The run's project
+    is the workspace this run holds the lease for (``context.workspace_path``; a unit that operates in an authorized candidate still belongs to
+    that run, so the project never comes from the unit's directory or from containment). The entry point's configuration is bound to it when it
+    carries no identity, and refused when it carries another project's (CONFIG's verdict, ``require_run_project``). Returns None to proceed, or
+    the owner's structured refusal (``project_refusal_result``); an entry point without one raises the typed ``ProjectStateError``. Nothing has
+    run yet: no model call, no store, no candidate."""
+    config = _run_configuration(arguments)
+    if config is None:
+        return None
+    try:
+        require_run_project(config, context.workspace_path)
+    except ProjectStateError as refusal:
+        logger.error("%s refused: %s", function.__qualname__, refusal)
+        render = getattr(arguments.get("self"), "project_refusal_result", None)
+        if not callable(render):
+            raise
+        return render(refusal, arguments)
     return None
 
 
@@ -672,7 +706,9 @@ def coordinated_mutation(function: F) -> F:
                     effective_config_fingerprint=_config_fingerprint(bound.arguments),
                 )
             try:
-                result = await function(*args, **kwargs)
+                result = _refuse_foreign_project(function, bound.arguments, context)
+                if result is None:
+                    result = await function(*args, **kwargs)
                 if outermost and lease.record is not None and not lease.record.terminal:
                     payload = result.legacy_result if hasattr(result, "legacy_result") else result
                     if isinstance(payload, dict):

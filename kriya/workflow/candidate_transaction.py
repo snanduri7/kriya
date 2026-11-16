@@ -1745,11 +1745,13 @@ def _code_intelligence_for(deps: CandidateDeps, ctx: AttemptCtx) -> Any:
     or None when there is none of the current parser identity."""
     open_code_intelligence = deps.load_open_code_intelligence()
 
-    memory = getattr(getattr(getattr(ctx.kernel, "config", None), "paths", None), "memory", None)
-    if not isinstance(memory, str):
+    config = getattr(ctx.kernel, "config", None)
+    if not isinstance(getattr(getattr(config, "paths", None), "memory", None), str):
         return None
+    from kriya.memory.project_store import project_store_path
+
     try:
-        return open_code_intelligence(ctx.workspace_path, os.path.join(memory, "dependency_graph.db"))
+        return open_code_intelligence(ctx.workspace_path, project_store_path(config, "dependency_graph.db"))  # C-05
     except Exception as error:  # read-only enrichment; T0 never depends on it
         deps.logger.warning("Code Intelligence index unavailable for known-target context: %s", error)
         return None

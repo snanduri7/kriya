@@ -34,7 +34,6 @@ already treats it as non-retryable)."""
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence
@@ -200,9 +199,10 @@ async def collect_unit_grounding(config: Any, workspace_path: str, unit_goal: st
     means the unit's retrieval is skipped too, which grounds nothing."""
     if config.process_profiles.enabled and config.process_profiles.enforce_context_depth:
         return None
-    memory = config.paths.memory
-    vector_index_path = os.path.join(memory, "vector_index.db")
-    if not os.path.exists(vector_index_path):
+    from kriya.memory.project_store import project_store_path
+
+    vector_index_path = project_store_path(config, "vector_index.db")  # C-05: this project's index only
+    if vector_index_path is None:
         return UnitGrounding()
     from kriya.memory.embedding import configured_client, run_deadline
     from kriya.memory.vector import LocalVectorStore
@@ -214,7 +214,7 @@ async def collect_unit_grounding(config: Any, workspace_path: str, unit_goal: st
         retrieval = await retrieve_graph_context(
             unit_goal, workspace_path,
             embed_client=configured_client(config), vector_store=vector_store,
-            dependency_graph_path=os.path.join(memory, "dependency_graph.db"),
+            dependency_graph_path=project_store_path(config, "dependency_graph.db"),
             limits=RetrievalLimits(top_k=5, max_hops=2, max_neighborhood_results=30),
             embedding_model=config.embedding.model, deadline=run_deadline(config),
             budget_limit=lambda: _reserve_graph_context_budget(allocation_window(config)),

@@ -55,10 +55,11 @@
   "run_events": "[{\"kind\": \"k\"}]",
   "run_id": "r-1",
   "status": "success",
-  "timestamp": "<time>"
+  "timestamp": "<time>",
+  "workspace_identity": null
  },
  "trace_schema": [
   "CREATE TABLE milestone_plans (\n                group_id TEXT PRIMARY KEY,\n                timestamp TEXT,\n                status TEXT,\n                schema_version INTEGER,\n                milestone_count INTEGER,\n                dependency_edges INTEGER,\n                extension_count INTEGER,\n                composition_count INTEGER,\n                validation_attempts INTEGER,\n                validation_failures TEXT,\n                repository_topology TEXT\n            )",
-  "CREATE TABLE runs (\n                run_id TEXT PRIMARY KEY,\n                timestamp TEXT,\n                goal TEXT,\n                duration_sec REAL,\n                attempts INTEGER,\n                status TEXT,\n                files_modified TEXT,\n                retrieved_chunks TEXT,\n                active_skills TEXT,\n                prompt_rendered TEXT,\n                gate_outcomes TEXT,\n                model_hops TEXT\n            , failure_category TEXT, milestone_group_id TEXT, milestone_index INTEGER, milestone_total INTEGER, run_events TEXT, evidence_records TEXT, generation_metrics TEXT, failure_report TEXT, enforce_run_id TEXT)"
+  "CREATE TABLE runs (\n                run_id TEXT PRIMARY KEY,\n                timestamp TEXT,\n                goal TEXT,\n                duration_sec REAL,\n                attempts INTEGER,\n                status TEXT,\n                files_modified TEXT,\n                retrieved_chunks TEXT,\n                active_skills TEXT,\n                prompt_rendered TEXT,\n                gate_outcomes TEXT,\n                model_hops TEXT\n            , failure_category TEXT, milestone_group_id TEXT, milestone_index INTEGER, milestone_total INTEGER, run_events TEXT, evidence_records TEXT, generation_metrics TEXT, failure_report TEXT, enforce_run_id TEXT, workspace_identity TEXT)"
  ]
 }

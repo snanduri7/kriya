@@ -146,7 +146,7 @@ async def _maybe_run_developer_investigation(
     if not autonomy_cfg.developer_investigation_enabled:
         return
     db_path = deps._dependency_graph_db_path(ctx)
-    if not os.path.exists(db_path):
+    if not os.path.exists(db_path):  # ":memory:" (no index for this project) does not exist either
         return
     configured_max = max(0, autonomy_cfg.developer_investigation_max_turns)
     used_so_far = state.investigation_turns_used_by_attempt.get(state.attempt_number, 0)
@@ -160,8 +160,10 @@ async def _maybe_run_developer_investigation(
     capability_profile = resolve_model_capability_profile(ctx.kernel.config, active_model)
 
     async def _search_code(query: str) -> List[Dict[str, Any]]:
-        vector_index_path = os.path.join(ctx.kernel.config.paths.memory, "vector_index.db")
-        if not os.path.exists(vector_index_path):
+        from kriya.memory.project_store import project_store_path
+
+        vector_index_path = project_store_path(ctx.kernel.config, "vector_index.db")  # C-05
+        if vector_index_path is None:
             return []
         from types import SimpleNamespace
 

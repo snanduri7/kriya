@@ -92,6 +92,17 @@ def strict_config(**sections: Dict[str, Any]) -> AppConfig:
     return AppConfig(**data)
 
 
+def for_project(config: Any, project_root: Any) -> Any:
+    """C-05 (S3): ``config`` as the configuration of the project at ``project_root`` (what ``load_config`` does for the directory it resolves in).
+    A run binds an unbound configuration itself, at its entry (kriya/control/run_coordinator.py); a test that calls a project store, a reader
+    or a writer BELOW a run entry states whose configuration it is with this, because an unbound one opens no project store
+    (PROJECT_IDENTITY_MISSING). Returns ``config``."""
+    from kriya.core.state_paths import bind_project_identity
+
+    bind_project_identity(config, os.fspath(project_root))
+    return config
+
+
 def strict_kernel(config: Optional[AppConfig] = None, *, registry: Any = None) -> MagicMock:
     """A ``Kernel``-spec'd double with a real config.
 

@@ -20,6 +20,14 @@ from kriya.memory.embedding import OllamaEmbeddingClient as OllamaEmbeddingClien
 logger = logging.getLogger(__name__)
 
 
+def project_vector_index_path(cfg) -> Optional[str]:
+    """C-05 (S3): the path of THIS project's vector index, or None when it has none (absent, another project's, unattributable) - the one answer
+    of ``kriya.memory.project_store.project_store_path`` for the store this module owns, for a caller that opens a ``LocalVectorStore``."""
+    from kriya.memory.project_store import VECTOR_INDEX_STORE, project_store_path
+
+    return project_store_path(cfg, VECTOR_INDEX_STORE)
+
+
 def serialize_embedding(vector: List[float]) -> bytes:
     return struct.pack(f"{len(vector)}f", *vector)
 

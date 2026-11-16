@@ -56,6 +56,9 @@ def _production_cfg(tmp_path):
     # CWD-relative default would otherwise pick up whatever index the
     # directory the suite runs from happens to hold.
     cfg.paths.memory = str(tmp_path / "memory")
+    from _strict_doubles import for_project
+
+    for_project(cfg, tmp_path)  # C-05 (S3): what load_config does; the doctor reads this project's stores
     core = tmp_path / "plugins" / "core_tools"
     core.mkdir(parents=True)
     (core / "__init__.py").write_text("", encoding="utf-8")

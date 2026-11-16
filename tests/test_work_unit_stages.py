@@ -15,6 +15,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import for_project
 
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
@@ -46,6 +47,9 @@ def _engine(tmp_path):
     cfg.paths.skills, cfg.paths.memory = str(tmp_path / "skills"), str(tmp_path / "memory")
     cfg.skills.load_global = cfg.skills.load_cwd = False
     cfg.knowledge.offline_mode = True
+    # C-05 (S3): the stages are called below the run entry, which is where a run's configuration is bound. The project is the directory that
+    # holds both the unit's workspace (tmp_path/ws) and these tests' unstamped stores (tmp_path/memory), so where they are proves whose they are.
+    for_project(cfg, tmp_path)
     return WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
 
 
@@ -106,7 +110,10 @@ def test_a_stage_given_lifecycle_only_deps_fails_closed(tmp_path):
     """E2's ``_stage_deps()`` carries no design collaborators: their defaults raise on any use, never a silent None."""
     deps = _engine(tmp_path)._stage_deps()
     assert sorted(not_injected(deps)) == sorted(design_stage_fields())
-    with pytest.raises(StageCollaboratorMissing, match=r"StageDeps\.KnowledgeGuard was not injected"):
+    # C-05 (S3): the stage now asks the Skills owner for the gate's read-only library roots while it builds the guard's arguments, so the first
+    # missing design collaborator it meets is SkillEngine (KnowledgeGuard, also missing, would be next). Either way: a typed stop, never a None.
+    assert {"SkillEngine", "KnowledgeGuard"} <= set(design_stage_fields())
+    with pytest.raises(StageCollaboratorMissing, match=r"StageDeps\.SkillEngine was not injected"):
         asyncio.run(check_knowledge_guard(_ctx(tmp_path), deps))
     with pytest.raises(StageCollaboratorMissing, match="CALLABLE_KINDS"):
         _ = "function" in deps.CALLABLE_KINDS

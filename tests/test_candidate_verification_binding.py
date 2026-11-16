@@ -314,7 +314,7 @@ async def test_enforce_refuses_a_candidate_changed_after_its_gates_bound(tmp_pat
             knowledge=SimpleNamespace(training_cutoff="2023-12-01", offline_mode=True, release_cache_ttl_days=30),
             llm=SimpleNamespace(knowledge_cutoff="2023-12-01"),
             skills=SimpleNamespace(load_global=False, load_cwd=False),
-            paths=SimpleNamespace(skills=str(tmp_path / "skills"), memory=str(tmp_path / "memory")),
+            paths=SimpleNamespace(skills=str(tmp_path / "skills"), memory=str(tmp_path / "memory"), state=None),  # state: read for <state>/global (S3)
         ),
     )
     we.kernel.registry.list_components.return_value = []

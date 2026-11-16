@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.config.authority import AutonomyModeError, is_human_in_the_loop
 from kriya.core.state_paths import resolve_state_directory
+from kriya.memory.project_store import project_store_path
 from kriya.policy.approval import (
     TypedApprovalCallback,
     VerifierRepairSubject,
@@ -713,7 +714,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # delegating shims) - deterministic, provenance-labelled, bounded; evidence only.
         memory_dir = getattr(getattr(kernel_config, "paths", None), "memory", None)
         goal_facts_text = goal_facts_block(
-            os.path.join(memory_dir, "dependency_graph.db") if isinstance(memory_dir, str) else None, workspace_path, goal)
+            project_store_path(kernel_config, "dependency_graph.db") if isinstance(memory_dir, str) else None,  # C-05: this project's index only
+            workspace_path, goal)
         if goal_facts_text:
             authoritative_planner_request += goal_facts_text
         # GR-R1A: the operator's explicit, closed requirement contract when one
@@ -972,8 +974,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # targets must exist in the current view and agree with
                     # the files it owns (evidence, never authorization).
                     target_errors, target_codes, target_evidence = deps.check_plan_targets(
-                        plan, workspace_path, lambda: os.path.join(
-                            deps.workflow_engine.kernel.config.paths.memory, "dependency_graph.db"))
+                        plan, workspace_path, lambda: project_store_path(
+                            deps.workflow_engine.kernel.config, "dependency_graph.db"))
                     if target_evidence:
                         ledger.record_and_persist(
                             workspace_path, "structured_plan_targets", run_id=run_id,

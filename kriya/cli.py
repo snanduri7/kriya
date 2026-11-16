@@ -342,7 +342,18 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         exists = os.path.exists(resolved)
         status = click.style("EXISTS", fg="green") if exists else click.style("MISSING (will be created on run)", fg="yellow")
         click.echo(f"  - {name}: {resolved} [{status}]")
-        
+    # C-05 (S3): stores left in the directory every project used to share. Reported only; never read, adopted, migrated or deleted.
+    from kriya.core.state_paths import legacy_shared_memory_stores
+
+    legacy_stores = legacy_shared_memory_stores(cfg)
+    if legacy_stores:
+        click.secho(
+            f"  - Legacy shared memory: {len(legacy_stores)} store file(s) from before per-project state remain and are IGNORED "
+            "(they may mix several projects and record no owner):", fg="yellow")
+        for legacy_store in legacy_stores:
+            click.echo(f"      {legacy_store}")
+        click.echo("    Run `kriya analyze` in a project to build its own index and `kriya learn` to re-teach it; delete these files when no longer needed.")
+
     errors_found = False
 
     # Diagnostic control-plane validation. Runtime enforcement remains in
@@ -4579,16 +4590,24 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
     cfg: AppConfig = ctx.obj['config']
     
+    from kriya.config.resolution import ProjectStateError
     from kriya.memory.embedding import EmbeddingError, configured_client
-    from kriya.memory.learned_knowledge import learned_knowledge_db_path
+    from kriya.memory.learned_knowledge import claim_learned_knowledge_store
     from kriya.memory.vector import LocalVectorStore
     from kriya.tools.web import fetch_url_text
+
+    # C-05 (S3): what is taught here is THIS project's (the store is claimed and stamped for it); a store of another project, or one that
+    # cannot be attributed, is refused before anything is fetched, embedded or written.
+    try:
+        learned_store_path = claim_learned_knowledge_store(cfg)
+    except ProjectStateError as refusal:
+        click.secho(f"Error [{refusal.reason_code}]: {refusal}", fg="red")
+        sys.exit(1)
 
     embed_client = configured_client(cfg)
     embedding_failed_sources: List[str] = []
 
-    os.makedirs(cfg.paths.memory, exist_ok=True)
-    vector_store = LocalVectorStore(learned_knowledge_db_path(cfg))
+    vector_store = LocalVectorStore(learned_store_path)
     
     async def index_text_content(source_name: str, content: str):
         chunks = []
@@ -4746,6 +4765,14 @@ def _design_stage_stop_exit(res: Dict[str, Any]) -> Optional[int]:
     return 1
 
 
+def _project_refusal_code(res: dict) -> Optional[str]:
+    """The project-state refusal a run result carries (C-05: one of PROJECT_STATE_REFUSALS), or None."""
+    from kriya.config.resolution import PROJECT_STATE_REFUSALS
+
+    codes = res.get("reason_codes") if isinstance(res, dict) else None
+    return next((code for code in codes or () if code in PROJECT_STATE_REFUSALS), None)
+
+
 @main.command(name="fix")
 @click.option('--error', '-e', help="Compilation or test error log string. If omitted, reads from stdin.")
 @click.option('--workspace', '-w', default=".", type=click.Path(exists=True, file_okay=False), help="Workspace directory path.")
@@ -4816,6 +4843,11 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             sys.exit(stage_stop_exit)
         if res.get("quality_gates_passed"):
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
+        elif _project_refusal_code(res) is not None:
+            # C-05 (S3): refused at the run entry (the configuration is another project's than the -w workspace). Nothing was attempted,
+            # so this is never worded as a repair that failed.
+            click.secho(f"\n[REFUSED] {_project_refusal_code(res)}: {res.get('error')}", fg="red", bold=True)
+            click.echo("Run `kriya fix` from inside the project you want to repair.")
         elif res.get("final_review_refusal"):
             _echo_final_review_refusal(res)
         else:

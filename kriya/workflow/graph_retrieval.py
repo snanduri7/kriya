@@ -541,15 +541,15 @@ async def localization_candidates(cfg: Any, workspace_path: str, text: str,
     vector index has the served embedding identity (EMBEDDING-CONTRACT-001).
     Localization context only, never write authority."""
     from kriya.code_intel import locate as loc
+    from kriya.memory.project_store import project_store_path
 
-    memory = cfg.paths.memory
-    service = open_code_intelligence(workspace_path, os.path.join(memory, "dependency_graph.db"))
+    service = open_code_intelligence(workspace_path, project_store_path(cfg, "dependency_graph.db"))  # C-05
     if service is None:
         return []
     try:
         semantic: List[Dict[str, Any]] = []
-        vector_path = os.path.join(memory, "vector_index.db")
-        if os.path.exists(vector_path):
+        vector_path = project_store_path(cfg, "vector_index.db")
+        if vector_path is not None:
             from kriya.memory.embedding import configured_client, run_deadline
             from kriya.memory.vector import LocalVectorStore
 

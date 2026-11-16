@@ -27,67 +27,99 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from kriya.config.environment import Environment, default_state_dir, expand_user
-from kriya.config.environment import state_dir as environment_state_dir
+from kriya.config.environment import Environment, expand_user
 
-# D3: the paths.state rule and its error are CONFIG's (kriya/config/resolution.py), re-exported here (PARTIAL_FACADES). Removed in P1.
-from kriya.config.resolution import WORKSPACE_STATE_PARENT as WORKSPACE_STATE_PARENT
-from kriya.config.resolution import StateDirectoryError as StateDirectoryError
+# D3 + S3 (C-05, owner rulings 2026-11-16): the paths.state rule, the state-directory composition and the project-state POLICY (identity binding,
+# project-state paths, the source and store-owner verdicts, the refusal table) are CONFIG's (kriya/config/resolution.py: CONFIG resolves the
+# paths.memory default and may not import STATE). This module re-exports those pure names (PARTIAL_FACADES) and keeps the AppConfig-shaped
+# ``resolve_state_directory``. The store MECHANISM (the SQLite stamp, project_store_path, claim_project_store) is RETRIEVAL's,
+# kriya/memory/project_store.py, and is deliberately NOT re-exported here: STATE does not import RETRIEVAL. Removed in P1.
+from kriya.config.resolution import (
+    ENV_STATE_DIR as ENV_STATE_DIR,
+)
+from kriya.config.resolution import (
+    PROJECT_IDENTITY_MISSING as PROJECT_IDENTITY_MISSING,
+)
+from kriya.config.resolution import (
+    PROJECT_MEMORY_DIRECTORY as PROJECT_MEMORY_DIRECTORY,
+)
+from kriya.config.resolution import (
+    PROJECT_SOURCE_FOREIGN as PROJECT_SOURCE_FOREIGN,
+)
+from kriya.config.resolution import (
+    PROJECT_STATE_PARENT as PROJECT_STATE_PARENT,
+)
+from kriya.config.resolution import (
+    PROJECT_STATE_REFUSALS as PROJECT_STATE_REFUSALS,
+)
+from kriya.config.resolution import (
+    PROJECT_STORE_FOREIGN as PROJECT_STORE_FOREIGN,
+)
+from kriya.config.resolution import (
+    PROJECT_STORE_UNATTRIBUTED as PROJECT_STORE_UNATTRIBUTED,
+)
+from kriya.config.resolution import (
+    PROJECT_STORE_UNREADABLE as PROJECT_STORE_UNREADABLE,
+)
+from kriya.config.resolution import (
+    STATE_DIR_SOURCE_CONFIG as STATE_DIR_SOURCE_CONFIG,
+)
+from kriya.config.resolution import (
+    STATE_DIR_SOURCE_DEFAULT as STATE_DIR_SOURCE_DEFAULT,
+)
+from kriya.config.resolution import (
+    STATE_DIR_SOURCE_ENV as STATE_DIR_SOURCE_ENV,
+)
+from kriya.config.resolution import (
+    WORKSPACE_STATE_PARENT as WORKSPACE_STATE_PARENT,
+)
+from kriya.config.resolution import (
+    ProjectStateError as ProjectStateError,
+)
+from kriya.config.resolution import (
+    StateDirectoryError as StateDirectoryError,
+)
+from kriya.config.resolution import (
+    ambient_state_directory as ambient_state_directory,
+)
+from kriya.config.resolution import (
+    bind_project_identity as bind_project_identity,
+)
+from kriya.config.resolution import (
+    default_project_memory_directory as default_project_memory_directory,
+)
+from kriya.config.resolution import (
+    default_state_directory as default_state_directory,
+)
+from kriya.config.resolution import (
+    project_identity as project_identity,
+)
+from kriya.config.resolution import (
+    project_state_root as project_state_root,
+)
+from kriya.config.resolution import (
+    require_project_source as require_project_source,
+)
+from kriya.config.resolution import (
+    require_store_owner as require_store_owner,
+)
 from kriya.config.resolution import (
     require_workspace_local_state_under_kriya_dir as require_workspace_local_state_under_kriya_dir,
 )
+from kriya.config.resolution import (
+    state_directory_for as state_directory_for,
+)
 
-ENV_STATE_DIR = "KRIYA_STATE_DIR"
 TRACE_DB_FILENAME = "traces.db"
-
-STATE_DIR_SOURCE_ENV = "env"
-STATE_DIR_SOURCE_CONFIG = "config"
-STATE_DIR_SOURCE_DEFAULT = "default"
 
 
 class LegacyTraceMigrationError(RuntimeError):
     """An explicit legacy trace migration was refused."""
 
 
-def default_state_directory(environment: Optional[Environment] = None) -> str:
-    """``~/.kriya/state``, computed at call time (tests point HOME elsewhere)."""
-    return default_state_dir(environment)
-
-
-def _absolute(value: str, origin: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise StateDirectoryError(f"{origin} must be a non-empty directory path.")
-    expanded = expand_user(value)
-    if not os.path.isabs(expanded):
-        raise StateDirectoryError(
-            f"{origin} must be an absolute path here (got {value!r}); Kriya never resolves "
-            "a state directory against the current working directory."
-        )
-    return os.path.realpath(expanded)
-
-
-def ambient_state_directory(environment: Optional[Environment] = None) -> str:
-    """The state directory for code with NO ``AppConfig`` in scope (a gate cache, a JVM acceptance staging root, a model-runtime record store):
-    ``KRIYA_STATE_DIR`` (absolute, ``~`` expanded; a relative value is refused, never resolved against the working directory) else ``~/.kriya/state``.
-    WAVE8 OI-02: this is the ONE place the environment/default location is decided; ``resolve_state_directory`` composes it and no other module reads
-    ``KRIYA_STATE_DIR`` or the default location itself (tripwire: tests/test_wave8_state_directory_authority.py). Code that HAS a configuration asks
-    ``resolve_state_directory(cfg)``, which also honours ``paths.state``. Raises ``StateDirectoryError``. Pure."""
-    env_value = environment_state_dir(environment)
-    if env_value:
-        return _absolute(env_value, ENV_STATE_DIR)
-    return os.path.realpath(default_state_directory(environment))
-
-
 def resolve_state_directory(cfg, environment: Optional[Environment] = None) -> Tuple[str, str]:
     """(directory, source) with precedence env > config > default. Pure."""
-    if environment_state_dir(environment):
-        return ambient_state_directory(environment), STATE_DIR_SOURCE_ENV
-    configured = getattr(cfg.paths, "state", None)
-    if configured is not None:
-        # load_config() already made this absolute (anchored at the config
-        # file's directory); a directly built AppConfig must do the same.
-        return _absolute(configured, "paths.state"), STATE_DIR_SOURCE_CONFIG
-    return ambient_state_directory(environment), STATE_DIR_SOURCE_DEFAULT
+    return state_directory_for(getattr(cfg.paths, "state", None), environment)
 
 
 def trace_db_path(cfg) -> str:
@@ -108,6 +140,28 @@ def historical_default_trace_db() -> str:
     """Where traces.db lived before it moved to the state directory: the
     packaged default ``./logs`` resolved against the install directory."""
     return historical_default_trace_db_for(kriya_install_dir())
+
+
+# C-05 (S3): before the project-state namespace, the packaged ``paths.memory`` ("./memory") resolved to ``<install>/memory`` for EVERY project,
+# so these files may hold several projects' state mixed together and record no owner. They are reported, never read, adopted, migrated or
+# deleted: a project rebuilds its own index with ``kriya analyze`` and re-teaches with ``kriya learn``.
+LEGACY_SHARED_MEMORY_SUFFIX = ".db"
+
+
+def legacy_shared_memory_stores(cfg, install_dir: Optional[str] = None) -> Tuple[str, ...]:
+    """The store files (every ``*.db``: the code index, the vector index, learned knowledge, the release cache) left in the historical shared
+    memory directory (``<install>/memory``), sorted; () when there are none or when ``cfg`` names that very directory as its explicit
+    ``paths.memory`` (then they are simply its configured stores, each still bound by its own stamp). Pure inspection: nothing is opened."""
+    directory = os.path.realpath(os.path.join(install_dir if install_dir is not None else kriya_install_dir(), "memory"))
+    configured = getattr(getattr(cfg, "paths", None), "memory", None)
+    if isinstance(configured, str) and os.path.realpath(configured) == directory:
+        return ()
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return ()
+    return tuple(path for path in (os.path.join(directory, name) for name in names if name.endswith(LEGACY_SHARED_MEMORY_SUFFIX))
+                 if os.path.isfile(path))
 
 
 def legacy_trace_db_path(cfg, legacy_path: Optional[str] = None) -> Optional[str]:

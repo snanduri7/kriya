@@ -29,7 +29,13 @@ def test_analyze_rejects_single_file_with_clear_error(tmp_path):
     assert "directory" in res.output.lower()
 
 
-def test_analyze_stdout_is_clean_json_with_no_progress_chrome(tmp_path):
+def test_analyze_stdout_is_clean_json_with_no_progress_chrome(tmp_path, monkeypatch):
+    # C-05 (S3): `kriya analyze <path>` indexes the project it is run IN; analyzing another project's directory from here is refused.
+    monkeypatch.chdir(tmp_path)
+    _analyze_stdout_is_clean_json(tmp_path)
+
+
+def _analyze_stdout_is_clean_json(tmp_path):
     """Regression test for a real bug found while auditing other commands for
     the same stdout-pollution shape as `prompt generate`: the JSON payload
     (model.model_dump_json()) was printed FIRST, then "Building semantic

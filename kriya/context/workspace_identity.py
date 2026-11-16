@@ -78,6 +78,30 @@ def authority_root(workspace_path: str) -> str:
     return canonical if root is None else root
 
 
+def belongs_to_root(root: str, directory: str) -> bool:
+    """Whether ``directory`` is part of the SAME root as ``root`` by the D-001 root search: ``root`` itself, or a directory beneath it that the
+    search from ``directory`` upward reaches without meeting a boundary first - a ``.git`` entry (an independent repository, a submodule, a linked
+    work tree) or a Kriya-owned directory (a sandbox, a snapshot, a gate view). Both are resolved to what they name first, so an alias of the
+    root is the root and a link that leads elsewhere is elsewhere. For a repository root this is exactly ``authority_root(directory) == root``;
+    for a root that is no repository it is the same rule applied from that root: its ordinary subdirectories are its own, an independently
+    rooted directory inside it is not. Lying beneath ``root`` is never sufficient by itself."""
+    return reaches_root(canonical_workspace(root), canonical_workspace(directory))
+
+
+def reaches_root(canonical_root: str, canonical_directory: str) -> bool:
+    """``belongs_to_root`` for two paths already in canonical spelling (a walk that asks for every directory beneath one root)."""
+    current = canonical_directory
+    while True:
+        if current == canonical_root:
+            return True
+        if os.path.lexists(os.path.join(current, ".git")) or os.path.basename(current) in _KRIYA_OWNED_DIRECTORIES:
+            return False
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
+
+
 def canonical_workspace(workspace_path: str) -> str:
     """PLAT-017 (BACKEND-READINESS-004): the one canonical string every
     control-plane identity, lock and record derives from - the real path

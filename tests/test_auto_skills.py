@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from _fake_embedding import native_embed_response
+from _strict_doubles import for_project
 
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.config import AppConfig
@@ -23,7 +24,8 @@ async def test_auto_skills_generation_and_injection(tmp_path):
     cfg.paths.memory = str(tmp_path / "memory")
     cfg.paths.skills = str(tmp_path / "skills")
     cfg.autonomy.run_verification_enabled = False
-    
+    for_project(cfg, tmp_path)  # C-05 (S3): the analyzer is called below load_config / a run entry; the project holds myapp and the stores
+
     analyzer = RepositoryAnalyzer(str(src_dir))
     
     # 1. Mock LLMClient.complete at class level

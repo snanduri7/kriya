@@ -111,8 +111,13 @@ def test_the_same_configuration_at_two_checkout_roots_has_the_same_fingerprint_w
     dump_b = _loaded(monkeypatch, tmp_path, root_b)
     fingerprint_b = compute_config_fingerprint(dump_b)
     # the runtime keeps real absolute paths, and they differ (this is the premise of the defect)...
-    assert dump_a["paths"]["skills"] == os.path.realpath(root_a / "skills") and dump_b["paths"]["skills"] == os.path.realpath(root_b / "skills")
-    assert dump_a["plugins"]["directory"] == os.path.realpath(root_a / "plugins") and dump_a["paths"]["memory"] == os.path.realpath(root_a / "memory")
+    assert dump_a["plugins"]["directory"] == os.path.realpath(root_a / "plugins") and dump_b["plugins"]["directory"] == os.path.realpath(root_b / "plugins")
+    # C-05 (S3): the default paths.skills left the checkout with paths.memory - it is the project's overlay beside it.
+    assert dump_a["paths"]["skills"] == os.path.join(os.path.dirname(dump_a["paths"]["memory"]), "skills")
+    # C-05 (S3): the default paths.memory left the checkout - it is the project's own directory under the state directory (its identity form is
+    # pinned by tests/test_s3_project_state_namespace.py), so it no longer varies with the checkout root at all.
+    assert not dump_a["paths"]["memory"].startswith(os.path.realpath(root_a) + os.sep)
+    assert f"{os.sep}projects{os.sep}" in dump_a["paths"]["memory"] and dump_a["paths"]["memory"].endswith(f"{os.sep}memory")
     assert dump_a != dump_b
     # ...but the identity does not
     assert fingerprint_a == fingerprint_b
@@ -165,7 +170,8 @@ def test_the_resume_configuration_bucket_is_the_same_at_two_checkout_roots(monke
     bucket_a = split_config_by_owner(_loaded(monkeypatch, tmp_path, tmp_path / "a-checkout"))["config"]
     bucket_b = split_config_by_owner(_loaded(monkeypatch, tmp_path, tmp_path / "a-much-longer-checkout-name-b"))["config"]
     assert bucket_a == bucket_b
-    assert bucket_a["paths"]["skills"] == f"{CHECKOUT_IDENTITY_TOKEN}/skills"
+    assert bucket_a["plugins"]["directory"] == f"{CHECKOUT_IDENTITY_TOKEN}/plugins"
+    assert bucket_a["paths"]["skills"] == "<kriya-project-state>/skills"  # C-05 (S3): the per-project overlay, in its identity form
 
 
 def test_the_resume_configuration_bucket_still_distinguishes_an_external_path(monkeypatch, tmp_path):

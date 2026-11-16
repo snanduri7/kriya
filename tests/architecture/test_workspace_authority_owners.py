@@ -8,7 +8,7 @@ KRIYA = pathlib.Path(__file__).resolve().parents[2] / "kriya"
 
 OWNERS = {
     "kriya/application/project.py": 1,        # kriya_directory_present
-    "kriya/config/resolution.py": 1,          # kriya.yaml discovery + SEC-009's workspace
+    "kriya/config/resolution.py": 2,          # kriya.yaml discovery + SEC-009's workspace; S3 (C-05): bind_project_identity records the project's root
     "kriya/context/workspace_identity.py": 1,  # the identity hash (the legacy id searches from the SPELLING it was given, by find_repository_root)
     "kriya/control/checkpoint.py": 1,
     "kriya/control/control_store.py": 1,

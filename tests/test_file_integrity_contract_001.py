@@ -844,6 +844,9 @@ def test_issue11_a_candidate_pom_correction_is_a_visible_staged_candidate_write(
         kernel=SimpleNamespace(config=SimpleNamespace(paths=SimpleNamespace(
             skills=str(wt / "skills"), memory=str(tmp_path / "memory")))),
     )
+    from kriya.config.resolution import bind_project_identity
+
+    bind_project_identity(ctx.kernel.config, str(wt))  # C-05 (S3): the configuration of the project this candidate is for
     before = pom.read_bytes()
     _apply_candidate_pom_corrections(state, ctx, ["app/App.java"])
     assert pom.read_bytes() == before  # not the candidate's pom: never touched

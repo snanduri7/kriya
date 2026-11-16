@@ -1,6 +1,7 @@
 import sqlite3
 from unittest.mock import AsyncMock, patch
 
+from _strict_doubles import for_project
 from click.testing import CliRunner
 
 from kriya.cli import main
@@ -28,6 +29,7 @@ def test_learn_text_entries_do_not_collide_across_invocations(tmp_path):
     shared a position, not because they're the same source being re-taught."""
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
+    for_project(cfg, tmp_path)  # C-05 (S3): what load_config does; learned knowledge is a project store
     runner = CliRunner()
 
     # First invocation: teach one fact, becomes "Manual Entry 1".

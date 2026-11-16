@@ -1,11 +1,11 @@
 {
  "discovered": {
   "load": {
-   "app": "6e2668a851ee7912dbd72d799c2dda66582924c5fb0e37738ac4b60d1dddbed9",
+   "app": "887e988a0bf56e2e374a0ed0b31163f5c6f6c127db981d0ccb1f0e8a2fd3e300",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
     "state": null
    },
    "sensitive_paths": [
@@ -18,7 +18,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "3ecb68c875bd76a24d713236f8cf3c4c32a7e76a4c14c8ce3a4d752382e8fa9f",
+   "config_dict": "bcb9df6c0b234246297a160923cd6f3c028080b056e62d15da4580a2a141b1dc",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -30,8 +30,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -42,11 +42,11 @@
  },
  "discovered_yml": {
   "load": {
-   "app": "899a4d34dfcad6122bddb7045c697da8671b08a317bbb3b292ed2d0ca22ff69e",
+   "app": "fa78f79260d377d8968f9c5fb62d9790de0b3e93724596ffc5df2bae599fda01",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
     "state": null
    },
    "sensitive_paths": [
@@ -59,7 +59,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "e3ded1a3fb9de30957dc79c90a5174224d449c8c7c41648f4e8f3b4bd61c5a7a",
+   "config_dict": "aef87b193afaf86f8b8e1c0ab1d2d397e2bd64e76c26e4269b22c967807de9a3",
    "config_path": "<TMP>/ws/kriya.yml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -71,8 +71,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -83,11 +83,11 @@
  },
  "explicit_missing": {
   "load": {
-   "app": "e5bbf8d8ed2cf2dbeb681b654efb87aeeadf06f338af9b56c82079e7502a06c0",
+   "app": "a9cd0270ad57cb60e833756e1d9d0de74caee6581a0e32439473860f0c8ea3bc",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
     "state": null
    },
    "sensitive_paths": [
@@ -100,7 +100,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "b0546f7089f386d7915f924d26d9952db7e1e7a15bc54f27947104f69e1a79ed",
+   "config_dict": "f4d60dc378f2145ac903964821d22740f18c09c6b05c72398551ce4f0e75aa54",
    "config_path": null,
    "config_source": null,
    "user_sections": {
@@ -112,8 +112,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -124,10 +124,10 @@
  },
  "explicit_outside": {
   "load": {
-   "app": "cd9d9d0f57561bbfaca3b42961187ae5cc9c83aaba038e8d435b549ac0c08e51",
+   "app": "9c8c433b0b64adb7a9bda2682118517204a09fd6acf25b9da5d6c8b0ce1c9b25",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
     "skills": "<TMP>/outside/conf/skills",
     "state": null
    },
@@ -141,7 +141,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "b9be585c00e7232bfe25df937e8a381c289aa1343273b1db88fcca3e27043158",
+   "config_dict": "e103103a03383db43bbbcc270ff9044b410458a23f0df9fba0ebf6fcc9e4a489",
    "config_path": "<TMP>/outside/conf/kriya.yaml",
    "config_source": "explicit_config_path_outside_workspace",
    "user_sections": {
@@ -153,7 +153,7 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
      "skills": "<TMP>/outside/conf/skills",
      "state": null
     },
@@ -165,11 +165,11 @@
  },
  "explicit_symlink": {
   "load": {
-   "app": "fdf06e72d62d383834d3d1ca990a15e75fe7aa35015d7fd3d747c66dd3a2a56b",
+   "app": "2222374dcb10f15086abfdd51d90e8f0e126a662dbe9851b325e60cc02f4938c",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
     "state": null
    },
    "sensitive_paths": [
@@ -182,7 +182,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "0ee5ad3b731aea81fa4b296e7f30ac84e4b220a35eb06be946fa2777717705e3",
+   "config_dict": "9c26423459a77d5193a7be19b07251c4296153b1c330759f29a54b3a42416056",
    "config_path": "<TMP>/outside/real/kriya.yaml",
    "config_source": "explicit_config_path_outside_workspace",
    "user_sections": {
@@ -194,8 +194,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -206,11 +206,11 @@
  },
  "log_null": {
   "load": {
-   "app": "e5bbf8d8ed2cf2dbeb681b654efb87aeeadf06f338af9b56c82079e7502a06c0",
+   "app": "a9cd0270ad57cb60e833756e1d9d0de74caee6581a0e32439473860f0c8ea3bc",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
     "state": null
    },
    "sensitive_paths": [
@@ -223,7 +223,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "b0546f7089f386d7915f924d26d9952db7e1e7a15bc54f27947104f69e1a79ed",
+   "config_dict": "f4d60dc378f2145ac903964821d22740f18c09c6b05c72398551ce4f0e75aa54",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -235,8 +235,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -269,7 +269,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "3a16e9d4a0a9ba8c0f48946453235c110ae2c48bd99a65d463c24c31eec2b531",
+   "config_dict": "c3edd37d32c86dfbd4a000fcd835354f816e1f77fd03253fd6cb73ff4873c7b0",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -281,8 +281,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -332,7 +332,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "030e4a23d6f30acd90282abfc441b99a4189696a20698b8ef1dcd4056ba68c72",
+   "config_dict": "3cf80477de27a95823bf6646384a547e8298951022e2678b09ad53a5ff7a3e6d",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -354,8 +354,8 @@
      }
     },
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -373,11 +373,11 @@
  },
  "none": {
   "load": {
-   "app": "e5bbf8d8ed2cf2dbeb681b654efb87aeeadf06f338af9b56c82079e7502a06c0",
+   "app": "a9cd0270ad57cb60e833756e1d9d0de74caee6581a0e32439473860f0c8ea3bc",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
     "state": null
    },
    "sensitive_paths": [
@@ -390,7 +390,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "b0546f7089f386d7915f924d26d9952db7e1e7a15bc54f27947104f69e1a79ed",
+   "config_dict": "f4d60dc378f2145ac903964821d22740f18c09c6b05c72398551ce4f0e75aa54",
    "config_path": null,
    "config_source": null,
    "user_sections": {
@@ -402,8 +402,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -434,11 +434,11 @@
  },
  "protected_approved": {
   "load": {
-   "app": "d7d4060e5cf5ab1e35ac3a42505dd16ab391178921d16f227c43c6fc8ca84b54",
+   "app": "890261b1e0d2e4216eaad1dd59ff3a85ac0d0d5617b4ee32026292bb94314d76",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
     "state": null
    },
    "sensitive_paths": [
@@ -451,7 +451,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_dict": "ce03ce1224de02af412b90d4500eda125133f779cb98722425209d9f32e9d725",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -463,8 +463,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -494,7 +494,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_dict": "ce03ce1224de02af412b90d4500eda125133f779cb98722425209d9f32e9d725",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -506,8 +506,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -537,7 +537,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_dict": "ce03ce1224de02af412b90d4500eda125133f779cb98722425209d9f32e9d725",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -549,8 +549,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -580,7 +580,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_dict": "ce03ce1224de02af412b90d4500eda125133f779cb98722425209d9f32e9d725",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -592,8 +592,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -615,7 +615,7 @@
    "message": "trust-artifact path '<TMP>/ws/trust.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live out"
   },
   "resolve": {
-   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_dict": "ce03ce1224de02af412b90d4500eda125133f779cb98722425209d9f32e9d725",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -627,8 +627,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -650,7 +650,7 @@
    "message": "trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the "
   },
   "resolve": {
-   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_dict": "ce03ce1224de02af412b90d4500eda125133f779cb98722425209d9f32e9d725",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -662,8 +662,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -693,7 +693,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_dict": "ce03ce1224de02af412b90d4500eda125133f779cb98722425209d9f32e9d725",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -705,8 +705,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -756,7 +756,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "d179da46859d4e9e257b1869e350cb96a69103ebfeb81898821061a24829001f",
+   "config_dict": "b20eb4e3b463bc89789e8261a4a7e9d906bb31ab5c5d18f5157f37eab9154d98",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -768,8 +768,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -799,7 +799,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "7fec15f981d85698474a1a33b403c4e242b4beb6149101c640a3af5804f991a4",
+   "config_dict": "b45a46ca0b428a904ab6cc564a7232577b78fc7e0f1ba4a350b7f25919a89f9e",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -811,8 +811,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -840,11 +840,11 @@
  },
  "state_null": {
   "load": {
-   "app": "e5bbf8d8ed2cf2dbeb681b654efb87aeeadf06f338af9b56c82079e7502a06c0",
+   "app": "a9cd0270ad57cb60e833756e1d9d0de74caee6581a0e32439473860f0c8ea3bc",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
     "state": null
    },
    "sensitive_paths": [
@@ -857,7 +857,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "b0546f7089f386d7915f924d26d9952db7e1e7a15bc54f27947104f69e1a79ed",
+   "config_dict": "f4d60dc378f2145ac903964821d22740f18c09c6b05c72398551ce4f0e75aa54",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -869,8 +869,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": null
@@ -893,7 +893,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "125ed2e13dc3ad6a7db23bf507dfa99f4f61d9849e94b1bdf86073e51a0ab153",
+   "config_dict": "22d258077a7de035e3eefb7b616f1617385d7e0e8e663e0730ec5866c0bc044e",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -905,8 +905,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/outside/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/outside/state/projects/<WS>_ID/skills",
      "state": "<TMP>/outside/state"
     },
     "static_analysis": null
@@ -946,7 +946,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "a21bb13b3e8c5fe5315a3047964821104ad56a401ba7c4111b98c86c8ba90a5d",
+   "config_dict": "a936aba0f2d9b7ca72546b58f52107748ae887419ad3c31aeab45056202e06c7",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -958,8 +958,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/kstate/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/kstate/projects/<WS>_ID/skills",
      "state": "<TMP>/home/kstate"
     },
     "static_analysis": null
@@ -977,11 +977,11 @@
  },
  "state_under_kriya": {
   "load": {
-   "app": "a302ecd135c1756d09dcfaf0ce6be843d424566549956c6d3097adcb802bb479",
+   "app": "4971f494acce85c033b6dda5c3d52c9e14467410245d42d432cc223bb3d88576",
    "logging_directory": null,
    "paths": {
-    "memory": "<INSTALL>/memory",
-    "skills": "<INSTALL>/skills",
+    "memory": "<TMP>/ws/.kriya/state/projects/<WS>_ID/memory",
+    "skills": "<TMP>/ws/.kriya/state/projects/<WS>_ID/skills",
     "state": "<TMP>/ws/.kriya/state"
    },
    "sensitive_paths": [
@@ -994,7 +994,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "96ee97b736b4227cdea567e4735612ddfc98fca0b16ed23605901e03374d2f13",
+   "config_dict": "7c3e3b67e68606a9e3806df4b3f84b37055b3edff0d1de61a06fbf151141dcc7",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -1006,8 +1006,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/ws/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/ws/.kriya/state/projects/<WS>_ID/skills",
      "state": "<TMP>/ws/.kriya/state"
     },
     "static_analysis": null
@@ -1036,7 +1036,7 @@
    ]
   },
   "resolve": {
-   "config_dict": "698a492cddf33da352c29ca901a1cf55fe0c24631130adfd8c56c343d7698ab8",
+   "config_dict": "d0918a7aa7053d20a31cba5263a811bcacc279e7e57bccd1f03746b86033634c",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -1048,8 +1048,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": {
@@ -1091,7 +1091,7 @@
    "message": "1 validation error for AppConfig\nstatic_analysis\n  Value error, static_analysis.provider 'nope' is not a registered provider [type=value_error, input_value={'enabled': True, 'provider': 'nope'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/<pydantic-docs-version>/v/value_error"
   },
   "resolve": {
-   "config_dict": "5858f91de6ab90d77066647574c2726693995527f6f59c53ca194949bd8acec7",
+   "config_dict": "cda01a9320c603bfb4b90401011f8abdb6e58673643a8be3a41eaa54252ed6b2",
    "config_path": "<TMP>/ws/kriya.yaml",
    "config_source": "auto_discovered_cwd",
    "user_sections": {
@@ -1103,8 +1103,8 @@
     },
     "mcp": {},
     "paths": {
-     "memory": "<INSTALL>/memory",
-     "skills": "<INSTALL>/skills",
+     "memory": "<TMP>/home/.kriya/state/projects/<WS>_ID/memory",
+     "skills": "<TMP>/home/.kriya/state/projects/<WS>_ID/skills",
      "state": null
     },
     "static_analysis": {

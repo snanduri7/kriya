@@ -136,8 +136,11 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
         convention_prompt += f"\n\n=== Environment Fact ===\n{java_toolchain_fact}\n"
     # BACKEND-READINESS-V2 (T2): the deterministic facts about where the goal's names live, as the Planner had them.
     memory_dir = getattr(getattr(deps.config, "paths", None), "memory", None)
+    from kriya.memory.project_store import project_store_path
+
     goal_facts_text = developer_goal_facts(
-        goal, workspace_path, os.path.join(memory_dir, "dependency_graph.db") if isinstance(memory_dir, str) else None)
+        goal, workspace_path,
+        project_store_path(deps.config, "dependency_graph.db") if isinstance(memory_dir, str) else None)  # C-05: this project's index only
     if goal_facts_text:
         convention_prompt += goal_facts_text
     if all_gap_report.has_gaps:
@@ -480,10 +483,12 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
     verified_grounding: Dict[str, List[str]] = {}
     hypothesis_candidates: Dict[str, List[str]] = {}
     try:
-        vector_index_path = os.path.join(deps.config.paths.memory, "vector_index.db")
-        db_path = os.path.join(deps.config.paths.memory, "dependency_graph.db")
+        from kriya.memory.project_store import project_store_path
+
+        vector_index_path = project_store_path(deps.config, "vector_index.db")  # C-05: this project's index only
+        db_path = project_store_path(deps.config, "dependency_graph.db")
             
-        if os.path.exists(vector_index_path):
+        if vector_index_path is not None:
             embed_client = configured_client(deps.config)
             vector_store = LocalVectorStore(vector_index_path)
                 

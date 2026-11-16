@@ -525,6 +525,18 @@ class SkillEngine:
             workspace_path=workspace_path,
         )
 
+    @staticmethod
+    def gate_library_roots(config: Any) -> List[str]:
+        """C-05 (S3): the READ-ONLY skill roots that count for this project's knowledge gate beside its own ``paths.skills``. The shipped
+        library, when ``paths.skills`` is the project's overlay (the per-project default) and ``skills.load_global`` is on: those projects used
+        to have the shipped library AS their skills root, so its skills keep counting, while another project's scaffolds no longer do. Empty
+        for an explicit ``paths.skills`` (the gate reads that directory only, as before) and for a configuration with no project identity."""
+        from kriya.config.resolution import is_project_skill_overlay
+
+        if getattr(getattr(config, "skills", None), "load_global", False) is not True or not is_project_skill_overlay(config):
+            return []
+        return [get_global_skills_dir()]
+
     # -- the run-local shadow (GIT-MIDRUN-COMMITS-S3-001) -------------------------------------------------------------
     # While a shadow is active this engine's effective skills root is a run-local copy under the Kriya state directory:
     # `skills_dirs` stays the CANONICAL set (the identity the resume fingerprint hashes), `skills_dir` and every loaded

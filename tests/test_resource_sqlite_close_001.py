@@ -81,12 +81,15 @@ def test_the_graph_rag_walk_closes_its_dependency_graph(tmp_path, opened):
 
 
 def test_indexed_embedding_dimensions_closes_its_read_only_connection(tmp_path, opened):
+    from _strict_doubles import for_project
+
     from kriya.config import AppConfig
     from kriya.memory.vector import LocalVectorStore
     from kriya.workflow.context_certification import indexed_embedding_dimensions
 
     config = AppConfig()
     config.paths.memory = str(tmp_path)
+    for_project(config, tmp_path)  # C-05 (S3): a reader below a run entry; the store's own directory is the project
     store = LocalVectorStore(str(tmp_path / "vector_index.db"))
     store.add_document("a.py", "x = 1", [0.1, 0.2, 0.3], chunk_index=0, model_name=config.embedding.model,
                        dimensions=3)

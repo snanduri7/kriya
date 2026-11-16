@@ -331,7 +331,11 @@ def indexed_embedding_dimensions(config: Any) -> Optional[int]:
     import sqlite3
     from contextlib import closing
 
-    path = os.path.join(config.paths.memory, "vector_index.db")
+    from kriya.memory.project_store import project_store_path
+
+    path = project_store_path(config, "vector_index.db")  # C-05
+    if path is None:
+        return None
     try:
         with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
             rows = connection.execute(
@@ -390,6 +394,9 @@ async def _index_repository(repository: RecallRepository, root: str, config: Any
     repo_config = config.model_copy(deep=True)
     repo_config.paths.memory = os.path.join(root, ".kriya-cert-memory")
     repo_config.paths.skills = os.path.join(root, ".kriya-cert-skills")
+    from kriya.core.state_paths import bind_project_identity
+
+    bind_project_identity(repo_config, root)  # C-05: the fixture repository is its own project, with its own index
     os.makedirs(repo_config.paths.memory, exist_ok=True)
     await RepositoryAnalyzer(root).index_repository(
         repo_config, force=True, embedding_client=embedder, generate_conventions_skill=False,
@@ -416,13 +423,15 @@ async def run_certification(
         for repository in repositories:
             root = os.path.join(scratch, repository.name)
             repo_config = await _index_repository(repository, root, config, embedding_client)
-            store = LocalVectorStore(os.path.join(repo_config.paths.memory, "vector_index.db"))
+            from kriya.memory.project_store import claim_project_store
+
+            store = LocalVectorStore(claim_project_store(repo_config, "vector_index.db", root))
             try:
                 for limits in retrieval_policies(config):
                     for case in repository.cases:
                         retrieval = await retrieve_graph_context(
                             case.goal, root, embed_client=embedding_client, vector_store=store,
-                            dependency_graph_path=os.path.join(repo_config.paths.memory, "dependency_graph.db"),
+                            dependency_graph_path=claim_project_store(repo_config, "dependency_graph.db", root),
                             limits=limits, embedding_model=config.embedding.model, budget_limit=lambda: budget,
                         )
                         report.cases.append(score_case(
@@ -459,7 +468,9 @@ def save_certification(config: Any, report: CertificationReport) -> str:
 def retrieval_applicable(config: Any) -> bool:
     """Graph RAG retrieval runs exactly when a code index exists at
     ``paths.memory`` (workflow.py's retrieval stage)."""
-    return os.path.exists(os.path.join(config.paths.memory, "vector_index.db"))
+    from kriya.memory.project_store import project_store_path
+
+    return project_store_path(config, "vector_index.db") is not None
 
 
 def certification_status(config: Any) -> Tuple[str, str]:

@@ -156,10 +156,10 @@ def probe_embedding(cfg: AppConfig) -> Dict[str, Any]:
 
     fingerprint = asyncio.run(measure())
     evidence: Dict[str, Any] = {**fingerprint.to_dict(), "truncate_false_honoured": True}
-    index_path = os.path.join(cfg.paths.memory, "vector_index.db")
-    if os.path.exists(index_path):
-        from kriya.memory.vector import LocalVectorStore
+    from kriya.memory.vector import LocalVectorStore, project_vector_index_path
 
+    index_path = project_vector_index_path(cfg)  # C-05: this project's index only
+    if index_path is not None:
         store = LocalVectorStore(index_path)
         try:
             evidence["index_fingerprint"] = store.active_fingerprint()

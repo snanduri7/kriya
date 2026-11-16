@@ -65,9 +65,17 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
         "D3: configuration resolution split from the schema; the schema and load_config stay; 1 patch target "
         "(kriya.config.config.resolve_config_state, test_state_location) and ~20 importers use the old path"),
     "kriya/core/state_paths.py": PartialFacade(
-        "kriya.config.resolution", ("StateDirectoryError", "WORKSPACE_STATE_PARENT", "require_workspace_local_state_under_kriya_dir"), "P1",
-        "D3: the paths.state rule and its error owned by CONFIG (resolution needs them without importing STATE); the state directory, "
-        "trace database and legacy migration stay"),
+        "kriya.config.resolution",
+        ("ENV_STATE_DIR", "PROJECT_IDENTITY_MISSING", "PROJECT_MEMORY_DIRECTORY", "PROJECT_SOURCE_FOREIGN", "PROJECT_STATE_PARENT",
+         "PROJECT_STATE_REFUSALS", "PROJECT_STORE_FOREIGN", "PROJECT_STORE_UNATTRIBUTED", "PROJECT_STORE_UNREADABLE", "STATE_DIR_SOURCE_CONFIG",
+         "STATE_DIR_SOURCE_DEFAULT", "STATE_DIR_SOURCE_ENV", "WORKSPACE_STATE_PARENT", "ProjectStateError", "StateDirectoryError",
+         "ambient_state_directory", "bind_project_identity", "default_project_memory_directory", "default_state_directory", "project_identity",
+         "project_state_root", "require_project_source", "require_store_owner", "require_workspace_local_state_under_kriya_dir",
+         "state_directory_for"), "P1",
+        "D3: the paths.state rule and its error owned by CONFIG (resolution needs them without importing STATE). S3 (C-05, owner rulings "
+        "2026-11-16): the state-directory composition and the project-state POLICY (identity binding, project-state paths, the source and "
+        "store-owner verdicts, the refusal table) are CONFIG's too - all pure; the store mechanism is RETRIEVAL's (kriya.memory.project_store) "
+        "and is NOT re-exported (STATE does not import RETRIEVAL). resolve_state_directory, the trace database and legacy migration stay"),
     "kriya/workflow/triage.py": PartialFacade(
         "kriya.policy.risk",
         ("ChangeKind", "EngineeringRoute", "ExecutionWeight", "ImpactVector", "RiskClass", "determine_execution_weight"), "P1",

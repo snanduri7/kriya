@@ -478,9 +478,10 @@ def _dependency_graph_signals(kernel: Optional[Any], symbols: List[str]) -> Dict
         return result
 
     try:
-        memory_path = kernel.config.paths.memory
-        db_path = os.path.join(memory_path, "dependency_graph.db")
-        if not os.path.exists(db_path):
+        from kriya.memory.project_store import project_store_path
+
+        db_path = project_store_path(kernel.config, "dependency_graph.db")  # C-05: this project's index only
+        if db_path is None:
             return result
 
         from kriya.analyzer.graph import DependencyGraph

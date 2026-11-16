@@ -156,7 +156,9 @@ def _git_identity(monkeypatch):
 
 
 def _short_row(row):
-    shape = {k: v for k, v in row.items() if k not in ("timestamp", "duration_sec", "run_id", "run_events")}
+    # workspace_identity (C-05, S3) is the run's project, not part of the short-row contract: pinned by tests/test_s3_project_state_stores.py
+    assert row["workspace_identity"], "a row written under a run records the run's workspace"
+    shape = {k: v for k, v in row.items() if k not in ("timestamp", "duration_sec", "run_id", "run_events", "workspace_identity")}
     shape["run_event_kinds"] = [e["kind"] for e in json.loads(row["run_events"] or "[]")]
     return shape
 

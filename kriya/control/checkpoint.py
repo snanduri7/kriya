@@ -88,13 +88,22 @@ def identity_path(path: Any, *, install_dir: Optional[str] = None) -> Any:
 
 def canonical_identity_config(config_dict: Dict[str, Any], *, install_dir: Optional[str] = None) -> Dict[str, Any]:
     """The configuration as it enters an IDENTITY: observational sections removed, and every string value that is an absolute path inside the Kriya
-    checkout in its identity form (``identity_path``). A new structure; the live configuration, whose paths stay absolute for the runtime, is untouched."""
+    checkout in its identity form (``identity_path``). A new structure; the live configuration, whose paths stay absolute for the runtime, is untouched.
+    C-05 (S3): a path under a project's state root (the per-project default of ``paths.memory``, ``<state>/projects/<identity>/memory``) enters in
+    ITS identity form too (CONFIG's ``project_state_identity_former``): neither where the state directory is nor where the workspace is (its identity
+    is a hash of that) is configuration, so the same configuration has the same identity for every project and every state location."""
+    from kriya.config.resolution import project_state_identity_former
+
+    paths = config_dict.get("paths") if isinstance(config_dict, dict) else None
+    project_state_form = project_state_identity_former(paths.get("state") if isinstance(paths, dict) else None)
+
     def project(value: Any) -> Any:
         if isinstance(value, dict):
             return {key: project(item) for key, item in value.items()}
         if isinstance(value, (list, tuple)):
             return [project(item) for item in value]
-        return identity_path(value, install_dir=install_dir)
+        in_project_state = project_state_form(value)
+        return in_project_state if in_project_state is not None else identity_path(value, install_dir=install_dir)
 
     return project(without_observational_config(config_dict))
 

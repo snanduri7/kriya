@@ -108,6 +108,7 @@ from kriya.control.run_coordinator import (
     coordinated_mutation,
     current_run_context,
     mark_run_stage,
+    project_refusal_payload,
 )
 from kriya.control.run_record import RunLifecycle
 from kriya.control.state import (
@@ -1233,6 +1234,15 @@ class WorkflowController:
             legacy_result=assessment.to_payload(run_id=run_id),
         )
 
+    def project_refusal_result(self, refusal: Any, arguments: Dict[str, Any]) -> WorkflowResult:
+        """C-05 (S3): a run refused by the run-entry project rule (this controller's configuration is bound to another project than the run's),
+        before triage/planning, so there is no route or control state and no model was called."""
+        run_id = arguments.get("run_id") or new_run_id()
+        return WorkflowResult(
+            run_id=run_id, control_state=None, route=None,
+            legacy_result=project_refusal_payload(refusal, goal=arguments.get("goal"), workspace_path=arguments.get("workspace_path"), run_id=run_id),
+        )
+
     @coordinated_mutation
     async def execute(
         self,
@@ -1308,6 +1318,8 @@ class WorkflowController:
             kernel = getattr(self.workflow_engine, "kernel", None)
             if kernel is not None:
                 _log_phase_banner("KNOWLEDGE GUARD")
+                from kriya.config.resolution import global_store_directory
+                from kriya.skills.skill import SkillEngine as _GateSkillEngine
                 from kriya.tools.knowledge import KnowledgeGuard
                 knowledge_config = kernel.config.knowledge
                 cutoff = kernel.config.llm.knowledge_cutoff
@@ -1317,8 +1329,9 @@ class WorkflowController:
                     skills_dir=kernel.config.paths.skills,
                     cutoff_date_str=cutoff,
                     offline=knowledge_config.offline_mode,
-                    memory_dir=kernel.config.paths.memory,
+                    memory_dir=global_store_directory(kernel.config.paths.state),  # C-05: the release cache is a declared global store
                     cache_ttl_days=knowledge_config.release_cache_ttl_days,
+                    library_dirs=_GateSkillEngine.gate_library_roots(kernel.config),
                 )
                 goal_gap_report = guard.check_goal(goal, workspace_path)
                 resolved_coordinates = [gap["library"] for gap in goal_gap_report.gaps]

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from kriya.config.resolution import global_store_directory
 from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
 from kriya.workflow.stage_context import StageContext, StageDeps
 
@@ -40,8 +41,9 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
         skills_dir=skills_root,
         cutoff_date_str=cutoff,
         offline=knowledge_config.offline_mode,
-        memory_dir=deps.config.paths.memory,
+        memory_dir=global_store_directory(deps.config.paths.state),  # C-05: the release cache is a declared global store
         cache_ttl_days=knowledge_config.release_cache_ttl_days,
+        library_dirs=deps.SkillEngine.gate_library_roots(deps.config),
     )
 
     all_gap_report = guard.check_goal(goal, workspace_path)

@@ -134,6 +134,7 @@ fallback behaviour, all four.
 | Existing seam | `core/state_paths.py::resolve_state_directory`; the index manifest; `SkillEngine`'s shared-install refusal (exists, not consulted by every writer) |
 | Dependencies | None upstream; R-06 and R-04 depend on it |
 | Disposition | FIX_REQUIRED_BEFORE_PRODUCTION for A, C, F; INTENTIONAL_CURRENT_CONTRACT for B and D once named global |
+| Correction to class B (S3, 2026-11-16) | The class-B row above calls learned knowledge "operator-taught public documentation ... global by nature". `TRACED` in S3 (`kriya/cli.py::learn`): the one writer also takes a local file (`--file`) and free text (`--text`), and a row records only text, embedding identity, `provenance_url` and `fetch_date`: no scope, no project and no approval. It is operator-taught and never run-derived (that part stands), but nothing in a record shows a chunk is meant for every project, so "global by nature" was not established. S3 binds the store to the project that taught it (`07` C-05, class B); a global namespace for it is a governed promotion decided in S4. Class D stands as written and is now named (`<state>/global`) |
 
 ### R-06 KNOWLEDGE-AUTHORITY
 

@@ -22,6 +22,7 @@ from kriya.agents.contracts import (
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
 )
 from kriya.config import AppConfig, LLMConfig
+from kriya.config.resolution import require_run_project
 from kriya.core.file_stamp import RACY_WINDOW_NS
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -58,8 +59,8 @@ from kriya.workflow.attempt import (
     _validate_and_convert_managed_service_contract,
     find_in_process_terminating_test_invocations,
     find_ungrounded_java_child_process_tests,
-    run_attempt,
 )
+from kriya.workflow.attempt import run_attempt as _run_attempt_below_run_entry
 from kriya.workflow.attribution import AttributionResult
 from kriya.workflow.checkpoint import (
     checkpoint_path,
@@ -213,6 +214,15 @@ from kriya.workflow.workflow_controller import (
     build_planning_structural_evidence,
     find_missing_grounded_production_artifacts,
 )
+
+
+async def run_attempt(state, ctx):
+    """C-05 (S3): ``kriya.workflow.attempt.run_attempt`` as a run reaches it. These tests call it directly, below the run entry
+    (``coordinated_mutation``), which is where a run's configuration is bound to the run's project; a configuration with no project identity
+    opens no project store (PROJECT_IDENTITY_MISSING). This stands in for that one boundary with CONFIG's own rule, so an unbound configuration
+    is bound to the context's workspace and one bound to another project is still refused (PROJECT_IDENTITY_MISMATCH), exactly as in a run."""
+    require_run_project(ctx.kernel.config, ctx.workspace_path)
+    return await _run_attempt_below_run_entry(state, ctx)
 
 
 def test_restore_public_contract_diagnosis_mismatch_cannot_veto():
@@ -24411,10 +24421,14 @@ async def test_ensure_repository_indexed_skips_when_already_indexed(tmp_path):
     # Pre-populate the graph exactly like a real prior index_repository() call
     # would have left it - has_indexed_files() must see this and skip real work.
     from kriya.analyzer.graph import DependencyGraph
+    from kriya.config.resolution import bind_project_identity
+    from kriya.memory.project_store import claim_project_store
 
     memory_dir = tmp_path / "memory"
     cfg = AppConfig(paths={"memory": str(memory_dir)})
-    graph = DependencyGraph(os.path.join(str(memory_dir), "dependency_graph.db"))
+    bind_project_identity(cfg, str(tmp_path))  # C-05 (S3): the configuration of the project at tmp_path
+    # the project's own store, as its writer leaves it (claimed and stamped) - "already indexed" is asked of this project's store only
+    graph = DependencyGraph(claim_project_store(cfg, "dependency_graph.db", str(tmp_path)))
     cursor = graph.conn.cursor()
     cursor.execute(
         "INSERT INTO files (filepath, mtime, hash) VALUES (?, ?, ?)",
@@ -24434,8 +24448,11 @@ async def test_ensure_repository_indexed_skips_when_already_indexed(tmp_path):
 
 @pytest.mark.asyncio
 async def test_ensure_repository_indexed_runs_once_when_graph_empty(tmp_path):
+    from kriya.config.resolution import bind_project_identity
+
     memory_dir = tmp_path / "memory"
     cfg = AppConfig(paths={"memory": str(memory_dir)})
+    bind_project_identity(cfg, str(tmp_path))  # C-05 (S3): the configuration of the project at tmp_path
 
     with patch(
         "kriya.workflow.workflow.RepositoryAnalyzer.index_repository",

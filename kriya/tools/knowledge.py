@@ -5,7 +5,7 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 
@@ -490,8 +490,14 @@ class GapReport:
 
 class KnowledgeGuard:
     """Subsystem checking for missing skills and model cutoff temporal mismatches."""
-    def __init__(self, skills_dir: str, cutoff_date_str: str, offline: bool = False, memory_dir: Optional[str] = None, cache_ttl_days: int = 30) -> None:
+    def __init__(self, skills_dir: str, cutoff_date_str: str, offline: bool = False, memory_dir: Optional[str] = None, cache_ttl_days: int = 30,
+                 library_dirs: Sequence[str] = ()) -> None:
+        # C-05 (S3). ``skills_dir`` is the project's skills root: read for coverage, and the only root a scaffold is written to.
+        # ``library_dirs`` are read-only roots that count for coverage beside it (the shipped library, for a project whose skills root is its
+        # own overlay; kriya/skills/skill.py::gate_library_roots). ``memory_dir`` is the directory of the release cache, a declared GLOBAL
+        # store (public registry dates; kriya/config/resolution.py::global_store_directory), never a project's ``paths.memory``.
         self.skills_dir = os.path.abspath(skills_dir)
+        self.library_dirs = tuple(os.path.abspath(d) for d in library_dirs if os.path.abspath(d) != self.skills_dir)
         self.cutoff_date = parse_iso_datetime(cutoff_date_str) or datetime(2023, 12, 1, tzinfo=timezone.utc)
         self.offline = offline
         self.cache = None
@@ -515,7 +521,8 @@ class KnowledgeGuard:
         for lib, ver in libs:
             # 1. Structural Gap Check (Missing Skills)
             skill_found = False
-            if os.path.exists(self.skills_dir):
+            coverage_roots = [root for root in (self.skills_dir, *self.library_dirs) if os.path.isdir(root)]
+            if coverage_roots:
                 aliases = [lib]
                 if ":" in lib:
                     aliases.extend(lib.split(":"))
@@ -527,7 +534,7 @@ class KnowledgeGuard:
                 if "artemis" in lib.lower():
                     aliases.extend(["activemq-artemis", "artemis"])
 
-                for folder in os.listdir(self.skills_dir):
+                for folder in (name for skills_root in coverage_roots for name in os.listdir(skills_root)):
                     if any(a.lower().replace(":", "-").replace("/", "-") in folder.lower() for a in aliases):
                         skill_found = True
                         break

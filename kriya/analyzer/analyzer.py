@@ -886,10 +886,15 @@ class RepositoryAnalyzer:
         ``generate_conventions_skill=False`` skips step 5 (an LLM call that
         writes an auto-conventions skill); certification indexes fixtures
         without calling any model."""
-        from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-        
         # 1. Resolve storage paths
-        vector_index_path = os.path.join(cfg.paths.memory, "vector_index.db")
+        # C-05 (S3): both stores are claimed for this project BEFORE either is opened or changed; a root that is not part of the configuration's
+        # project, or a store built for another project (or one that cannot be attributed), raises here and the store is left exactly as it was -
+        # indexing one project never writes into or replaces another's index.
+        from kriya.memory.project_store import claim_project_store
+        from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
+
+        vector_index_path = claim_project_store(cfg, "vector_index.db", self.root_path)
+        db_path = claim_project_store(cfg, "dependency_graph.db", self.root_path)
         store = LocalVectorStore(vector_index_path)
         client = embedding_client if embedding_client is not None else OllamaEmbeddingClient(
             base_url=cfg.embedding.base_url, model=cfg.embedding.model,
@@ -900,7 +905,6 @@ class RepositoryAnalyzer:
         from kriya.code_intel.model import ParseState
         from kriya.code_intel.parsing import is_structural_path, parse_file
         from kriya.code_intel.store import StructuralStore
-        db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
         # The Code Intelligence BaselineIndex: the same parse feeds the graph.
         structural = StructuralStore(db_path)
@@ -958,6 +962,11 @@ class RepositoryAnalyzer:
         files_to_index = []
         gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
         owned_roots = kriya_owned_index_roots(cfg, self.root_path)
+        # C-05 (S3): a directory that is another repository/root (an independent repository or submodule nested in this one) is never walked:
+        # its files are not this project's by lying beneath it, so they never enter this project's stores.
+        from kriya.config.resolution import foreign_root_within
+
+        foreign_root = foreign_root_within(self.root_path)
 
         for root, dirs, files in os.walk(self.root_path):
             # CTX-001 P1 WP8: the shared nested-.gitignore primitive
@@ -970,6 +979,7 @@ class RepositoryAnalyzer:
                 d for d in dirs
                 if not is_ignored(os.path.join(root, d), self.root_path, current_patterns)
                 and not is_knowledge_artifact_dir(os.path.join(root, d), owned_roots)
+                and not foreign_root(os.path.relpath(os.path.join(root, d), self.root_path))
             ]
             for file in files:
                 filepath = os.path.join(root, file)

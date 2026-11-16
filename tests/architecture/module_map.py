@@ -141,7 +141,8 @@ MODULES: Dict[str, Module] = {
         layer=2),
     "RETRIEVAL": Module(
         owner_paths=("kriya/code_intel/", "kriya/analyzer/", "kriya/memory/"),
-        public=("kriya.code_intel.service", "kriya.analyzer.analyzer", "kriya.memory.vector", "kriya.memory.embedding"),
+        public=("kriya.code_intel.service", "kriya.analyzer.analyzer", "kriya.memory.vector", "kriya.memory.embedding",
+                "kriya.memory.project_store"),  # S3 (C-05): the project-derived stores - the stamp and the reader/writer hand-out; the policy is CONFIG's
         layer=2),
     "KERNEL": Module(
         owner_paths=("kriya/workflow/", "kriya/agents/", "kriya/prompt/", "kriya/core/__init__.py",

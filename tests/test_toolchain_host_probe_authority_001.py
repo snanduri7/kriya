@@ -230,7 +230,9 @@ def test_the_canonical_seam_for_a_goal_stated_jdk_is_kept(tmp_path, monkeypatch)
 # ----------------------------------------------------------------------------- the pom.xml flag transform
 
 def _corrections_ctx(worktree: Path, tmp_path: Path) -> SimpleNamespace:
-    cfg = strict_config(paths={"skills": str(tmp_path / "skills"), "memory": str(tmp_path / "memory")})
+    from _strict_doubles import for_project
+
+    cfg = for_project(strict_config(paths={"skills": str(tmp_path / "skills"), "memory": str(tmp_path / "memory")}), worktree)  # C-05 (S3)
     return SimpleNamespace(
         worktree_path=str(worktree), workspace_path=str(worktree), protected_relpath=None, allowed_write_relpaths=(),
         write_scope_mode=WriteScopeMode.UNRESTRICTED, established_files=[], structured_plan=None, migration_resolution=None,
