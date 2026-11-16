@@ -19,6 +19,7 @@ import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _skill_owner import operator_owner
 from _strict_doubles import strict_kernel
 
 from kriya.config import AppConfig
@@ -96,7 +97,9 @@ def test_s3_still_refuses_an_advanced_workspace_head_and_a_held_verification_nev
     assert bind() is not None
 
     # Immediate persistence (the pre-fix behavior, reproduced on a fresh engine): the workspace HEAD advances and S3 refuses.
-    assert _engine(repo).mark_verified("widgetlib", context="widgetlib 2.0.0") is True
+    immediate = SkillEngine(str(repo / "skills"), load_global=False, workspace_path=str(repo), operator=True)   # C-04: only a person's command commits at once
+    immediate.discover_and_load()
+    assert immediate.mark_verified("widgetlib", context="widgetlib 2.0.0") is True
     assert _head(repo) != _head(mounted)
     with pytest.raises(GitMetadataError) as refusal:
         bind()
@@ -165,8 +168,8 @@ def test_discarding_persists_nothing(tmp_path):
 def test_rule_provenance_flips_only_for_the_held_snapshot_and_only_after_the_skill_is_marked(tmp_path):
     from kriya.skills.skill import record_rule_provenance
     folder = _skill_workspace(tmp_path)
-    record_rule_provenance(str(folder), "The magic widget constant is 42.", "test")
-    record_rule_provenance(str(folder), "Never flipped.", "test")
+    record_rule_provenance(str(folder), "The magic widget constant is 42.", "test", engine=operator_owner(str(folder)))
+    record_rule_provenance(str(folder), "Never flipped.", "test", engine=operator_owner(str(folder)))
     engine = _engine(tmp_path)
 
     engine.hold_verifications([_held(rules=("The magic widget constant is 42.",))])
@@ -181,7 +184,7 @@ def test_rule_provenance_flips_only_for_the_held_snapshot_and_only_after_the_ski
 def test_a_failed_persistence_is_reported_and_the_skill_is_never_claimed_verified(tmp_path):
     from kriya.skills.skill import record_rule_provenance
     folder = _skill_workspace(tmp_path)
-    record_rule_provenance(str(folder), "Rule A.", "test")
+    record_rule_provenance(str(folder), "Rule A.", "test", engine=operator_owner(str(folder)))
     engine = _engine(tmp_path)
     engine.hold_verifications([_held(rules=("Rule A.",))])
 
@@ -282,7 +285,8 @@ async def test_a_passing_run_keeps_one_repository_identity_until_the_terminal_ap
     assert {head for _, head in observed} == {initial}, observed
     # Only afterwards did the bookkeeping land: one commit, the skill verified, no persistence error.
     assert _head(tmp_path) != initial
-    assert _git(tmp_path, "log", "-1", "--format=%s") == "Kriya: mark skill 'widgetlib' verified (widgetlib 2.0.0)"
+    assert _git(tmp_path, "log", "-1", "--format=%s") == "Kriya: persist the skills this run learned"     # C-04: the run's one learning commit
+    assert int(_git(tmp_path, "rev-list", "--count", f"{initial}..HEAD")) == 1                           # exactly that one (the direct shape applies, it does not commit)
     assert "verified: true" in _yaml_text(folder)
     assert "post_commit_persistence_errors" not in res
 
@@ -607,7 +611,7 @@ async def test_a_terminal_gate_failure_ends_the_run_and_discards_what_the_run_he
 # ---------------------------------------------------------------------------------------------- mark_verified(False)
 
 def _unverified_rule_provenance(folder, rule="Widgets must be printed in uppercase."):
-    record_rule_provenance(str(folder), rule, "human_text")
+    record_rule_provenance(str(folder), rule, "human_text", engine=operator_owner(str(folder)))
     return rule
 
 
@@ -719,7 +723,7 @@ async def test_a_later_work_unit_trusts_a_rule_this_run_proved_in_its_prompt_onl
     folder = _skill_workspace(tmp_path)
     rule = "Always close every widget handle after use."
     (folder / "rules.txt").write_text(rule + "\n")
-    record_rule_provenance(str(folder), rule, "human_text")        # auto-extracted earlier: unverified in the provenance file
+    record_rule_provenance(str(folder), rule, "human_text", engine=operator_owner(str(folder)))        # auto-extracted earlier: unverified in the provenance file
     engine = _engine(tmp_path)
     if held:
         engine.hold_verifications([_held(rules=(rule,))])

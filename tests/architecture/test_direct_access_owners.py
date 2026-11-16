@@ -132,7 +132,6 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
     "home": {},
     "cwd": {
         "kriya.core.release_candidate": (1, "P2", _P2),
-        "kriya.mcp.mcp": (4, "P2", _P2),
         "kriya.skills.skill": (2, "J1", "skill scopes (ScopeRef) instead of load_cwd's process cwd"),
     },
     "sqlite": {
@@ -245,6 +244,7 @@ DECLARED_CACHES: Dict[str, Tuple[FrozenSet[str], str]] = {
     "kriya.core.model_runtime": (frozenset({"_CACHE"}), "runtime fingerprint cache, bounded by bindings"),
     "kriya.core.token_budget": (frozenset({"_EXACT_COUNTERS"}), "tokenizer cache"),
     "kriya.memory.vector": (frozenset({"_MATRIX_CACHE"}), "embedding matrix cache"),
+    "kriya.skills.authority": (frozenset({"_SHIPPED_IDENTITY"}), "shipped-skill identity read once per process and installation directory (fail closed on later change)"),
     "kriya.tools.containment_oci": (frozenset({"_ATTESTED_TOOLCHAINS"}), "process-wide toolchain attestation cache"),
     "kriya.workflow.goal_facts": (frozenset({"_DEVELOPER_FACTS_CACHE"}), "goal fact extraction cache"),
     "kriya.workflow.semantic_region_authority": (frozenset({"_IDENTIFIER_RE_CACHE"}), "compiled regex cache"),

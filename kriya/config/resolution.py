@@ -297,6 +297,13 @@ def _bound_project(cfg) -> Tuple[str, str]:
     return identity, root
 
 
+def bound_project_root(cfg) -> str:
+    """The authority root of the project ``cfg`` is bound to: the ONE workspace root a consumer that acts for that project (the MCP manager:
+    capability scope, containment mount, invocation approval) derives from the configuration, never from the process working directory. A
+    configuration that carries no project (or none at all) proves nothing: ``ProjectStateError(PROJECT_IDENTITY_MISSING)``, never a default."""
+    return _bound_project(cfg)[1]
+
+
 def require_run_project(cfg, run_workspace: str) -> None:
     """The RUN-ENTRY rule (owner decision 2026-11-16, option 1). ``run_workspace`` is the workspace of the run that holds the lease (STATE's
     ``RunContext.workspace_path``: the run's own workspace, never a candidate sandbox and never a unit's directory). A configuration that carries

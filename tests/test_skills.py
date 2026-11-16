@@ -1,6 +1,7 @@
 import os
 from unittest.mock import patch
 
+from _skill_owner import operator_owner
 from click.testing import CliRunner
 
 from kriya.analyzer.analyzer import RepositoryModel
@@ -88,7 +89,7 @@ def test_skills_lifecycle(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
     
-    se = SkillEngine(str(skills_dir), load_global=False)
+    se = SkillEngine(str(skills_dir), load_global=False, operator=True)   # `kriya skills create`: the person's own command (C-04)
     
     # 1. Create skill skeleton
     path = se.create_skill_skeleton("FastAPI App")
@@ -394,7 +395,7 @@ def test_conflict_registry_round_trips_resolution(tmp_path):
 
     assert find_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.") is None
 
-    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a")
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a", engine=operator_owner(str(skills_dir), is_root=True))
 
     assert find_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.") == "prefer_a"
 
@@ -403,7 +404,7 @@ def test_conflict_registry_lookup_is_order_independent(tmp_path):
 
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
-    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a")
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a", engine=operator_owner(str(skills_dir), is_root=True))
 
     # Looked up with the two skills swapped, the resolution must flip accordingly -
     # "prefer_a" (qpid) becomes "prefer_b" when qpid is now the second argument.
@@ -414,8 +415,8 @@ def test_conflict_registry_overwrites_prior_resolution_for_same_pair(tmp_path):
 
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
-    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a")
-    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "both_ok")
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a", engine=operator_owner(str(skills_dir), is_root=True))
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "both_ok", engine=operator_owner(str(skills_dir), is_root=True))
 
     assert find_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.") == "both_ok"
     assert len(load_conflict_resolutions(str(skills_dir))) == 1
@@ -425,7 +426,7 @@ def test_conflict_registry_distinct_rule_pairs_tracked_separately(tmp_path):
 
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
-    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a")
+    record_conflict_resolution(str(skills_dir), "qpid", "Use port 5672.", "artemis", "Use port 5673.", "prefer_a", engine=operator_owner(str(skills_dir), is_root=True))
 
     # A different conflicting rule pair between the same two skills is a distinct,
     # unresolved decision - must not be silently covered by the earlier resolution.
@@ -440,7 +441,7 @@ def test_rule_provenance_round_trips(tmp_path):
 
     assert load_rule_provenance(str(skill_dir)) == []
 
-    record_rule_provenance(str(skill_dir), "The magic constant is 42.", "human_text")
+    record_rule_provenance(str(skill_dir), "The magic constant is 42.", "human_text", engine=operator_owner(str(skill_dir)))
     records = load_rule_provenance(str(skill_dir))
     assert len(records) == 1
     assert records[0]["text"] == "The magic constant is 42."
@@ -453,8 +454,8 @@ def test_rule_provenance_overwrites_record_for_same_text(tmp_path):
 
     skill_dir = tmp_path / "widgetlib"
     skill_dir.mkdir()
-    record_rule_provenance(str(skill_dir), "Rule A.", "human_text")
-    record_rule_provenance(str(skill_dir), "Rule A.", "live_lookup:https://example.com")
+    record_rule_provenance(str(skill_dir), "Rule A.", "human_text", engine=operator_owner(str(skill_dir)))
+    record_rule_provenance(str(skill_dir), "Rule A.", "live_lookup:https://example.com", engine=operator_owner(str(skill_dir)))
 
     records = load_rule_provenance(str(skill_dir))
     assert len(records) == 1
@@ -465,12 +466,12 @@ def test_mark_rules_verified_only_flips_existing_records(tmp_path):
 
     skill_dir = tmp_path / "widgetlib"
     skill_dir.mkdir()
-    record_rule_provenance(str(skill_dir), "Rule A.", "human_text")
-    record_rule_provenance(str(skill_dir), "Rule B.", "human_text")
+    record_rule_provenance(str(skill_dir), "Rule A.", "human_text", engine=operator_owner(str(skill_dir)))
+    record_rule_provenance(str(skill_dir), "Rule B.", "human_text", engine=operator_owner(str(skill_dir)))
 
     # "Rule C." has no provenance record (pre-existing/untracked content) - marking it
     # verified must be a no-op, not create a new record out of thin air.
-    mark_rules_verified(str(skill_dir), ["Rule A.", "Rule C."])
+    mark_rules_verified(str(skill_dir), ["Rule A.", "Rule C."], engine=operator_owner(str(skill_dir)))
 
     records = {r["text"]: r for r in load_rule_provenance(str(skill_dir))}
     assert records["Rule A."]["verified"] is True
@@ -484,7 +485,7 @@ def test_mark_rules_verified_noop_when_no_provenance_file(tmp_path):
     skill_dir = tmp_path / "widgetlib"
     skill_dir.mkdir()
     # Must not raise or create a file for a skill with no tracked rules at all.
-    mark_rules_verified(str(skill_dir), ["Some rule."])
+    mark_rules_verified(str(skill_dir), ["Some rule."], engine=operator_owner(str(skill_dir)))
     assert not (skill_dir / "rule_provenance.json").exists()
 
 
@@ -504,7 +505,7 @@ def test_skills_show_flags_unverified_rules_individually(tmp_path):
 
     config_file, project_skills = _make_local_project(tmp_path, skill_name="widgetlib", verified=False)
     (project_skills / "widgetlib" / "rules.txt").write_text("Existing rule.\nFreshly extracted rule.\n")
-    record_rule_provenance(str(project_skills / "widgetlib"), "Freshly extracted rule.", "human_text")
+    record_rule_provenance(str(project_skills / "widgetlib"), "Freshly extracted rule.", "human_text", engine=operator_owner(str(project_skills / "widgetlib")))
 
     runner = CliRunner()
     result = runner.invoke(main, ["--config", config_file, "skills", "show", "widgetlib"])

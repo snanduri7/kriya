@@ -1184,7 +1184,7 @@ def _apply_run(tmp_path: Path, *, developer: Callable[[str, int, str], str] = la
                configure: Optional[Callable[[Any], None]] = None, approve: Optional[bool] = True,
                on_approval: Optional[Callable[[Path], None]] = None, controller: bool = True,
                prepare: Optional[Callable[[Path], None]] = None, patches: Iterable[Any] = (),
-               run_kwargs: Optional[Dict[str, Any]] = None) -> Outcome:
+               run_kwargs: Optional[Dict[str, Any]] = None, skills_in_project: bool = False) -> Outcome:
     """One isolated run (legacy controller, or the engine directly) of the calc scenario for stages 5-7; ``extra``
     records what the result dict and the E1 form do not show: the step callbacks, the streamed progress lines, every
     approval request (its diffs and escalation reason, digested), every traces.db row, the stage checkpoints left
@@ -1205,7 +1205,9 @@ def _apply_run(tmp_path: Path, *, developer: Callable[[str, int, str], str] = la
     git_workspace(workspace, {"calc.py": BASE, "test_calc.py": TESTS})
     if prepare is not None:
         prepare(workspace)
-    skills_dir = tmp_path / "skills"
+    # C-04 (S4, owner ruling 2026-11-16): a run writes skills only under a root that is its own project's. A scenario whose run STAGES or
+    # ACCRUES a skill therefore keeps its skills root inside the workspace; an explicit root outside it is the operator's and a run only reads it.
+    skills_dir = (workspace if skills_in_project else tmp_path) / "skills"
 
     def isolated(cfg):
         cfg.paths.skills = str(skills_dir)
@@ -1255,7 +1257,9 @@ def _apply_run(tmp_path: Path, *, developer: Callable[[str, int, str], str] = la
                    literals=trace_ids,
                    extra={"steps": steps, "streamed": streamed, "approvals": approvals, "trace_rows": rows,
                           "checkpoints": checkpoints, "model_calls": {role: len(calls) for role, calls in seen.items()},
-                          "requests": seen, "workspace_files": _tree_digests(workspace),
+                          # The skills root is reported once, under its own leaf, wherever it lies.
+                          "requests": seen, "workspace_files": _tree_digests(
+                              workspace, skip=(".git", ".kriya", "skills") if skills_in_project else (".git", ".kriya")),
                           "skills_files": _tree_digests(skills_dir)})
 
 
@@ -1418,7 +1422,7 @@ def legacy_lessons_staged(tmp_path: Path) -> Outcome:
     from _scripted_run import FALLBACK
     with golden_test_clock():
         return _apply_run(tmp_path, chain=True, developer=lambda m, n, t: GOOD if m == FALLBACK else _oscillating(n),
-                          lessons=lambda n: APPLY_FACTS)
+                          lessons=lambda n: APPLY_FACTS, skills_in_project=True)
 
 
 @scenario("legacy_dependency_skill_accrued")
@@ -1438,7 +1442,7 @@ def legacy_dependency_skill_accrued(tmp_path: Path) -> Outcome:
             return {"success": False, "output": DEPENDENCY_SUGGESTION}
         return real(self, *args, **kwargs)
     return _apply_run(tmp_path, developer=lambda m, n, t: GOOD + "# uses mylib-core\n",
-                      patches=[patch.object(PolymorphicValidator, "run_compile_check", compile_check)])
+                      patches=[patch.object(PolymorphicValidator, "run_compile_check", compile_check)], skills_in_project=True)
 
 
 def _unsettled_prior_run(workspace: Path) -> None:

@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Type
 
 from pydantic import BaseModel, Field, create_model
 
+from kriya.config.resolution import bound_project_root
 from kriya.core.kernel import Kernel
 from kriya.mcp.capability import (
     MCPCapabilityProfile,
@@ -96,6 +97,9 @@ logger = logging.getLogger(__name__)
 # deliberately excluded - inheriting them merely because they exist in
 # the parent would be an indirect network-authority bypass; same
 # explicit-override path applies.
+# C-04 (S4): an MCP client that was handed no project workspace root is not started.
+MCP_WORKSPACE_UNBOUND = "MCP_WORKSPACE_UNBOUND"
+
 MCP_BASELINE_ENV_ALLOWLIST: List[str] = [
     "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
 ]
@@ -176,6 +180,7 @@ class MCPClient:
         lifecycle_config: Optional[Any] = None, on_closed: Optional[Callable[[str, BaseException], None]] = None,
         capability_profile: Optional[MCPCapabilityProfile] = None,
         containment_required: bool = True, containment_backend: Optional[Any] = None,
+        workspace_root: Optional[str] = None,
     ) -> None:
         if not containment_required:
             # S8-ORPHAN-HOST-CODE-001: the raw host spawn this flag used to select is gone; contained is the only mode, so a client that does not require containment cannot be built.
@@ -192,7 +197,12 @@ class MCPClient:
         # mcp.<server>.capabilities config. A data/authority BINDING only -
         # this does not (yet) change what start()/spawn_mcp_process() does
         # in any way; see kriya/mcp/capability.py's own security statement.
-        self.capability_profile = capability_profile or resolve_mcp_capability_profile({}, workspace_root=os.getcwd())
+        # An empty declaration names no path, so no workspace root is compared when it is resolved.
+        self.capability_profile = capability_profile or resolve_mcp_capability_profile({}, workspace_root="")
+        # C-04 (S4): the workspace this server acts for is HANDED IN (MCPManager.start_all: the configuration's bound project root). It is never
+        # read from the process working directory, so a process standing elsewhere cannot redirect the mount or the protected-authority check;
+        # a client that was handed none is refused, typed, at start().
+        self._workspace_root = workspace_root
         # TOOL-003 P2 / S8: an MCP server ALWAYS runs inside real OCI containment - there is no host mode. `containment_required` stays in the signature (and as a property, for the
         # telemetry and `kriya mcp` readers) but only `True` is accepted; `containment_backend` is the resolved kriya.tools.containment.ContainmentBackend instance injected by
         # MCPManager.start_all(), never resolved by this class itself, and a client that was handed none is refused, typed, at start().
@@ -314,6 +324,11 @@ class MCPClient:
         # before anything is prepared or started.
         self._containment_backend = require_isolating_backend(mcp_subject(self.name), self._containment_backend)
         profile_digest = compute_mcp_capability_profile_digest(self.capability_profile)
+        if not isinstance(self._workspace_root, str) or not self._workspace_root:
+            raise ContainmentSetupError(
+                f"MCP server '{self.name}': {MCP_WORKSPACE_UNBOUND} - no project workspace root was bound to this client, so its containment "
+                "cannot be mapped; the process working directory is never used instead.")
+        workspace_root = os.path.realpath(self._workspace_root)
         loop = asyncio.get_running_loop()
         # OCIContainmentBackend.prepare() does real, synchronous
         # subprocess I/O (docker daemon probe, image ensure) -
@@ -322,7 +337,7 @@ class MCPClient:
 
         def _prepare():
             containment_profile = map_capability_profile_to_containment(
-                self.capability_profile, workspace_root=os.path.realpath(os.getcwd()),
+                self.capability_profile, workspace_root=workspace_root,
                 resolved_env=full_env, profile_digest=profile_digest,
                 cpu_seconds=self._lifecycle.cpu_seconds, memory_mb=self._lifecycle.memory_mb,
             )
@@ -950,17 +965,20 @@ class MCPManager:
         # ExecutionPolicy's own default-construction behavior at all
         # (ExecutionPolicy() with no arguments, used throughout this
         # codebase's other real call sites, is completely unaffected).
-        # `workspace_root` is derived the SAME way `start_all()` already
-        # derives it for capability-profile resolution below
-        # (os.path.realpath(os.getcwd())) - one consistent workspace-
-        # identity source for both the capability profile and the
-        # invocation-approval binding, never two independently-computed
-        # values that could silently drift apart.
-        self._execution_policy = execution_policy or ExecutionPolicy(
-            mcp_invocation_approval_resolver=resolve_mcp_invocation_approval(
-                workspace_root=os.path.realpath(os.getcwd())
-            )
-        )
+        # C-04 (S4): `workspace_root` is the SAME value `start_all()` uses for capability-profile resolution and the containment mount:
+        # the bound project root of this kernel's configuration (`_workspace_root`), asked for when a call is evaluated - one workspace-identity
+        # source for the capability profile, the mount and the invocation-approval binding, and never the process working directory. A
+        # configuration bound to no project raises here; MCPTool._run's fail-closed boundary turns that into a denial.
+        self._execution_policy = execution_policy or ExecutionPolicy(mcp_invocation_approval_resolver=self._approval_for_bound_project)
+
+    def _workspace_root(self) -> str:
+        """The workspace every MCP authority decision of this manager is taken for: the project its kernel's configuration is bound to
+        (S3 `bind_project_identity`). Typed `ProjectStateError(PROJECT_IDENTITY_MISSING)` when there is none - never the working directory."""
+        return os.path.realpath(bound_project_root(self.kernel.config))
+
+    def _approval_for_bound_project(self, tool_identity: Any, capability_identity: Any) -> bool:
+        """The durable invocation-approval answer for the bound project, read fresh on every call."""
+        return resolve_mcp_invocation_approval(workspace_root=self._workspace_root())(tool_identity, capability_identity)
 
     def _on_client_closed(self, server_name: str, reason: BaseException) -> None:
         """SEC-004: invoked by an MCPClient the instant it transitions to
@@ -1002,9 +1020,8 @@ class MCPManager:
                 # (kriya.config.config.resolve_config_state()); this call
                 # only classifies/canonicalizes, never re-validates safety
                 # (see kriya/mcp/capability.py's own docstring).
-                capability_profile = resolve_mcp_capability_profile(
-                    cfg_dict.get("capabilities", {}), workspace_root=os.path.realpath(os.getcwd())
-                )
+                workspace_root = self._workspace_root()
+                capability_profile = resolve_mcp_capability_profile(cfg_dict.get("capabilities", {}), workspace_root=workspace_root)
 
                 # TOOL-003 P2: `autonomy.mcp_contained_execution_required`
                 # (default False) - resolved fresh per server from the
@@ -1033,6 +1050,7 @@ class MCPManager:
                     capability_profile=capability_profile,
                     containment_required=True,  # S8: contained is the only mode (the decision above is the typed refusal when no isolating backend exists)
                     containment_backend=containment_backend,
+                    workspace_root=workspace_root,
                 )
                 await client.start()
                 self.clients[server_name] = client

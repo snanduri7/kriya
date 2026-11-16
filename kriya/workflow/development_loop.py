@@ -523,6 +523,7 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
         retrieval_member_hints=retrieval_member_hints,
         retrieval_symbol_loci=retrieval_symbol_loci,
         protected_relpath=protected_relpath,
+        project_authority_relpaths=tuple(ctx.project_authority_relpaths or ()),
         allowed_write_relpaths=list(allowed_write_relpaths or []),
         authorized_semantic_regions=list(authorized_semantic_regions or []),
         required_verification=list(required_verification or []),

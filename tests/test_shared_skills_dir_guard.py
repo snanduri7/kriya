@@ -159,7 +159,7 @@ def test_mark_verified_still_works_for_the_kriya_install_workspace_itself(tmp_pa
     _write_fake_skill(fake_global, "auto-core")
 
     with patch("kriya.skills.skill.get_global_skills_dir", return_value=str(fake_global)):
-        engine = SkillEngine(str(fake_global), load_global=False)  # no workspace_path supplied
+        engine = SkillEngine(str(fake_global), load_global=False, operator=True)  # no workspace_path supplied; C-04: the person's own command
         assert engine.workspace_path == str(fake_kriya_install)
         engine.discover_and_load()
         result = engine.mark_verified("auto-core", context="promoted-value")

@@ -11,6 +11,7 @@ import sqlite3
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _skill_owner import operator_owner
 from click.testing import CliRunner
 from test_s3_project_state_namespace import A_FILES, B_FILES, _config, _git_project, _project, _real_engine, _Stop
 
@@ -329,7 +330,7 @@ def test_what_one_project_holds_in_its_overlay_does_not_close_another_projects_k
     S4 (C-06): a scaffold closes nobody's gate, A's included; what closes A's is a skill with a trusted rule, and that stays A's."""
     a, b, cfg_a, cfg_b = two_projects
     assert _gaps(cfg_a, a) == [IGNITE] and _gaps(cfg_b, b) == [IGNITE]
-    target = _guard(cfg_a).generate_skill_template(IGNITE, "2.16.0")
+    target = _guard(cfg_a).generate_skill_template(IGNITE, "2.16.0", engine=operator_owner(cfg_a.paths.skills, is_root=True))
     assert os.path.dirname(target) == cfg_a.paths.skills  # the scaffold is written to A's overlay, never to a library root
     assert _gaps(cfg_a, a) == [IGNITE] and _gaps(cfg_b, b) == [IGNITE]
     _trusted_skill(cfg_a.paths.skills)
@@ -350,7 +351,8 @@ def test_a_library_root_counts_for_coverage_and_is_never_written(tmp_path):
     assert [gap["library"] for gap in without.check_goal(IGNITE_GOAL, str(tmp_path)).gaps] == [IGNITE]
     assert with_library.check_goal(IGNITE_GOAL, str(tmp_path)).gaps == []
     before = sorted(os.listdir(library))
-    assert os.path.dirname(with_library.generate_skill_template("com.example:other", "1.0.0")) == str(overlay)
+    assert os.path.dirname(with_library.generate_skill_template(
+        "com.example:other", "1.0.0", engine=operator_owner(overlay, is_root=True))) == str(overlay)
     assert sorted(os.listdir(library)) == before
 
 

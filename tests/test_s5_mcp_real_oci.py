@@ -22,6 +22,7 @@ import subprocess
 import sys
 
 import pytest
+from _mcp_containment_standin import bound
 from test_tool003_p2_oci_enforcement import TESTS_DIR, _approved, _cwd, _leftover_containers, _oci_config, _server_cfg
 
 from kriya.config.config import AppConfig, AutonomyConfig
@@ -129,7 +130,7 @@ def test_an_unrestricted_network_grant_is_valid_in_the_container_and_the_filesys
 
 def test_required_containment_with_the_null_backend_is_refused_before_any_container_or_process_on_a_docker_host_too(tmp_path):
     with _cwd(tmp_path / "ws"):
-        kernel = Kernel(config=AppConfig(autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="none")))
+        kernel = Kernel(config=bound(AppConfig(autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="none"))))
         manager = MCPManager(kernel)
         with pytest.raises(ExternalExecutionRefused):
             asyncio.run(manager.start_all({"fixture": _server_cfg(

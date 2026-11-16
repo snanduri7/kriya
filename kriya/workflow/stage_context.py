@@ -409,6 +409,7 @@ class StageContext:
     resume_plan: Any = None                # PRD-008 S3 (resume_fingerprints.ResumePlan)
     resume_restored_ledger: Any = None     # the effective ledger a reused candidate was verified against
     protected_relpath: Optional[str] = None
+    project_authority_relpaths: Sequence[str] = ()     # C-04: the workspace skills root, relative to the workspace
     planned_source_files: Optional[Sequence[str]] = None
     recovery_contract_block: str = ""
     grounded_locations: Optional[Sequence[Mapping[str, Any]]] = None

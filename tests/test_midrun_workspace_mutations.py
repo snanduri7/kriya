@@ -99,18 +99,18 @@ def _drivers(ws, engine):
         "mark_gap_acknowledged": lambda: engine.mark_gap_acknowledged("widgetlib"),
         "write_skill_extraction": lambda: _write_skill_extraction(
             widget, {"rules": ["Always close every widget handle after use."], "examples": {"ex.py": "print(2)\n"}, "conflicts": []},
-            source="human_text"),
+            source="human_text", engine=engine),
         "stage_skill_conflicts": lambda: _stage_skill_conflicts(
-            widget, [{"candidate_rule": "Widgets are lowercase.", "conflicts_with": RULE, "reason": "opposite"}]),
+            widget, [{"candidate_rule": "Widgets are lowercase.", "conflicts_with": RULE, "reason": "opposite"}], engine=engine),
         "record_conflict_resolution": lambda: record_conflict_resolution(
-            engine.effective_skills_dir(skills), "widgetlib", RULE, "otherlib", RULE, "prefer_a"),
-        "record_rule_provenance": lambda: record_rule_provenance(widget.source_path, RULE, "human_text"),
-        "mark_rules_verified": lambda: (record_rule_provenance(widget.source_path, RULE, "human_text"),
-                                        mark_rules_verified(widget.source_path, [RULE])),
+            engine.effective_skills_dir(skills), "widgetlib", RULE, "otherlib", RULE, "prefer_a", engine=engine),
+        "record_rule_provenance": lambda: record_rule_provenance(widget.source_path, RULE, "human_text", engine=engine),
+        "mark_rules_verified": lambda: (record_rule_provenance(widget.source_path, RULE, "human_text", engine=engine),
+                                        mark_rules_verified(widget.source_path, [RULE], engine=engine)),
         "generate_skill_template": lambda: KnowledgeGuard(
-            skills_dir=engine.effective_skills_dir(skills), cutoff_date_str="2023-12-01", offline=True,
-            memory_dir=str(ws.parent / "memory")).generate_skill_template("org.example:mylib-core", "1.4.2"),
-        "stage_facts": lambda: knowledge_staging.stage_facts(engine.effective_skills_dir(str(ws / "skills")) + "/auto-ws", _facts()),
+            skills_dir=skills, cutoff_date_str="2023-12-01", offline=True,
+            memory_dir=str(ws.parent / "memory")).generate_skill_template("org.example:mylib-core", "1.4.2", engine=engine),
+        "stage_facts": lambda: knowledge_staging.stage_facts(engine.effective_skills_dir(str(ws / "skills")) + "/auto-ws", _facts(), engine=engine),
         "apply_held_verifications": lambda: (engine.hold_verifications([held]), engine.apply_held_verifications()),
     }
 
@@ -127,7 +127,9 @@ def _measure(ws, sandbox, tmp_path, act):
             "sandbox_head_unchanged": _git(sandbox, "rev-parse", "HEAD") == before["head"]}
 
 
-# site -> the number of commits it makes. Measured with a real sandbox worktree over a real git workspace.
+# site -> the number of commits it MADE before C-04 (S4): measured then with a real sandbox worktree over a real git workspace. Since C-04 a
+# run's writer commits nothing (its learning is one transaction, committed at the run's end); only the end-of-run persistence itself
+# (`apply_held_verifications`, after the candidate's commit) still commits.
 MEASURED_COMMITS = {
     "create_skill_skeleton": 1, "write_skill_extraction": 3, "stage_skill_conflicts": 1,
     "record_conflict_resolution": 1, "record_rule_provenance": 1, "mark_rules_verified": 2, "apply_held_verifications": 1,
@@ -135,13 +137,19 @@ MEASURED_COMMITS = {
 
 
 @pytest.mark.parametrize("site", sorted(MEASURED_COMMITS))
-def test_every_committing_skill_writer_moves_the_workspace_head_so_a_later_bound_gate_over_an_earlier_sandbox_is_stale(tmp_path, site):
+def test_no_skill_writer_of_a_run_commits_so_a_later_bound_gate_over_an_earlier_sandbox_still_binds(tmp_path, site):
+    """C-04 (BYP-A4-07) inverted: each of these writers used to commit (MEASURED_COMMITS) and move the workspace HEAD under the gates. A run's
+    writer now commits nothing. The one committing site left is the end-of-run persistence, which runs after the candidate's commit."""
     ws, sandbox, engine = _world(tmp_path)
 
     result = _measure(ws, sandbox, tmp_path, _drivers(ws, engine)[site])
 
-    assert result == {"commits": MEASURED_COMMITS[site], "head_moved": True, "content_changed": True, "bind_before": "bound",
-                      "bind_after": GIT_METADATA_STALE, "sandbox_head_unchanged": True}
+    if site == "apply_held_verifications":
+        assert result == {"commits": MEASURED_COMMITS[site], "head_moved": True, "content_changed": True, "bind_before": "bound",
+                          "bind_after": GIT_METADATA_STALE, "sandbox_head_unchanged": True}
+    else:
+        assert result == {"commits": 0, "head_moved": False, "content_changed": True, "bind_before": "bound",
+                          "bind_after": "bound", "sandbox_head_unchanged": True}
 
 
 def test_a_workspace_skill_gap_decline_is_run_local_so_it_changes_nothing_the_gates_bind_to(tmp_path):
@@ -251,8 +259,8 @@ GENERATION = ["Step 1: Write code", "Design: Write app.py", '[{"filepath": "app.
 def _assert_every_skill_commit_precedes_the_sandbox_and_every_bound_gate_saw_one_identity(timeline, expected_commits):
     sandbox_at, commits = timeline.index("sandbox"), timeline.index("commit")
     assert len(commits) == expected_commits and len(sandbox_at) == 1, timeline.events
-    assert max(commits) < sandbox_at[0], timeline.events                      # the sandbox is created from the final HEAD
-    assert timeline.events[sandbox_at[0]][2] == timeline.events[commits[-1]][2]
+    assert not commits or max(commits) < sandbox_at[0], timeline.events       # the sandbox is created from the final HEAD
+    assert not commits or timeline.events[sandbox_at[0]][2] == timeline.events[commits[-1]][2]
     gates = [event for event in timeline.events if event[0] in ("gate", "terminal_apply")]
     assert gates and {event[2] for event in gates} == {"bound"}, timeline.events
 
@@ -293,10 +301,11 @@ async def test_a_standalone_extraction_and_conflict_resolution_commit_before_the
         skill_conflict_callback=lambda *args: "prefer_b")
 
     assert result["quality_gates_passed"] is True
+    # C-04 (BYP-A4-07): the direct shape used to commit each of these during analysis (two commits before the sandbox existed, whatever
+    # the run's outcome). Its learning is now one transaction: no skill commit while the run works, every bound gate sees one identity.
     messages = [e[1] for e in timeline.events if e[0] == "commit"]
-    assert any("add 1 rule(s) to skill 'brokeralpha'" in m for m in messages)
-    assert any("record skill-conflict resolution" in m for m in messages)
-    _assert_every_skill_commit_precedes_the_sandbox_and_every_bound_gate_saw_one_identity(timeline, len(messages))
+    assert not any("add 1 rule(s) to skill" in m or "record skill-conflict resolution" in m for m in messages), messages
+    _assert_every_skill_commit_precedes_the_sandbox_and_every_bound_gate_saw_one_identity(timeline, 0)
 
 
 # ------------------------------------------------------------------------------------------ real enforce flow

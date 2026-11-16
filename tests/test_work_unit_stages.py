@@ -126,7 +126,9 @@ def test_a_stage_given_lifecycle_only_deps_fails_closed(tmp_path):
 @pytest.mark.parametrize("fields, stops", [
     ({}, True),
     ({"knowledge_risk_confirmed": True}, False),
-    ({"resume_state": {"plan": "p"}}, False),                     # a resumed checkpoint already cleared the gate
+    ({"resume_state": {"plan": "p"}}, True),                      # INT-06 (S4): a checkpoint's existence is not knowledge truth and opens nothing
+    ({"resume_state": {"plan": "p"}, "knowledge_risk_confirmed": True}, False),   # a resumed unit proceeds on THIS invocation's acceptance
+    ({"resume_state": {"plan": "p"}, "resolved_knowledge_coordinates": ["otherlib"]}, True),
     ({"resolved_knowledge_coordinates": ["mylib"]}, False),       # the run acknowledged exactly this library
     ({"resolved_knowledge_coordinates": ["otherlib"]}, True),     # a coordinate-scoped acknowledgement of another one
 ])
@@ -844,8 +846,10 @@ def test_auto_accrual_scaffolds_only_a_suggested_dependency_the_final_content_us
     scaffolded = []
 
     class Guard:
-        def generate_skill_template(self, coordinate, version):
+        def generate_skill_template(self, coordinate, version, *, engine):
             scaffolded.append((coordinate, version))
+            owners.append(engine)
+    owners = []
     ctx = _apply_ctx(tmp_path, guard=Guard())
     (tmp_path / "wt" / "calc.py").write_text(CALC_NEW + "# uses mylib-core\n")
     ctx.state.budgets.retry_count = 1
@@ -854,6 +858,7 @@ def test_auto_accrual_scaffolds_only_a_suggested_dependency_the_final_content_us
                                               "<groupId>org.x</groupId><artifactId>never-used</artifactId><version>0.1</version>"})
     prepare_lessons(ctx, _late_deps(_engine(tmp_path)))
     assert scaffolded == [("org.example:mylib-core", "1.4.2")]
+    assert owners == [ctx.se]   # C-04: the scaffold is written through the unit's own Skills owner
     ctx.state.budgets.retry_count = 0     # a first-attempt success accrues nothing
     prepare_lessons(ctx, _late_deps(_engine(tmp_path)))
     assert scaffolded == [("org.example:mylib-core", "1.4.2")]
@@ -862,12 +867,13 @@ def test_auto_accrual_scaffolds_only_a_suggested_dependency_the_final_content_us
 def test_the_lesson_extraction_stages_the_facts_and_never_fails_the_run(tmp_path):
     from kriya.workflow.stage_apply import extract_lessons
 
-    staged = []
+    staged, owners = [], []
 
     class Staging:
         @staticmethod
-        def stage_facts(folder, facts):
+        def stage_facts(folder, facts, *, engine):
             staged.append((folder, facts))
+            owners.append(engine)
             return list(facts)
 
     class Channel:
@@ -885,6 +891,7 @@ def test_the_lesson_extraction_stages_the_facts_and_never_fails_the_run(tmp_path
     deps = _late_deps(engine, load_lesson_extraction=lambda: (Staging, Channel, LiveFailureContext))
     asyncio.run(extract_lessons(ctx, deps, should_extract_hard_won_knowledge=True, self_corrected_outcome=None))
     assert staged == [(os.path.join(engine.kernel.config.paths.skills, "auto-calc-repo"), ["a fact about calc.py"])]
+    assert owners == [ctx.se]   # C-04: the facts are staged through the unit's own Skills owner
     asyncio.run(extract_lessons(ctx, deps, should_extract_hard_won_knowledge=False, self_corrected_outcome=None))
     assert len(staged) == 1
 

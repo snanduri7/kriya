@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _dependency_scope import hold_dependency_scope
+from _skill_owner import operator_owner
 from _strict_doubles import developer_double
 
 from kriya.agents.agent import DeveloperAgent, RunVerifierAgent
@@ -16715,7 +16716,7 @@ async def test_workflow_skill_conflict_remembered_resolution_skips_callback(tmp_
     from kriya.skills.skill import record_conflict_resolution
 
     skills_dir = _make_conflicting_skills_dir(tmp_path)
-    record_conflict_resolution(str(skills_dir), "brokeralpha", _ALPHA_RULE, "brokerbeta", _BETA_RULE, "prefer_b")
+    record_conflict_resolution(str(skills_dir), "brokeralpha", _ALPHA_RULE, "brokerbeta", _BETA_RULE, "prefer_b", engine=operator_owner(str(skills_dir), is_root=True))
 
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -23123,6 +23124,7 @@ def test_write_skill_extraction_never_overwrites_existing_example(tmp_path):
         skill,
         {"examples": {"pom.xml": "OVERWRITTEN BY EXTRACTION", "new_file.txt": "brand new content"}},
         source="test",
+        engine=operator_owner(skill),
     )
 
     assert (examples_dir / "pom.xml").read_text() == "ORIGINAL CURATED CONTENT"
@@ -23146,6 +23148,7 @@ def test_write_skill_extraction_collapses_embedded_newlines_in_a_rule(tmp_path):
         skill,
         {"rules": ["Always call close() on the client.\nNever skip this step."]},
         source="test",
+        engine=operator_owner(skill),
     )
 
     lines = [
@@ -23166,7 +23169,7 @@ def test_stage_skill_conflicts_collapses_embedded_newlines(tmp_path):
         "candidate_rule": "Use a fixed\nthread pool.",
         "conflicts_with": "Use a cached\nthread pool.",
         "reason": "contradicts\nexisting guidance",
-    }])
+    }], engine=operator_owner(skill))
 
     lines = [
         line.strip() for line in (skill_dir / "staged_rules.txt").read_text().splitlines() if line.strip()

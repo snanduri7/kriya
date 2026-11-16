@@ -569,13 +569,15 @@ class KnowledgeGuard:
 
         return report
 
-    def generate_skill_template(self, library: str, version: Optional[str]) -> str:
-        """Scaffolds a new skill directory template under skills/."""
+    def generate_skill_template(self, library: str, version: Optional[str], *, engine: Any) -> str:
+        """Scaffolds a new skill directory template under skills/. C-04: every file goes through the Skills owner's one write entry, so the
+        caller NAMES its owner (``engine``: the run's engine, whose effective root the template lands in, or the operator's). There is no
+        default owner: this module builds no engine. A refused location raises `SkillWriteRefused` before anything is created."""
         has_version = version not in (None, "unspecified")
         clean_lib = library.lower().replace(":", "-").replace("/", "-")
         skill_name = f"{clean_lib}-{version}" if has_version else clean_lib
-        target_dir = os.path.join(self.skills_dir, skill_name)
-        os.makedirs(target_dir, exist_ok=True)
+        target_dir = os.path.join(engine.effective_skills_dir(self.skills_dir), skill_name)
+        engine.authorize_skill_write(os.path.join(target_dir, "skill.yaml"))
 
         # 1. skill.yaml
         version_line = f'version: "{version}"\n' if has_version else ""
@@ -590,8 +592,7 @@ tags:
   - {clean_lib}
   - java
 """
-        with open(os.path.join(target_dir, "skill.yaml"), "w", encoding="utf-8") as f:
-            f.write(yaml_content)
+        engine.write_skill_path(os.path.join(target_dir, "skill.yaml"), yaml_content)
 
         # 2. rules.txt
         rules_content = """# Coding rules and gotchas for this library version.
@@ -600,8 +601,7 @@ tags:
 # - Always disable cache persistence in Ignite Configuration when running unit tests.
 # - Do not use deprecated client factory classes.
 """
-        with open(os.path.join(target_dir, "rules.txt"), "w", encoding="utf-8") as f:
-            f.write(rules_content)
+        engine.write_skill_path(os.path.join(target_dir, "rules.txt"), rules_content)
 
         # 3. instructions.md
         title = f"# {library} Version {version} Guidelines" if has_version else f"# {library} Guidelines"
@@ -617,14 +617,10 @@ Include Markdown code blocks to guide code generation.
 ## Official Resources
 - Release Notes: https://search.maven.org/artifact/{library}
 """
-        with open(os.path.join(target_dir, "instructions.md"), "w", encoding="utf-8") as f:
-            f.write(instructions_content)
+        engine.write_skill_path(os.path.join(target_dir, "instructions.md"), instructions_content)
 
         # 4. Create examples folder & blank template
-        examples_dir = os.path.join(target_dir, "examples")
-        os.makedirs(examples_dir, exist_ok=True)
-        example_file = os.path.join(examples_dir, "Example.java")
-        with open(example_file, "w", encoding="utf-8") as f:
-            f.write(f"// Example boilerplate for {library}{' ' + version if has_version else ''}\n")
+        example_file = os.path.join(target_dir, "examples", "Example.java")
+        engine.write_skill_path(example_file, f"// Example boilerplate for {library}{' ' + version if has_version else ''}\n")
 
         return target_dir

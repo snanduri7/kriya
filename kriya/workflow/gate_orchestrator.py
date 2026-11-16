@@ -266,6 +266,7 @@ def _apply_candidate_pom_corrections(
         protected_relpaths=(ctx.protected_relpath,) if ctx.protected_relpath else (),
         allowed_relpaths=ctx.allowed_write_relpaths,
         write_scope_mode=ctx.write_scope_mode,
+        project_authority_relpaths=ctx.project_authority_relpaths,
     ).commit_batch([StagedFileWrite(
         target_path=pom_path, content=corrected, base_path=pom_path,
         expected_base_revision=snapshot.raw_sha256, content_bytes=data, mode=snapshot.file_mode,

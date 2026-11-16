@@ -287,6 +287,8 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_s2_canonical_containment_decision.py': ('N', 'C'),
  'tests/test_s3_config_authority_enabling_fields.py': ('S', 'M'),
  'tests/test_s3_execution_views.py': ('N', 'C'),
+ 'tests/test_s4_skill_write_authority.py': ('S', 'M'),
+ 'tests/test_s4_workspace_and_selection_authority.py': ('N', 'C'),
  'tests/test_s4_1_managed_service_view.py': ('S', 'M'),
  'tests/test_s4_runtime_toolchain.py': ('S', 'M'),
  'tests/test_s5_mcp_containment.py': ('N', 'C'),

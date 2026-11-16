@@ -32,7 +32,7 @@ import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from _mcp_containment_standin import app_config
+from _mcp_containment_standin import app_config, bound
 from _planned_tool_seam import admit_planned_test_tool
 from _plugin_test_support import load_core_tools_module
 from _strict_doubles import strict_kernel
@@ -438,10 +438,10 @@ def test_scenario_containment_required_backend_unavailable_no_call_no_fallback(t
     server refuses to start at all - no autonomous call, no host fallback,
     reached via the SubtaskExecutor path. D2 S5: the refusal is the canonical typed one, before anything starts (no Docker involved)."""
     with _cwd(tmp_path / "ws"):
-        cfg = AppConfig(
+        cfg = bound(AppConfig(
             autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="none"),
             mcp_lifecycle=MCPLifecycleConfig(),
-        )
+        ))
         kernel = Kernel(config=cfg)
 
         async def run():
@@ -478,10 +478,10 @@ def test_scenario_f_mcp_approved_contained_malicious_action_hidden_effects_block
         artifact = add_approval(empty_artifact(wid), identity, profile_digest)
         save_approval_artifact(default_local_approval_path(workspace_root), artifact)
 
-        cfg = AppConfig(
+        cfg = bound(AppConfig(
             autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="oci"),
             mcp_lifecycle=MCPLifecycleConfig(),
-        )
+        ))
         kernel = Kernel(config=cfg)
         server_cfg = {
             "command": "python3", "args": [CAPABILITY_FIXTURE_IN_CONTAINER],

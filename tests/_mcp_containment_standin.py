@@ -12,10 +12,12 @@ the ``mcp_standin`` fixture (tests/conftest.py) registers it for ONE test and re
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any, List, Optional
 
 from kriya.config.config import AppConfig, AutonomyConfig
+from kriya.config.resolution import bind_project_identity
 from kriya.tools.containment import BackendUnavailableError, ContainmentProfile, PreparedContainment
 
 STANDIN_BACKEND_NAME = "mcp-test-standin"
@@ -74,7 +76,7 @@ def current() -> ContainmentStandIn:
 
 def client_kwargs() -> dict:
     """MCPClient keyword arguments for the contained branch (a client constructed directly is handed its backend)."""
-    return {"containment_required": True, "containment_backend": current()}
+    return {"containment_required": True, "containment_backend": current(), "workspace_root": os.path.realpath(os.getcwd())}
 
 
 def autonomy(**fields: Any) -> AutonomyConfig:
@@ -85,4 +87,11 @@ def autonomy(**fields: Any) -> AutonomyConfig:
 def app_config(**fields: Any) -> AppConfig:
     """An AppConfig whose MCP servers start through the stand-in (any other ``AppConfig`` field as usual)."""
     autonomy_fields = fields.pop("autonomy_fields", {})
-    return AppConfig(autonomy=autonomy(**autonomy_fields), **fields)
+    return bound(AppConfig(autonomy=autonomy(**autonomy_fields), **fields))
+
+
+def bound(config: AppConfig) -> AppConfig:
+    """``config`` bound to the project the test stands in, as ``load_config`` binds a real one (C-04, S4: the MCP manager acts for the
+    configuration's bound project and refuses one that carries none)."""
+    bind_project_identity(config, os.getcwd())
+    return config

@@ -17,7 +17,15 @@ from kriya.platform import git_argv, git_environment
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.repository.atomic_write import atomic_write_file
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
-from kriya.skills.run_shadow import RunShadow, is_shadow_path
+from kriya.skills.authority import (
+    SKILL_WRITE_EXPLICIT_ROOT_OPERATOR_ONLY,
+    SKILL_WRITE_PATH_UNCLASSIFIED,
+    SKILL_WRITE_RUN_TRANSACTION_UNAVAILABLE,
+    SKILL_WRITE_SHIPPED_READ_ONLY,
+    SkillPathClass,
+    is_shipped_skill,
+)
+from kriya.skills.run_shadow import RunShadow, inside_bound_repository, is_shadow_path
 from kriya.skills.run_shadow import (
     RunShadowRefused as RunShadowRefused,  # re-export: the skills package's public contract for the typed shadow refusal
 )
@@ -31,7 +39,11 @@ def get_global_skills_dir() -> str:
     return os.path.join(kriya_install_dir, "skills")
 
 class SkillWriteRefused(RuntimeError):
-    """A skill write the Skills owner refuses (it would land in the shared install skills directory for an unrelated workspace)."""
+    """A skill write the Skills owner refuses (C-04): ``reason_code`` is one of `kriya.skills.authority.SKILL_WRITE_REASON_CODES`."""
+
+    def __init__(self, message: str, reason_code: str = SKILL_WRITE_SHIPPED_READ_ONLY) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 def is_accidental_shared_skills_write(skills_dir: str, workspace_path: str) -> bool:
@@ -156,6 +168,16 @@ def _commit_in_work_tree(directory: str, path: str, only: Optional[List[str]], m
         return False
 
 
+def skill_write_owner(engine: Optional["SkillEngine"], skills_root: str) -> "SkillEngine":
+    """The Skills owner a module-level writer writes through (C-04): the caller's engine, or - for a caller that has none (a path-only
+    helper, a test) - an engine for ``skills_root`` that writes as a RUN on behalf of the process directory's project. There is no
+    engine-less write: without an engine the same path class and authority rules apply, with the narrowest actor. Every production
+    caller hands its own engine in (tests/test_s4_skill_write_authority.py)."""
+    if engine is not None:
+        return engine
+    return SkillEngine(skills_root, load_global=False, load_cwd=False)
+
+
 def _conflict_registry_path(skills_dir: str) -> str:
     return os.path.join(os.path.abspath(skills_dir), ".skill_conflicts.json")
 
@@ -196,7 +218,7 @@ def find_conflict_resolution(skills_dir: str, skill_a: str, rule_a: str, skill_b
 
 
 def record_conflict_resolution(
-    skills_dir: str, skill_a: str, rule_a: str, skill_b: str, rule_b: str, resolution: str, note: str = ""
+    skills_dir: str, skill_a: str, rule_a: str, skill_b: str, rule_b: str, resolution: str, note: str = "", *, engine: Optional["SkillEngine"] = None,
 ) -> None:
     """Persists a human's resolution of a specific skill-pair rule conflict so future
     runs that co-activate the same two skills with the same rule text don't re-ask.
@@ -214,10 +236,9 @@ def record_conflict_resolution(
         "resolved_at": date.today().isoformat(),
     })
     try:
-        os.makedirs(os.path.abspath(skills_dir), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2)
-        git_commit_if_tracked(path, f"Kriya: record skill-conflict resolution ({skill_a} vs {skill_b}): {resolution}")
+        engine = skill_write_owner(engine, skills_dir)
+        engine.write_skill_path(path, json.dumps(records, indent=2))
+        engine.commit_skill_change(path, f"Kriya: record skill-conflict resolution ({skill_a} vs {skill_b}): {resolution}")
     except Exception as e:
         logger.warning(f"Failed to persist skill conflict resolution (non-fatal): {e}")
 
@@ -256,7 +277,7 @@ def read_rule_provenance(skill_source_path: str) -> Optional[List[Dict[str, Any]
     return data
 
 
-def record_rule_provenance(skill_source_path: str, rule_text: str, source: str) -> None:
+def record_rule_provenance(skill_source_path: str, rule_text: str, source: str, *, engine: Optional["SkillEngine"] = None) -> None:
     """Records a freshly-extracted rule as unverified with where it came from, so
     generation prompts can flag it distinctly (kriya/workflow/workflow.py) until a
     passing Runtime Verification run proves it. Best-effort, like every other
@@ -271,14 +292,14 @@ def record_rule_provenance(skill_source_path: str, rule_text: str, source: str) 
         "added_at": date.today().isoformat(),
     })
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2)
-        git_commit_if_tracked(path, f"Kriya: record provenance for new rule in skill '{os.path.basename(skill_source_path)}'")
+        engine = skill_write_owner(engine, os.path.dirname(os.path.abspath(skill_source_path)))
+        engine.write_skill_path(path, json.dumps(records, indent=2))
+        engine.commit_skill_change(path, f"Kriya: record provenance for new rule in skill '{os.path.basename(skill_source_path)}'")
     except Exception as e:
         logger.warning(f"Failed to persist rule provenance (non-fatal): {e}")
 
 
-def mark_rules_verified(skill_source_path: str, rule_texts: List[str], project: Optional[str] = None) -> Optional[bool]:
+def mark_rules_verified(skill_source_path: str, rule_texts: List[str], project: Optional[str] = None, *, engine: Optional["SkillEngine"] = None) -> Optional[bool]:
     """Flips verified=True for exactly the given rule texts that already have a
     provenance record - never creates a new record, since a rule with no record is
     pre-existing/untracked content that was never flagged unverified in the first
@@ -315,9 +336,9 @@ def mark_rules_verified(skill_source_path: str, rule_texts: List[str], project: 
         return None
     path = _rule_provenance_path(skill_source_path)
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2)
-        return git_commit_if_tracked(path, f"Kriya: mark rule(s) verified in skill '{os.path.basename(skill_source_path)}'")
+        engine = skill_write_owner(engine, os.path.dirname(os.path.abspath(skill_source_path)))
+        engine.write_skill_path(path, json.dumps(records, indent=2))
+        return engine.commit_skill_change(path, f"Kriya: mark rule(s) verified in skill '{os.path.basename(skill_source_path)}'")
     except Exception as e:
         logger.warning(f"Failed to persist rule verification (non-fatal): {e}")
         return None
@@ -460,7 +481,17 @@ class SkillEngine:
     def __init__(
         self, skills_dir: str, load_global: bool = True,
         load_cwd: Optional[bool] = None, workspace_path: Optional[str] = None,
+        *, operator: bool = False, project_overlay: Optional[str] = None,
     ) -> None:
+        # C-04: who this engine writes for. ``operator`` False (the default) is a RUN: it never writes the shipped library, writes an
+        # explicit root outside the project only when that root is bound to this project, and never commits to Git (its learning is one
+        # transaction, the run shadow). True is a person's own `kriya skills ...` command. ``project_overlay`` is the project's own skills
+        # location under its state root (CONFIG's answer, `is_project_skill_overlay`), when ``skills_dir`` is that location.
+        self.operator = bool(operator)
+        self.project_overlay = os.path.realpath(project_overlay) if project_overlay else None
+        self._root_classes: Dict[str, SkillPathClass] = {}
+        self._run_writes_blocked: Optional[Tuple[str, str]] = None
+        self._persisting = False       # True only inside `apply_held_verifications`: the end-of-run persistence, after the candidate's commit
         # MA7.4 - "no flag required for safety": defaults to os.getcwd() when
         # a caller doesn't supply one, rather than skipping the write-safety
         # check entirely - every documented incident of durable lesson #4
@@ -541,12 +572,16 @@ class SkillEngine:
         self.last_write_committed: Optional[bool] = None
 
     @classmethod
-    def from_config(cls, config: Any, workspace_path: Optional[str] = None) -> "SkillEngine":
+    def from_config(cls, config: Any, workspace_path: Optional[str] = None, *, operator: bool = False) -> "SkillEngine":
+        from kriya.config.resolution import is_project_skill_overlay
+
         return cls(
             config.paths.skills,
             load_global=config.skills.load_global,
             load_cwd=config.skills.load_cwd,
             workspace_path=workspace_path,
+            operator=operator,
+            project_overlay=config.paths.skills if is_project_skill_overlay(config) else None,
         )
 
     @staticmethod
@@ -627,19 +662,129 @@ class SkillEngine:
                 return True
         return False
 
+    # -- the one write entry (C-04) -----------------------------------------------------------------------------------
+    # Every byte written under a skills root goes through `write_skill_path`: path class -> authority -> one atomic write. No other
+    # function in the product opens a skills path for writing (tests/test_s4_skill_write_authority.py holds the structural guard).
+
+    def _canonical_roots(self) -> List[str]:
+        return list(dict.fromkeys([*self.skills_dirs, self.canonical_skills_dir]))
+
+    def _root_of(self, durable: str) -> Optional[str]:
+        """The skills root of this engine that holds the durable path, the most specific one first; None when none does."""
+        holding = [root for root in self._canonical_roots() if path_relation(root, durable) is PathRelation.WITHIN]
+        return max(holding, key=len) if holding else None
+
+    def classify_path(self, path: str) -> SkillPathClass:
+        """The path class of ``path`` (a path at or beneath one of this engine's skills roots; a run-shadow path counts as the durable
+        path it stands for). The installation's skills directory is the shipped library whoever names it; a root is the project's when it
+        is the project's overlay (CONFIG's identity-derived location) or lies in the repository the workspace belongs to; any other root of
+        this engine is an explicit root outside the project. Everything else, and every relation that cannot be established, is unknown."""
+        try:
+            durable = os.path.abspath(self.canonical_path(path))
+            if path_relation(get_global_skills_dir(), durable) is PathRelation.WITHIN:
+                return SkillPathClass.PRODUCT_SHIPPED_READ_ONLY
+            root = self._root_of(durable)
+            if root is None:
+                return SkillPathClass.FOREIGN_UNKNOWN
+            if root not in self._root_classes:
+                if self.project_overlay is not None and os.path.realpath(root) == self.project_overlay:
+                    self._root_classes[root] = SkillPathClass.PROJECT_MUTABLE
+                elif inside_bound_repository(root, os.path.realpath(self.workspace_path)):
+                    self._root_classes[root] = SkillPathClass.PROJECT_MUTABLE
+                else:
+                    self._root_classes[root] = SkillPathClass.EXPLICIT_SHARED
+            return self._root_classes[root]
+        except Exception as error:  # noqa: BLE001 - a path that cannot be classified is written by nobody
+            logger.debug(f"Skills path '{path}' could not be classified: {error}")
+            return SkillPathClass.FOREIGN_UNKNOWN
+
+    def authorize_skill_write(self, path: str) -> None:
+        """Raises `SkillWriteRefused` (typed) unless this engine may write ``path``. A RUN writes the project's own roots and nothing else:
+        never the shipped library, never an explicit root outside the project (a configured path is no write authority). An OPERATOR
+        command writes what the person names, except the shipped library from another project's directory (MA7.4)."""
+        path_class = self.classify_path(path)
+        durable = os.path.abspath(self.canonical_path(path))
+        if path_class is SkillPathClass.FOREIGN_UNKNOWN:
+            raise SkillWriteRefused(f"Refusing to write '{durable}': it is under no skills root of this run, or its location cannot be established.",
+                                    SKILL_WRITE_PATH_UNCLASSIFIED)
+        if path_class is SkillPathClass.PRODUCT_SHIPPED_READ_ONLY:
+            if not self.operator or is_accidental_shared_skill_write(durable, self.workspace_path):
+                raise SkillWriteRefused(
+                    f"Refusing to write '{durable}': it is in Kriya's own SHARED install skills directory ({get_global_skills_dir()}), the "
+                    "shipped skill library a run never writes. What a run learns belongs to the project's own skills (paths.skills); a shared skill is changed by "
+                    "'kriya skills promote' from the Kriya installation.", SKILL_WRITE_SHIPPED_READ_ONLY)
+            return
+        if self.operator:
+            return
+        if self._run_writes_blocked is not None:
+            raise SkillWriteRefused(self._run_writes_blocked[1], self._run_writes_blocked[0])
+        if path_class is SkillPathClass.PROJECT_MUTABLE:
+            return
+        raise SkillWriteRefused(
+            f"Refusing to write '{durable}': the skills directory {self._root_of(durable)} is outside this project. A configured path gives a "
+            "run no write authority there; a person changes it with the 'kriya skills' commands, and what a run learns belongs to the "
+            "project's own skills (leave paths.skills unset, or set it inside the project).", SKILL_WRITE_EXPLICIT_ROOT_OPERATOR_ONLY)
+
+    def _may_write(self, path: str) -> bool:
+        try:
+            self.authorize_skill_write(path)
+        except SkillWriteRefused:
+            return False
+        return True
+
+    @staticmethod
+    def existing_text(path: str) -> str:
+        """The present text of a skill file ('' when absent): an append is a whole-file write through `write_skill_path`."""
+        if not os.path.exists(path):
+            return ""
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    def write_skill_path(self, path: str, text: Optional[str]) -> None:
+        """THE one write under a skills root (C-04): authorizes ``path`` (`authorize_skill_write`), then writes ``text`` with the canonical
+        atomic writer, or removes the file when ``text`` is None. It never commits: see `commit_skill_change`."""
+        self.authorize_skill_write(path)
+        if text is None:
+            if os.path.lexists(path):
+                os.remove(path)
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        atomic_write_file(path, text)
+
+    def commit_skill_change(self, path: str, message: str) -> bool:
+        """The Git commit of a skill change an OPERATOR command made (`git_commit_if_tracked`'s contract). A run commits nothing here: its
+        learning is one transaction, committed once by `persist_run_learning` after the candidate's own commit (no mid-run Git commit on
+        any shape). The one exception is the run's own END: `apply_held_verifications` on an engine with no shadow persists after the
+        candidate's commit, and commits what it persists."""
+        if not self.operator and not self._persisting:
+            return True
+        return git_commit_if_tracked(path, message)
+
+    def begin_run_learning(self, workspace_path: str, state_directory: str) -> None:
+        """Starts this run's skill-learning transaction (the run shadow) on a shape that has no controller doing it (the direct and
+        milestone shapes). When the transaction cannot be made the run goes on and every skill write of it is refused: learning is
+        never written outside a transaction."""
+        try:
+            self.activate_run_shadow(workspace_path, state_directory)
+        except RunShadowRefused as refusal:
+            self._run_writes_blocked = (SKILL_WRITE_RUN_TRANSACTION_UNAVAILABLE,
+                                        f"Refusing to write skills in this run: its learning transaction could not be started ({refusal.reason_code}: {refusal}).")
+            logger.warning(self._run_writes_blocked[1])
+
     # -- the run-local shadow (GIT-MIDRUN-COMMITS-S3-001) -------------------------------------------------------------
     # While a shadow is active this engine's effective skills root is a run-local copy under the Kriya state directory:
     # `skills_dirs` stays the CANONICAL set (the identity the resume fingerprint hashes), `skills_dir` and every loaded
     # skill's `source_path` are the copy. See kriya/skills/run_shadow.py.
 
     def activate_run_shadow(self, workspace_path: str, state_directory: str) -> bool:
-        """Starts the run-local shadow of every skills directory inside the bound candidate repository `workspace_path`
-        belongs to, and reloads the registry from it. False (the existing behaviour is kept) when none of this engine's
-        directories is inside that repository, or a shadow is already active. Raises `RunShadowRefused` when a directory
-        that must be shadowed cannot be."""
+        """Starts the run-local shadow of every skills directory this run may write (C-04: the project's own roots, inside the bound
+        repository or not - the overlay under the state directory too), and reloads the registry from it: until `persist_run_learning` nothing the run learns reaches a durable
+        skills directory or a repository. False when there is no such directory, or a shadow is already active. Raises
+        `RunShadowRefused` when a directory that must be shadowed cannot be."""
         if self._shadow is not None:
             return False
-        shadow = RunShadow.create(list(self.skills_dirs), workspace_path, state_directory)
+        writable = [d for d in self.skills_dirs if self.classify_path(d) is SkillPathClass.PROJECT_MUTABLE]
+        shadow = RunShadow.create(writable, workspace_path, state_directory, every_root=True)
         if shadow is None:
             return False
         self._shadow = shadow
@@ -684,11 +829,13 @@ class SkillEngine:
 
     def _skill_verification_is_authoritative(self, folder_path: str) -> bool:
         """B3: whether the `verified` value in this skill folder's skill.yaml may be believed. A skill in the Kriya install's
-        library is Kriya's; a skill inside the workspace is project-supplied and may not attest its own verification; one
-        elsewhere (an operator-chosen skills directory) is the operator's. Unknown relations fail closed."""
+        library is Kriya's ONLY when it is genuinely shipped (C-04: the product's own canonical metadata names every file the loader reads
+        with exactly these bytes, `is_shipped_skill`); a folder or a rule a run left there is not, wherever it lies. A skill inside the
+        workspace is project-supplied and may not attest its own verification; one elsewhere (an operator-chosen skills directory) is
+        the operator's. Unknown relations fail closed."""
         durable = self.canonical_path(folder_path)
         if path_relation(get_global_skills_dir(), durable) is PathRelation.WITHIN:
-            return True
+            return is_shipped_skill(get_global_skills_dir(), durable)
         return path_relation(self.workspace_path, durable) is PathRelation.OUTSIDE
 
     def discover_and_load(self) -> None:
@@ -828,16 +975,15 @@ class SkillEngine:
         """Why a NEW skill called ``name`` may not be created here (None = it may): the target is Kriya's own shared install skills directory
         and the workspace is a different project (MA7.4). The one predicate ``create_skill`` enforces; a caller may ask first to avoid
         spending work (a model call) on a skill that will be refused."""
-        if is_accidental_shared_skills_write(self.skills_dir, self.workspace_path):
-            return (f"Refusing to create skill '{name}': {os.path.abspath(self.skills_dir)} is Kriya's own SHARED install skills directory and "
-                    f"this workspace ({self.workspace_path}) is a different project; every other project would inherit it. Set paths.skills in "
-                    "this project's kriya.yaml (for example \"./skills\") and run again.")
+        try:
+            self.authorize_skill_write(os.path.join(self.skill_path_for(name), "skill.yaml"))
+        except SkillWriteRefused as refusal:
+            return f"Refusing to create skill '{name}': {refusal}"
         return None
 
-    @staticmethod
-    def _write_skill_file(path: str, text: str) -> None:
-        """The ONE way the Skills owner writes a skill file (WAVE8 OI-120): the canonical atomic, durable writer."""
-        atomic_write_file(path, text)
+    def _write_skill_file(self, path: str, text: str) -> None:
+        """The Skills owner's own file writes go through the one entry (C-04; WAVE8 OI-120: the canonical atomic, durable writer)."""
+        self.write_skill_path(path, text)
 
     def create_skill_skeleton(self, name: str) -> str:
         """Creates folder structure and default files for a new skill."""
@@ -857,9 +1003,7 @@ class SkillEngine:
         skill_path = self.skill_path_for(name)
         if os.path.exists(skill_path):
             raise FileExistsError(f"Skill '{os.path.basename(skill_path)}' already exists at {skill_path}")
-        refusal = self.new_skill_refusal(name)
-        if refusal is not None:
-            raise SkillWriteRefused(refusal)
+        self.authorize_skill_write(os.path.join(skill_path, "skill.yaml"))     # typed, before anything is created
         os.makedirs(skill_path, exist_ok=True)
         os.makedirs(os.path.join(skill_path, "examples"), exist_ok=True)
         self._write_skill_file(os.path.join(skill_path, "skill.yaml"), yaml.safe_dump(metadata, default_flow_style=False))
@@ -873,7 +1017,7 @@ class SkillEngine:
                 [{"text": rule, "verified": False, "source": "skill_creation", "added_at": date.today().isoformat()} for rule in created_rules], indent=2))
         logger.info(f"Created skill '{name}' at {skill_path}")
         if commit_message is not None:
-            git_commit_if_tracked(skill_path, commit_message)
+            self.commit_skill_change(skill_path, commit_message)
         return skill_path
 
     def _resolve_skill(self, skill_name: str) -> Optional[Skill]:
@@ -906,18 +1050,12 @@ class SkillEngine:
         # data. self.workspace_path always has a real value (defaults to
         # os.getcwd() in __init__, never None) - this check cannot be
         # silently skipped by a caller forgetting to pass one.
-        if is_accidental_shared_skill_write(self.canonical_path(skill.source_path), self.workspace_path):
-            logger.error(
-                f"Refusing to write skill.yaml for '{skill_name}': its source ({skill.source_path}) "
-                f"lives inside Kriya's own shared install skills directory, but this run's workspace "
-                f"({self.workspace_path}) is a different project. Writing here would overwrite this "
-                f"skill's real, shared verification record with data from an unrelated run - see "
-                f"durable lesson #4 in project memory. Set skills.load_global/load_cwd: false in this "
-                f"workspace's kriya.yaml if it shouldn't be touching global skills at all."
-            )
-            return False
-
         yaml_path = os.path.join(skill.source_path, "skill.yaml")
+        try:
+            self.authorize_skill_write(yaml_path)
+        except SkillWriteRefused as refusal:
+            logger.error(f"Refusing to write skill.yaml for '{skill_name}' ({refusal.reason_code}): {refusal}")
+            return False
         try:
             meta = {}
             if os.path.exists(yaml_path):
@@ -927,7 +1065,7 @@ class SkillEngine:
             self._write_skill_file(yaml_path, yaml.safe_dump(meta, default_flow_style=False))
             for field, value in fields.items():
                 setattr(skill, field, value)
-            self.last_write_committed = git_commit_if_tracked(yaml_path, commit_message)
+            self.last_write_committed = self.commit_skill_change(yaml_path, commit_message)
             return True
         except Exception as e:
             logger.warning(f"Failed to update skill '{skill_name}': {e}")
@@ -1001,6 +1139,14 @@ class SkillEngine:
         held, self._held_verifications = list(self._held_verifications.values()), {}
         self._run_gap_acknowledged = set()
         failures: List[Dict[str, str]] = []
+        self._persisting = True
+        try:
+            self._apply_held(held, failures)
+        finally:
+            self._persisting = False
+        return failures
+
+    def _apply_held(self, held: List[HeldSkillVerification], failures: List[Dict[str, str]]) -> None:
         for item in held:
             try:
                 skill = self.get_skill(item.skill_name)
@@ -1016,7 +1162,7 @@ class SkillEngine:
                         "error": "skill.yaml was updated but its Git commit failed; the repository holds an uncommitted change",
                     })
                 if skill.source_path and item.rule_texts is not None:
-                    if mark_rules_verified(skill.source_path, list(item.rule_texts), project=self.project_identity) is False:
+                    if mark_rules_verified(skill.source_path, list(item.rule_texts), project=self.project_identity, engine=self) is False:
                         failures.append({
                             "operation": "skill_verification_commit", "skill": item.skill_name,
                             "error": "the rule provenance was updated but its Git commit failed; "
@@ -1027,7 +1173,6 @@ class SkillEngine:
                     "operation": "skill_verification", "skill": item.skill_name,
                     "error": f"{type(ex).__name__}: {ex}",
                 })
-        return failures
 
     def is_gap_acknowledged(self, skill: Skill) -> bool:
         """Whether the human gap prompt is suppressed for ``skill``: a decline Kriya or the operator owns (``skill.yaml`` outside the
@@ -1043,7 +1188,9 @@ class SkillEngine:
         authority (`discover_and_load`), so a decline about it lives only in this engine's in-memory Skill for the run - the same
         run-local owner that holds verifications - and is never written into the project's bytes: the next run asks again."""
         skill = self._resolve_skill(skill_name)
-        if skill and skill.source_path and not self._skill_verification_is_authoritative(skill.source_path):
+        if skill and skill.source_path and (not self._skill_verification_is_authoritative(skill.source_path) or not self._may_write(skill.source_path)):
+            # ... and a skill this engine may not write (C-04: the shipped library, the operator's explicit root, for a run) keeps the
+            # decline for the run only as well: a run never writes there, and asking again next run is the fail-safe direction.
             self.last_write_committed = None
             self._run_gap_acknowledged.add(skill.name)
             skill.verification_gap_acknowledged = True       # until the next discover_and_load; `is_gap_acknowledged` is what survives it

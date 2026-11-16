@@ -16,6 +16,7 @@ import threading
 import time
 
 import pytest
+from _mcp_containment_standin import bound
 
 from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
 from kriya.core.kernel import Kernel
@@ -72,10 +73,10 @@ def _oci_config(*, cpu_seconds=None, memory_mb=None):
         lifecycle_kwargs["cpu_seconds"] = cpu_seconds
     if memory_mb is not None:
         lifecycle_kwargs["memory_mb"] = memory_mb
-    return AppConfig(
+    return bound(AppConfig(
         autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="oci"),
         mcp_lifecycle=MCPLifecycleConfig(**lifecycle_kwargs) if lifecycle_kwargs else MCPLifecycleConfig(),
-    )
+    ))
 
 
 def _approved(server_name: str, *tool_names: str) -> ExecutionPolicy:
@@ -555,7 +556,7 @@ def test_19_backend_unavailable_fails_closed_no_raw_host_fallback(tmp_path):
     import asyncio
 
     with _cwd(tmp_path / "ws"):
-        cfg = AppConfig(autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="none"))
+        cfg = bound(AppConfig(autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="none")))
         kernel = Kernel(config=cfg)
         manager = MCPManager(kernel, execution_policy=_approved("fixture", "echo"))
 
@@ -573,7 +574,7 @@ def test_19b_unknown_backend_name_fails_closed(tmp_path):
     import asyncio
 
     with _cwd(tmp_path / "ws"):
-        cfg = AppConfig(autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="totally_made_up"))
+        cfg = bound(AppConfig(autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="totally_made_up")))
         kernel = Kernel(config=cfg)
         manager = MCPManager(kernel, execution_policy=_approved("fixture", "echo"))
 

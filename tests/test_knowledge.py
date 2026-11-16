@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _skill_owner import operator_owner
 
 from kriya.tools.knowledge import (
     KnowledgeGuard,
@@ -165,7 +166,7 @@ def test_generate_skill_template(tmp_path):
     skills_dir.mkdir()
     
     kg = KnowledgeGuard(str(skills_dir), "2023-12-01")
-    t_dir = kg.generate_skill_template("org.apache.ignite:ignite-core", "2.18.0")
+    t_dir = kg.generate_skill_template("org.apache.ignite:ignite-core", "2.18.0", engine=operator_owner(skills_dir, is_root=True))
     
     assert os.path.exists(t_dir)
     assert os.path.exists(os.path.join(t_dir, "skill.yaml"))
@@ -511,7 +512,7 @@ def test_generate_skill_template_without_version(tmp_path):
     skills_dir.mkdir()
 
     kg = KnowledgeGuard(str(skills_dir), "2023-12-01")
-    t_dir = kg.generate_skill_template("org.apache.qpid:qpid-broker-core", "unspecified")
+    t_dir = kg.generate_skill_template("org.apache.qpid:qpid-broker-core", "unspecified", engine=operator_owner(skills_dir, is_root=True))
 
     assert os.path.basename(t_dir) == "org.apache.qpid-qpid-broker-core"
     with open(os.path.join(t_dir, "skill.yaml"), "r") as f:

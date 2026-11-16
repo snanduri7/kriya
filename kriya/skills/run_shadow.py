@@ -144,16 +144,20 @@ class RunShadow:
 
     # -- creation -----------------------------------------------------------------------------------------------------
     @classmethod
-    def create(cls, skills_dirs: List[str], workspace_path: str, state_directory: str) -> Optional["RunShadow"]:
+    def create(cls, skills_dirs: List[str], workspace_path: str, state_directory: str, *, every_root: bool = False) -> Optional["RunShadow"]:
         """The shadow for the ``skills_dirs`` that are inside the bound repository, or None when none is (nothing to
         protect: the existing behaviour is kept). Raises `RunShadowRefused` when a protected directory cannot be shadowed."""
         workspace = os.path.realpath(workspace_path)
-        inside = [d for d in skills_dirs if inside_bound_repository(d, workspace)]
+        bound = [d for d in skills_dirs if inside_bound_repository(d, workspace)]
+        # C-04: ``every_root`` shadows every directory given (the Skills owner passes the ones its run may write), so a run's learning is
+        # one transaction wherever it lands; without it only the directories inside the bound repository are (the original scope).
+        inside = list(skills_dirs) if every_root else bound
         if not inside:
             return None
         for directory in inside:
             real = os.path.realpath(directory)
-            if real == workspace or path_relation(real, workspace) is PathRelation.WITHIN or os.path.lexists(os.path.join(real, ".git")):
+            if real == workspace or path_relation(real, workspace) is PathRelation.WITHIN or (
+                    directory in bound and os.path.lexists(os.path.join(real, ".git"))):
                 raise RunShadowRefused(REASON_ROOT_ENCLOSES_REPOSITORY, f"the skills root {directory!r} is the repository itself (or holds it); it cannot be shadowed")
         # One per workspace: the workspace lock admits one run at a time, so whatever an earlier run left is stale.
         base = os.path.join(os.path.realpath(state_directory), "run_shadow", hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16])

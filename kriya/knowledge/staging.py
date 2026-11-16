@@ -12,16 +12,21 @@ exact-string-only dedup the old inline lesson-extraction block used.
 import json
 import logging
 import os
-from typing import List
+from typing import Any, List
 
 from kriya.knowledge.schema import KnowledgeFact
-from kriya.skills.skill import git_commit_if_tracked, record_rule_provenance
-from kriya.workflow.skill_extraction import _is_near_duplicate_rule, _sanitize_for_flat_file_line
+from kriya.skills.skill import record_rule_provenance, skill_write_owner
+from kriya.workflow.skill_extraction import _existing_text, _is_near_duplicate_rule, _sanitize_for_flat_file_line
 
 logger = logging.getLogger(__name__)
 
 STAGED_KNOWLEDGE_FILENAME = "staged_knowledge.json"
 KNOWLEDGE_FILENAME = "knowledge.json"
+
+
+def _owner(engine: Any, skill_folder: str) -> Any:
+    """The Skills owner these writers write through: the caller's engine, else one for the skill folder's root (`skill_write_owner`)."""
+    return skill_write_owner(engine, os.path.dirname(os.path.abspath(skill_folder)))
 
 
 def _staged_path(skill_folder: str) -> str:
@@ -44,9 +49,9 @@ def _load_facts(path: str) -> List[KnowledgeFact]:
         return []
 
 
-def _save_facts(path: str, facts: List[KnowledgeFact]) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([f.model_dump() for f in facts], f, indent=2)
+def _save_facts(path: str, facts: List[KnowledgeFact], engine: Any) -> None:
+    """C-04: through the Skills owner's one write entry (``engine``), like every other byte under a skills root."""
+    engine.write_skill_path(path, json.dumps([fact.model_dump() for fact in facts], indent=2))
 
 
 def load_staged(skill_folder: str) -> List[KnowledgeFact]:
@@ -57,7 +62,7 @@ def load_knowledge(skill_folder: str) -> List[KnowledgeFact]:
     return _load_facts(_knowledge_path(skill_folder))
 
 
-def stage_facts(skill_folder: str, facts: List[KnowledgeFact]) -> List[KnowledgeFact]:
+def stage_facts(skill_folder: str, facts: List[KnowledgeFact], *, engine: Any = None) -> List[KnowledgeFact]:
     """Appends `facts` to staged_knowledge.json, skipping anything that's an exact or
     near-duplicate of a fact already staged or already approved for this skill. Returns
     the facts actually written (a subset of the input, in the same order), so callers
@@ -67,7 +72,7 @@ def stage_facts(skill_folder: str, facts: List[KnowledgeFact]) -> List[Knowledge
     if not facts:
         return []
     try:
-        os.makedirs(skill_folder, exist_ok=True)
+        engine = _owner(engine, skill_folder)
         existing = load_staged(skill_folder) + load_knowledge(skill_folder)
         existing_values = [f.value for f in existing]
 
@@ -85,14 +90,14 @@ def stage_facts(skill_folder: str, facts: List[KnowledgeFact]) -> List[Knowledge
 
         if written:
             all_staged = load_staged(skill_folder) + written
-            _save_facts(_staged_path(skill_folder), all_staged)
+            _save_facts(_staged_path(skill_folder), all_staged, engine)
         return written
     except Exception as e:
         logger.warning(f"Failed to stage knowledge facts for '{skill_folder}' (non-fatal): {e}")
         return []
 
 
-def promote_staged(skill_folder: str) -> List[KnowledgeFact]:
+def promote_staged(skill_folder: str, *, engine: Any = None) -> List[KnowledgeFact]:
     """The structured analogue of `kriya skills approve`: moves every staged fact into
     knowledge.json (the approved record the readiness rubric scores) and flattens each
     fact's value into a rules.txt line - via the same append + record_rule_provenance
@@ -102,6 +107,7 @@ def promote_staged(skill_folder: str) -> List[KnowledgeFact]:
     staged = load_staged(skill_folder)
     if not staged:
         return []
+    engine = _owner(engine, skill_folder)
 
     rules_file = os.path.join(skill_folder, "rules.txt")
     existing_rules: List[str] = []
@@ -120,33 +126,31 @@ def promote_staged(skill_folder: str) -> List[KnowledgeFact]:
         promoted.append(fact)
 
     if new_rules:
-        with open(rules_file, "a", encoding="utf-8") as rf:
-            for fact in new_rules:
-                rf.write(f"\n{fact.value}")
+        engine.write_skill_path(rules_file, _existing_text(rules_file) + "".join(f"\n{fact.value}" for fact in new_rules))
         for fact in new_rules:
-            record_rule_provenance(skill_folder, fact.value, source=f"knowledge_channel:{fact.source_channel}")
-        git_commit_if_tracked(rules_file, f"Kriya: promote {len(new_rules)} structured knowledge fact(s) to skill '{os.path.basename(skill_folder)}'")
+            record_rule_provenance(skill_folder, fact.value, source=f"knowledge_channel:{fact.source_channel}", engine=engine)
+        engine.commit_skill_change(rules_file, f"Kriya: promote {len(new_rules)} structured knowledge fact(s) to skill '{os.path.basename(skill_folder)}'")
 
     knowledge = load_knowledge(skill_folder) + promoted
-    _save_facts(_knowledge_path(skill_folder), knowledge)
-    git_commit_if_tracked(_knowledge_path(skill_folder), f"Kriya: record {len(promoted)} promoted knowledge fact(s) for skill '{os.path.basename(skill_folder)}'")
+    _save_facts(_knowledge_path(skill_folder), knowledge, engine)
+    engine.commit_skill_change(_knowledge_path(skill_folder), f"Kriya: record {len(promoted)} promoted knowledge fact(s) for skill '{os.path.basename(skill_folder)}'")
 
-    os.remove(_staged_path(skill_folder))
+    engine.write_skill_path(_staged_path(skill_folder), None)
     return promoted
 
 
-def record_direct_fact(skill_folder: str, fact: KnowledgeFact) -> bool:
+def record_direct_fact(skill_folder: str, fact: KnowledgeFact, *, engine: Any = None) -> bool:
     """Writes a single fact straight to rules.txt + knowledge.json, skipping
     staged_knowledge.json entirely - for kriya/knowledge/scaffold.py's human-answered
     gap questions, where a human directly answering a targeted question is already a
     strong intent signal (same trust tier as skill_extraction.py's own
     _write_skill_extraction, which skips staging for the same reason). Returns whether
     the fact was newly written (False if it was a duplicate of an existing rule)."""
-    os.makedirs(skill_folder, exist_ok=True)
     value = _sanitize_for_flat_file_line(fact.value)
     if not value:
         return False
     fact = fact.model_copy(update={"value": value})
+    engine = _owner(engine, skill_folder)
 
     rules_file = os.path.join(skill_folder, "rules.txt")
     existing_rules: List[str] = []
@@ -158,12 +162,11 @@ def record_direct_fact(skill_folder: str, fact: KnowledgeFact) -> bool:
         logger.info(f"Skipping near-duplicate direct knowledge fact for '{skill_folder}': {value[:100]}")
         return False
 
-    with open(rules_file, "a", encoding="utf-8") as rf:
-        rf.write(f"\n{value}")
-    record_rule_provenance(skill_folder, value, source=f"knowledge_channel:{fact.source_channel}")
-    git_commit_if_tracked(rules_file, f"Kriya: add human-answered knowledge fact to skill '{os.path.basename(skill_folder)}'")
+    engine.write_skill_path(rules_file, _existing_text(rules_file) + f"\n{value}")
+    record_rule_provenance(skill_folder, value, source=f"knowledge_channel:{fact.source_channel}", engine=engine)
+    engine.commit_skill_change(rules_file, f"Kriya: add human-answered knowledge fact to skill '{os.path.basename(skill_folder)}'")
 
     knowledge = load_knowledge(skill_folder) + [fact]
-    _save_facts(_knowledge_path(skill_folder), knowledge)
-    git_commit_if_tracked(_knowledge_path(skill_folder), f"Kriya: record human-answered knowledge fact for skill '{os.path.basename(skill_folder)}'")
+    _save_facts(_knowledge_path(skill_folder), knowledge, engine)
+    engine.commit_skill_change(_knowledge_path(skill_folder), f"Kriya: record human-answered knowledge fact for skill '{os.path.basename(skill_folder)}'")
     return True

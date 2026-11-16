@@ -565,9 +565,9 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
                             source = manual_source
 
                     if extraction["conflicts"]:
-                        _stage_skill_conflicts(target, extraction["conflicts"])
+                        _stage_skill_conflicts(target, extraction["conflicts"], engine=se)
                     if extraction["rules"] or extraction["examples"]:
-                        _write_skill_extraction(target, extraction, source=source)
+                        _write_skill_extraction(target, extraction, source=source, engine=se)
                         if extraction["rules"]:
                             skills_prompt += (
                                 f"\n\n=== Engineering Skill Conventions: {target.name} (just added, unverified - "

@@ -377,7 +377,7 @@ def _system_calendar(monkeypatch, day: tuple) -> None:
 def _staged_added_at(outcome) -> list:
     """The added_at of every fact the run staged (read back from the staged files; never digested away)."""
     found = []
-    for path in sorted(p for p in (Path(outcome.workspace).parent / "skills").rglob("*") if p.is_file()):
+    for path in sorted(p for p in Path(outcome.cfg.paths.skills).rglob("*") if p.is_file()):
         found.extend(re.findall(r"added_at\W+(\d{4}-\d{2}-\d{2})", path.read_text(encoding="utf-8", errors="replace")))
     return found
 

@@ -25,7 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from _mcp_containment_standin import STANDIN_BACKEND_NAME, ContainmentStandIn, NoPrefixBackend
+from _mcp_containment_standin import STANDIN_BACKEND_NAME, ContainmentStandIn, NoPrefixBackend, bound
 
 from kriya.config.config import AppConfig, AutonomyConfig
 from kriya.core.kernel import Kernel
@@ -72,7 +72,7 @@ def spawns(monkeypatch):
 
 
 def _config(*, required: bool, backend: str, **autonomy) -> AppConfig:
-    return AppConfig(autonomy=AutonomyConfig(mcp_contained_execution_required=required, containment_backend=backend, **autonomy))
+    return bound(AppConfig(autonomy=AutonomyConfig(mcp_contained_execution_required=required, containment_backend=backend, **autonomy)))
 
 
 def _server(*, network: str = "denied", **capabilities) -> dict:
@@ -154,14 +154,15 @@ def test_required_containment_with_an_unavailable_backend_is_a_typed_refusal_wit
 
 def test_a_backend_that_prepared_nothing_to_launch_through_is_refused_and_never_reported_as_contained(spawns):
     backend = NoPrefixBackend()
-    client = MCPClient("srv", sys.executable, [MOCK_SERVER], containment_required=True, containment_backend=backend)
+    client = MCPClient("srv", sys.executable, [MOCK_SERVER], containment_required=True, containment_backend=backend, workspace_root=os.getcwd())
     with pytest.raises(ContainmentSetupError):
         asyncio.run(client.start())
     assert spawns == [] and client.containment_active is False and backend.cleaned == 1, "the prepared (but unusable) containment was released"
 
 
 def test_a_failed_startup_after_a_contained_preparation_leaves_no_active_evidence(mcp_standin):
-    client = MCPClient("srv", sys.executable, ["-c", "import sys; sys.exit(3)"], containment_required=True, containment_backend=mcp_standin)
+    client = MCPClient("srv", sys.executable, ["-c", "import sys; sys.exit(3)"], containment_required=True, containment_backend=mcp_standin,
+                       workspace_root=os.getcwd())
     with pytest.raises(Exception):
         asyncio.run(client.start())
     assert client.containment_active is False and client.is_healthy is False
@@ -345,6 +346,8 @@ NOT_THE_STANDIN = {
     "test_s5_mcp_containment.py": "this file: it drives the legacy host case on purpose and the contained one through the stand-in",
     "test_tool002_p2_real_cli.py": "real `kriya` CLI processes (cannot use an in-process stand-in): legacy-host characterization, plus one real-OCI test",
     "test_config.py": "configuration fields only",
+    "test_s18_planned_tool_governance.py": "constructs an MCPClient only as the client of an MCPTool whose governance is read: never started",
+    "test_s4_knowledge_truth.py": "constructs an MCPClient only as the client of an MCPTool whose planned-write class is read: never started",
 }
 _STARTS = ("MCPClient(", ".start_all(")
 _CONTAINED_BRANCH = ("mcp_standin", "client_kwargs", "app_config(", "_oci_config(", 'containment_backend="oci"')

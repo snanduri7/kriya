@@ -685,3 +685,145 @@ state the person's acceptance); an MCP tool built with no client (`test_s18_plan
 (`BYP-A4-07`; the shipped library is still writable by `_write_skill_extraction` and `record_rule_provenance` for a foreign workspace);
 the project-authority path class in the write gate (A5 P5); the MCP server's workspace binding to the run's authority root; INT-06 (a
 direct resume opens the gate from a checkpoint's existence); the relevance rule (one selection per run).
+
+## 15. Slice S4, step 2a: skill mutation authority and the project-authority path class (C-04 items 1 and 2, R-04; 2026-11-16, implementation branch)
+
+**Owner rulings applied (2026-11-16).** Items 1 and 2 are one root: the write owner cannot authorize a mutation until it knows the class
+of the path. Shipped skills are read-only to ordinary runs, and "directory location is not proof that a skill is genuinely shipped".
+"Explicit user paths do not acquire write authority merely because they were configured." No manifest unless tracing proves it necessary.
+
+**Measured before (4bf42c1; `~/kriya-evidence/s4-4bf42c1/reproducers_pre_fix_4bf42c1.txt`).** R1: a run for a foreign workspace appended
+an extracted rule and its provenance to a shipped skill. R2: on the direct shape a skeleton and an extracted rule moved the workspace
+repository's HEAD during the run. R3: a folder left in the installation's skills directory was loaded with trusted rules. R4: two
+projects' runs both wrote one explicit directory outside both. R5: the write gate allowed `kriya.yaml` and a workspace skill file.
+**After** (`reproducers_post_fix.txt`): R1 refused, zero bytes; R2 no HEAD move; R3 untrusted; R4 refused for a run; R5 `kriya.yaml` denied.
+
+**First wrong owner.** There was no owner: eleven writers opened skills paths themselves and most committed; the only location rule
+(`new_skill_refusal`) covered one of them. The path class did not exist, so neither the writers nor the write gate could ask it.
+
+**What was built.**
+- `kriya/skills/authority.py`: the closed path classes (`PROJECT_MUTABLE`, `PRODUCT_SHIPPED_READ_ONLY`, `EXPLICIT_SHARED`,
+  `FOREIGN_UNKNOWN`), the closed reason codes, and the positive shipped identity.
+- `SkillEngine.write_skill_path` is THE one write under a skills root (`authorize_skill_write` -> one atomic write or removal);
+  `commit_skill_change` is the one commit funnel. Every former writer goes through them: the engine's own, `record_rule_provenance`,
+  `mark_rules_verified`, `record_conflict_resolution`, `_write_skill_extraction`, `_stage_skill_conflicts`, `knowledge/staging.py`,
+  `knowledge/scaffold.py`, `KnowledgeGuard.generate_skill_template`, and the `kriya skills approve / promote / gaps / create / unverify`
+  commands.
+- Actor. An engine is a RUN unless built with `operator=True` (the person's own `kriya skills` command). A run writes only the project's
+  own roots (the overlay CONFIG derives from the project identity, or a skills root in the repository the workspace belongs to; S3's
+  identity and `inside_bound_repository`, no path prefixes). It never writes the shipped library, even when its workspace is the Kriya
+  installation, and never an explicit root outside the project. An operator command writes what the person names (MA7.4 kept: not the
+  shipped library from another project's directory).
+- Transaction. A run's learning is one transaction, the run shadow, now on every shape and for every root the run may write (the overlay
+  under the state directory too). The direct and milestone shapes start it where they build their engine (`stage_analysis.py`,
+  `begin_run_learning`); the end of `run_generation_workflow` persists it (one commit, `persist_run_learning`) when the candidate passed and
+  drops it otherwise. No writer of a run commits. A run whose transaction cannot start writes no skill
+  (`SKILL_WRITE_RUN_TRANSACTION_UNAVAILABLE`).
+- Shipped identity (the owner's corrected X-17). A folder in the installation's skills directory is trusted as shipped only when the
+  product's own canonical metadata names every file the loader reads with exactly those bytes: the distribution `RECORD` of a wheel
+  installation, or the `HEAD` tree of the product repository in a source checkout (the installation directory must be that work tree's
+  root). Both exist already (`kriya.distribution` requires a wheel's skills to equal the tracked set), so no manifest was created and the
+  STOP condition of the ruling did not arise. Everything else there is loaded untrusted; no canonical metadata means nothing is shipped.
+- Write gate. `PROJECT_AUTHORITY_PATH_DENIED`: a candidate write never reaches a project configuration file (`kriya.yaml`, `kriya.yml`;
+  any depth, any spelling, through any name) nor the workspace's skills root (the per-run relative path the run hands the candidate
+  commit and the pom correction through `AttemptContext.project_authority_relpaths`). The class is the configured root, never the name
+  `skills`.
+
+**Proof.** `tests/test_s4_skill_write_authority.py` (66 tests): the path classes; negative 1 (fifteen writers, a foreign run, zero bytes
+of the shipped library changed); negative 2 (an explicit root, two projects, refused; the operator writes it); negative 3 (a run that does
+not pass, and the real direct-shape `run_generation_workflow` whose model fails after the rule was written: skills directory and HEAD
+unchanged); positive 4 (a passing run: exactly one commit holding each write once); shipped identity by `HEAD` and by `RECORD`; the gate;
+the structural guard (no raw write outside the entry; every production caller names its owner). Mutants in a scratch copy
+(`mutants_s4b.py`): 22 of 22 killed; run 1 had three survivors, one equivalent (a table already in folded form, replaced by the
+mutant of the target's fold) and two real gaps closed before the commit (the failing direct run was not seen to write; a foreign
+`RECORD` masking the checkout's identity). Adjacent files, the architecture and inventory guards, ruff and pylint: see the commit.
+
+**Readings taken (for the owner's review).** (1) "Explicit authority" for an explicit root outside the project is read strictly: no run
+writes it; the person's command does. A first draft that bound the root to its first writing project was dropped as "authority by
+configuration". Consequence: where two projects share one explicit directory, neither run records a verification there (step 1 let the
+second project add itself; that path is closed) and such a project keeps run learning only if its `paths.skills` is unset or inside the
+project. (2) "Failed or unapproved run" is the existing persistence condition of the direct shape (`quality_passed`, as for the held
+verifications since P-B). (3) The candidate write gate denies a configuration file even when the goal names it: the goal-named exception
+needs the approval subject of C-03 and arrives with S7 (`PROJECT-AUTHORITY-GOAL-NAMED-EXCEPTION-001`).
+
+**Known limits.** In a wheel installation an operator's `kriya skills promote` changes a RECORD-listed file, so that skill is no longer
+shipped content and loads untrusted (`SKILLS-WHEEL-OPERATOR-PROMOTE-IDENTITY-001`). A Windows checkout with line-ending conversion would
+not match the `HEAD` blobs (fail closed). The self-correction micro-loop's writer gets the name half of the gate class only; the
+transaction-level check is C-03's. The analyzer's conventions bootstrap writes through the entry but outside a run transaction (it has no
+pass or fail), uncommitted as before.
+
+**Stale test contracts corrected (class C, one root).** Thirty-five calls of a skill writer with no owner now pass the operator owner
+(`tests/_skill_owner.py`); the characterization that every writer moves HEAD is inverted (`test_midrun_workspace_mutations.py`); the
+tests of shadow scope, of the commit message and of an external root follow the ruling. Two were step-1 misses of mine, found here: a
+direct run in `test_skill_commit_failure_truth.py` that did not state the person's acceptance of the knowledge gap, and the analyzer's
+file list without the provenance record.
+
+**Left in S4.** Closed in section 16.
+
+## 16. Slice S4, closure: explicit skills root ruling, MCP workspace authority, the resume knowledge gate, one skill selection text (C-04 item 3, INT-06, BYP-A4-02; 2026-11-16, implementation branch)
+
+**Owner ruling (2026-11-16): option A.** Explicit configuration does not independently grant project or run mutation authority. A run
+writes its own project's skill state; it does not write an explicit skills root outside the project because `paths.skills` points there;
+an operator command is a different actor. "First writer acquires authority" and "configuration alone grants mutation" are rejected. Section
+15's behaviour stands unchanged; no product code changed for the ruling.
+
+**Kernel goldens (class C, harness topology).** `legacy_lessons_staged` and `legacy_dependency_skill_accrued` kept their writable skills
+root at `<tmp>/skills`, outside the workspace. The harness (`tests/state_machine/_kernel_golden.py::_apply_run(skills_in_project=True)`)
+now keeps it at `<workspace>/skills` for those two scenarios, reported once under its own `skills_files` leaf. MEASURED: both scenarios
+reproduce their stored goldens byte for byte (written to a scratch directory and compared with `diff`: no output). **No golden was
+regenerated.** The three calendar tests read the staged files from the configured root.
+
+### 16.1 MCP workspace authority is the bound project root
+
+| Field | Value |
+|---|---|
+| Observation (`TRACED`) | `kriya/mcp/mcp.py` read `os.getcwd()` four times: the default capability profile, the containment mapping (`map_capability_profile_to_containment`: the mount and the protected-authority check), the durable invocation-approval resolver, and the capability-scope resolution in `start_all` |
+| Why it is an authority defect | The working directory is ambient process state. A process standing in another project (an API or GUI host, `working_directory()`), or one that changed directory after loading its configuration, took the mount, the scope labels and the approval lookup for THAT directory |
+| Owner | `MCPManager._workspace_root()` -> `kriya/config/resolution.py::bound_project_root(cfg)`: the authority root S3's `bind_project_identity` put on the configuration (`load_config` binds it; `require_run_project` binds a run's). One value for scope, mount and approval |
+| Client | `MCPClient(workspace_root=...)` is handed the root by the manager; it never reads the working directory |
+| Fail closed | A configuration bound to no project (or no configuration): `ProjectStateError(PROJECT_IDENTITY_MISSING)` in `start_all` before a client exists, and from the approval resolver (a denial at `MCPTool._run`'s boundary). A client handed no root: `ContainmentSetupError` naming `MCP_WORKSPACE_UNBOUND`, before its containment is prepared |
+| Unchanged | A planned call to a write-granted MCP tool stays `TOOL_OPERATOR_ONLY`; no candidate-mounted transactional MCP; the operator commands (`kriya mcp ...`, `cli.py::_mcp_workspace_root`) still act where the operator stands - the approval identity is the authority root's (`workspace_identity`), so an approval granted from `<repo>` or `<repo>/sub` is the one the manager reads |
+| Reading taken | The bound root is the AUTHORITY root (D-001: the repository root). A process invoked in `<repo>/sub` used to scope and mount `<repo>/sub`; it now scopes and mounts `<repo>`, the root the configuration's own path validation (`resolve_config_state`) and the approval identity already used. In every other invocation the value is the same as before |
+| Proof | `tests/test_s4_workspace_and_selection_authority.py`: a server started while the process stands in a foreign directory is scoped and mapped for the bound project (the same declaration resolves `WORKSPACE_RELATIVE` for one root and `HOST_PATH` for the other, so the root used is observable); the working directory's approval is not the project's and the project's is found from anywhere; unbound configuration and unbound client refused before anything is prepared; an ordinary read-only server still starts and registers. Mutants M1-M8, B1 killed |
+
+### 16.2 INT-06: a checkpoint is not knowledge truth
+
+`stage_knowledge_guard.py` set `knowledge_risk_confirmed = True` whenever `resume_state` existed; the checkpoint records no acceptance, so
+a resumed direct run passed an open gap silently (`BYP-A4-08`). The line is removed: the stage already re-evaluates the current coverage
+(the Skills owner's answer for the project), and a resumed unit is now judged like a fresh one, by that answer and by the acceptance THIS
+invocation carries. An open gap returns `knowledge_gap` again; the CLI's existing handling asks again and re-invokes with the acceptance
+and the same resume arguments (`cli.py::_generate_impl`, TRACED). Resume and planning are otherwise untouched. Proof: checkpoint + gap
+still open -> `knowledge_gap`; checkpoint + this invocation's acceptance -> proceeds; checkpoint + the knowledge now trusted in the
+project's overlay -> proceeds with no gap (`test_a_resumed_unit_is_judged_by_the_current_knowledge_and_not_by_its_checkpoint`, and the
+stage parameters in `tests/test_work_unit_stages.py`, whose row "a resumed checkpoint already cleared the gate" pinned the defect).
+Mutants R1, R2 killed.
+
+### 16.3 One skill selection text per run (BYP-A4-02)
+
+The trace answered YES. `MEASURED` (A4 P4, reproduced by the new test under mutant K1): the Planner selects skills over the user's goal;
+a unit selected over its composed goal, which also holds the Planner's description, acceptance and verification text. Planner text could
+therefore add a skill the plan was not made under (Planner `[alpha-skill]`, unit `[alpha-skill, beta-skill]`) and a version in Planner
+text could remove one. Fix at the existing owner's call site (`stage_analysis.py::analyze_work_unit`): the predicate
+`skill_applies_to_goal` is given `ctx.grounding_goal or goal`, the user's goal, the same text `planning_skill_constraints` reads. A direct
+run's goal is the user's text already (unchanged; negative control). No new machinery. Consequence stated plainly: a skill that only the
+Planner's own wording would have selected is no longer rendered to that unit's Developer. Mutants K1, K2 killed.
+
+### 16.4 Readings kept, and what was NOT done
+
+Direct-shape skill persistence stays gated by `quality_passed`; a run write to `kriya.yaml` / `kriya.yml` stays denied until S7; two
+projects naming one external explicit skills root both get no run-write authority there. `SKILLS-WHEEL-OPERATOR-PROMOTE-IDENTITY-001`
+stays registered (no current product path needs it). The self-correction micro-loop's writer: `TRACED` no reachable C-04 bypass - its
+patch tool refuses any file outside the attempt's `writable_files` (the approved scope, whose members passed the main gate), and the
+configuration names are denied by every `AuthorizedFileWriter`; the run's skills-root half stays the recorded path-class enhancement
+(`PROJECT-AUTHORITY-GOAL-NAMED-EXCEPTION-001`).
+
+**Stale test contracts corrected (class C / D).** (1) Four scaffold tests with no owner (`test_knowledge.py`, `test_s3_project_state_stores.py`):
+the operator owner. (2) One family, MCP tests that start a server with a hand-built configuration carrying no project, or a client with
+no root: shared fix `tests/_mcp_containment_standin.py::bound` / `client_kwargs` (binds to the directory the test stands in, what the
+working directory used to supply). (3) Two stage doubles in `test_work_unit_stages.py` that did not accept the Skills owner keyword
+section 15 added (found by the mutant baseline; they now assert which owner they are handed). (4) A step-1 miss of mine, red at
+`4bf42c1`: `test_s5_mcp_containment.py`'s inventory of modules that construct an `MCPClient` did not list the two that build one only as
+an `MCPTool`'s never-started client (`test_s18_planned_tool_governance.py`, `test_s4_knowledge_truth.py`).
+
+**Not run (by the lightweight slice process).** The full suite, all of `tests/test_workflow.py`, the whole state-machine tier, an owner
+exact-SHA run, and the 22 section-15 mutants again (no later edit touched their branches).

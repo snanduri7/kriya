@@ -2344,7 +2344,7 @@ def skills_gaps(ctx: click.Context, skill_name: str, interactive: bool) -> None:
     """Show targeted questions for whatever the readiness rubric says is still thin,
     instead of a blank rules.txt - optionally answer them right here with --interactive."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine.from_config(cfg)
+    se = SkillEngine.from_config(cfg, operator=True)
     se.discover_and_load()
 
     try:
@@ -2372,7 +2372,7 @@ def skills_gaps(ctx: click.Context, skill_name: str, interactive: bool) -> None:
             category = question.split(":", 1)[0].lstrip("[")
             answer = click.prompt("     Answer (blank to skip)", default="", show_default=False)
             if answer.strip():
-                written = scaffold.record_scaffold_answer(s.source_path, category, answer.strip())
+                written = scaffold.record_scaffold_answer(s.source_path, category, answer.strip(), engine=se)
                 if written:
                     click.secho("     Recorded.", fg="green")
                 else:
@@ -2398,7 +2398,7 @@ def skills_create(ctx: click.Context, skill_name: str) -> None:
 
     os.makedirs(cfg.paths.skills, exist_ok=True)
 
-    se = SkillEngine.from_config(cfg)
+    se = SkillEngine.from_config(cfg, operator=True)
     try:
         path = se.create_skill_skeleton(skill_name)
         click.secho(f"Successfully created skill skeleton at: {path}", fg="green")
@@ -2418,6 +2418,7 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
         skill_folder = os.path.join(cfg.paths.skills, skill_name)
     staged_file = os.path.join(skill_folder, "staged_rules.txt")
     rules_file = os.path.join(skill_folder, "rules.txt")
+    se = SkillEngine.from_config(cfg, operator=True)      # C-04: the operator's writes go through the Skills owner's one entry too
 
     approved_anything = False
 
@@ -2440,16 +2441,12 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
             unresolved_conflicts = [line for line in staged_lines if line.startswith("[CONFLICT]")]
 
             if promotable:
-                with open(rules_file, "a", encoding="utf-8") as rf:
-                    for line in promotable:
-                        rf.write(f"\n{line}")
+                se.write_skill_path(rules_file, SkillEngine.existing_text(rules_file) + "".join(f"\n{line}" for line in promotable))
                 approved_anything = True
                 click.secho(f"Approved and promoted {len(promotable)} rule(s) to rules.txt for skill '{skill_name}'.", fg="green")
 
             if unresolved_conflicts:
-                with open(staged_file, "w", encoding="utf-8") as sf:
-                    for line in unresolved_conflicts:
-                        sf.write(f"{line}\n")
+                se.write_skill_path(staged_file, "".join(f"{line}\n" for line in unresolved_conflicts))
                 click.secho(
                     f"{len(unresolved_conflicts)} flagged conflict(s) for skill '{skill_name}' were NOT "
                     "auto-promoted - each needs a manual decision. Review them and edit rules.txt/"
@@ -2457,7 +2454,7 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
                     fg="yellow",
                 )
             else:
-                os.remove(staged_file)
+                se.write_skill_path(staged_file, None)
         except Exception as e:
             click.secho(f"Failed to approve staged rules: {e}", fg="red")
 
@@ -2465,7 +2462,7 @@ def skills_approve(ctx: click.Context, skill_name: str) -> None:
     staged_facts = staging.load_staged(skill_folder)
     if staged_facts:
         try:
-            promoted = staging.promote_staged(skill_folder)
+            promoted = staging.promote_staged(skill_folder, engine=se)
             approved_anything = True
             click.secho(f"Approved and promoted {len(promoted)} structured knowledge fact(s) for skill '{skill_name}'.", fg="green")
         except Exception as e:
@@ -2561,16 +2558,15 @@ def skills_promote(ctx: click.Context, source_skill: str, target_skill: str, rul
         click.secho("Aborted.", fg="red")
         return
 
-    with open(target_rules_file, "a", encoding="utf-8") as tf:
-        for r in to_promote:
-            tf.write(f"\n{r}")
-    from kriya.skills.skill import git_commit_if_tracked
-    git_commit_if_tracked(target_rules_file, f"Kriya: promote {len(to_promote)} rule(s) from '{source_skill}' into skill '{target_skill}'")
+    # C-04: the one operator command that writes the shipped library, through the Skills owner's one entry (an engine the person points
+    # at the library itself). In a source checkout the commit below makes the promoted rule part of the product's tracked content.
+    target_engine = SkillEngine(global_skills_dir, load_global=False, operator=True)
+    target_engine.write_skill_path(target_rules_file, SkillEngine.existing_text(target_rules_file) + "".join(f"\n{r}" for r in to_promote))
+    target_engine.commit_skill_change(target_rules_file, f"Kriya: promote {len(to_promote)} rule(s) from '{source_skill}' into skill '{target_skill}'")
 
     # A human explicitly vouching for a rule is at least as strong a trust signal as an
     # automated passing Runtime Verification run - mark the target skill verified too,
     # so future generations stop being asked to strengthen it.
-    target_engine = SkillEngine(global_skills_dir, load_global=False)
     target_engine.discover_and_load()
     target_engine.mark_verified(target_skill, context=f"promoted from '{source_skill}'")
 
@@ -2591,7 +2587,7 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
     show <name>' first to see when/what it was last verified for.
     """
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine.from_config(cfg)
+    se = SkillEngine.from_config(cfg, operator=True)
     se.discover_and_load()
 
     try:
@@ -3595,8 +3591,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                             cutoff_date_str=cutoff,
                             offline=knowledge_config.offline_mode
                         )
+                        operator_engine = SkillEngine.from_config(cfg, operator=True)      # the person confirmed the scaffold above
                         for g in unacked_gaps:
-                            t_dir = guard.generate_skill_template(g["library"], g["version"])
+                            t_dir = guard.generate_skill_template(g["library"], g["version"], engine=operator_engine)
                             click.secho(f"Created skill template at: {t_dir}", fg="green")
                         click.secho("\n💡 INFO: Please populate the scaffolded files with specific API rules or version matching logic.", fg="cyan")
                         click.secho("  - Update skill.yaml to set tags and version range support (e.g. 'supported_versions: >=2.18.0').", fg="cyan")

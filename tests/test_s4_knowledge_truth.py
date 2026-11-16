@@ -18,6 +18,7 @@ import json
 import os
 
 import pytest
+from _skill_owner import operator_owner
 from test_s3_project_state_namespace import A_FILES, B_FILES, _config, _project, _real_engine
 
 from kriya.context.workspace_identity import workspace_identity
@@ -96,11 +97,10 @@ def test_an_empty_folder_named_after_the_library_leaves_the_gap(places):
 def test_kriyas_own_scaffolds_leave_the_gap(places):
     root, workspace = places
     guard = KnowledgeGuard(skills_dir=str(root), cutoff_date_str="2023-12-01", offline=True)
-    scaffold = guard.generate_skill_template(WIDGET, "2.16.0")
+    scaffold = guard.generate_skill_template(WIDGET, "2.16.0", engine=operator_owner(root, is_root=True))   # the person confirmed the scaffold
     assert sorted(os.listdir(scaffold)) == ["examples", "instructions.md", "rules.txt", "skill.yaml"]
+    operator_owner(root, is_root=True).create_skill_skeleton("widget-core")                                  # `kriya skills create`
     engine = _engine(root, workspace)
-    engine.create_skill_skeleton("widget-core")
-    engine.discover_and_load()
     loaded = {skill.name: skill for skill in engine.list_skills()}
     assert set(loaded) == {"com.kriyaprobe.widgets-widget-core", "widget-core"}  # both ARE loaded skills whose tags name the library
     assert all(skill.rules == [] and skill.trusted_rules == [] for skill in loaded.values())
@@ -153,7 +153,7 @@ def test_a_rule_a_run_wrote_is_trusted_only_once_a_run_verified_it(places):
     skill = engine.get_skill("widget-core")
     assert skill.trusted_rules == [] and _split_rules_by_verification(skill) == ([], [RULE, OTHER_RULE])
     assert _gaps(root, workspace, engine=engine) == [WIDGET]
-    assert mark_rules_verified(folder, [OTHER_RULE]) is True
+    assert mark_rules_verified(folder, [OTHER_RULE], engine=operator_owner(folder)) is True
     engine.discover_and_load()
     skill = engine.get_skill("widget-core")
     assert _split_rules_by_verification(skill) == ([OTHER_RULE], [RULE])
@@ -200,7 +200,8 @@ def test_rules_a_run_creates_with_a_skill_are_unverified_and_do_not_close_the_ga
     """The analyzer's conventions bootstrap writes model-derived rules through ``create_skill``. Without a record they would read as authored
     by the owner of the skills root: trusted on the next load."""
     root, workspace = places
-    engine = _engine(root, workspace)
+    engine = SkillEngine(str(root), load_global=False, load_cwd=False, workspace_path=str(workspace), project_overlay=str(root))  # the project's own root
+    engine.discover_and_load()
     created = engine.create_skill("widget-core", {"name": "widget-core", "description": "d", "tags": ["widget-core"]},
                                   "# instructions\n", f"# derived\n{RULE}\n{OTHER_RULE}\n", commit_message=None)
     with open(os.path.join(created, "rule_provenance.json"), encoding="utf-8") as handle:
@@ -219,10 +220,17 @@ def test_rules_a_run_creates_with_a_skill_are_unverified_and_do_not_close_the_ga
 def test_what_one_projects_run_proved_in_a_shared_skills_directory_is_not_knowledge_for_another(tmp_path):
     shared = tmp_path / "shared-skills"
     a, b = _project(tmp_path, "A", A_FILES), _project(tmp_path, "B", B_FILES)
-    KnowledgeGuard(skills_dir=str(shared), cutoff_date_str="2023-12-01", offline=True).generate_skill_template(WIDGET, "2.16.0")
+
+    def _owner_engine(project):
+        """A's own skills root (its overlay), which B's configuration also names as an explicit directory (the shared-directory case)."""
+        engine = SkillEngine(str(shared), load_global=False, load_cwd=False, workspace_path=str(project), project_overlay=str(shared))
+        engine.discover_and_load()
+        return engine
+
+    KnowledgeGuard(skills_dir=str(shared), cutoff_date_str="2023-12-01", offline=True).generate_skill_template(WIDGET, "2.16.0", engine=_owner_engine(a))
     assert _gaps(shared, a) == [WIDGET] and _gaps(shared, b) == [WIDGET]  # A's scaffold closes neither gate (MEASURED before: it closed B's)
     folder = _skill(shared, "widget-core", provenance=[_record(RULE)])  # a rule A's run extracted: unverified
-    engine_a = _engine(shared, a)
+    engine_a = _owner_engine(a)
     engine_a.hold_verifications([HeldSkillVerification("widget-core", "widget-core 2.16.0", (RULE,))])
     assert engine_a.apply_held_verifications() == []  # A's run verified its candidate and committed: the rule's verification is persisted
     with open(os.path.join(folder, "rule_provenance.json"), encoding="utf-8") as handle:
@@ -230,14 +238,16 @@ def test_what_one_projects_run_proved_in_a_shared_skills_directory_is_not_knowle
     assert record["verified"] is True and record["verified_for"] == [workspace_identity(a)]
     assert _gaps(shared, a) == [] and _engine(shared, a).get_skill("widget-core").trusted_rules == [RULE]
     assert _gaps(shared, b) == [WIDGET] and _engine(shared, b).get_skill("widget-core").trusted_rules == []
-    # B's own committed run earns it for B, and A keeps it.
+    # C-04 (S4 step 2): to B the directory is an explicit root OUTSIDE its project. A configured path gives B's run no write authority
+    # there, so B's own passing run cannot record a verification in it: the persistence is refused and reported, A's record is unchanged,
+    # and B's gate stays open. (Step 1 let B add itself to the record; the owner's ruling on explicit paths replaced that.)
     engine_b = _engine(shared, b)
     engine_b.hold_verifications([HeldSkillVerification("widget-core", "widget-core 2.16.0", (RULE,))])
-    assert engine_b.apply_held_verifications() == []
+    assert [failure["operation"] for failure in engine_b.apply_held_verifications()] == ["skill_verification"]
     with open(os.path.join(folder, "rule_provenance.json"), encoding="utf-8") as handle:
         (record,) = json.load(handle)
-    assert record["verified_for"] == [workspace_identity(a), workspace_identity(b)]
-    assert _gaps(shared, a) == [] and _gaps(shared, b) == []
+    assert record["verified_for"] == [workspace_identity(a)]
+    assert _gaps(shared, a) == [] and _gaps(shared, b) == [WIDGET]
 
 
 def test_a_malformed_project_binding_binds_no_project(places):
@@ -249,7 +259,7 @@ def test_a_malformed_project_binding_binds_no_project(places):
 def test_an_operators_verification_carries_no_project_list_and_is_left_alone(places):
     root, workspace = places
     folder = _skill(root, "widget-core", provenance=[_record(RULE, verified=True)])
-    assert mark_rules_verified(folder, [RULE], project="some-project") is None  # nothing to change: not narrowed to one project
+    assert mark_rules_verified(folder, [RULE], project="some-project", engine=operator_owner(folder)) is None  # nothing to change: not narrowed to one project
     assert _engine(root, workspace).get_skill("widget-core").trusted_rules == [RULE]
 
 
@@ -282,7 +292,8 @@ def test_the_unit_stage_asks_the_skills_owner_and_a_scaffold_does_not_open_it(tm
     cfg = _config(monkeypatch, a)
     cfg.knowledge.offline_mode = True
     engine, _llm = _real_engine(cfg)
-    KnowledgeGuard(skills_dir=cfg.paths.skills, cutoff_date_str="2023-12-01", offline=True).generate_skill_template(WIDGET, "2.16.0")
+    KnowledgeGuard(skills_dir=cfg.paths.skills, cutoff_date_str="2023-12-01", offline=True).generate_skill_template(
+        WIDGET, "2.16.0", engine=SkillEngine.from_config(cfg, workspace_path=str(a)))
     result, _ctx = _stage(engine, a)
     assert result["status"] == "knowledge_gap" and [gap["library"] for gap in result["gap_report"]["gaps"]] == [WIDGET]
     _skill(cfg.paths.skills, "widget-core")  # the operator supplies the knowledge in the project's overlay
@@ -297,7 +308,8 @@ def test_the_enforce_entry_asks_the_skills_owner_and_a_scaffold_does_not_open_it
 
     a, cfg = _git_project(tmp_path, monkeypatch)
     cfg.knowledge.offline_mode = True
-    KnowledgeGuard(skills_dir=cfg.paths.skills, cutoff_date_str="2023-12-01", offline=True).generate_skill_template(WIDGET, "2.16.0")
+    KnowledgeGuard(skills_dir=cfg.paths.skills, cutoff_date_str="2023-12-01", offline=True).generate_skill_template(
+        WIDGET, "2.16.0", engine=SkillEngine.from_config(cfg, workspace_path=str(a)))
     engine, _llm = _real_engine(cfg)
     calls = []
 

@@ -839,7 +839,7 @@ def test_issue11_a_candidate_pom_correction_is_a_visible_staged_candidate_write(
     _write(wt, "app/App.java", b"public class App {}\n")
     state = GenerationState()
     ctx = SimpleNamespace(
-        worktree_path=str(wt), workspace_path=str(wt), protected_relpath=None, allowed_write_relpaths=(),
+        worktree_path=str(wt), workspace_path=str(wt), protected_relpath=None, project_authority_relpaths=(), allowed_write_relpaths=(),
         write_scope_mode=WriteScopeMode.UNRESTRICTED, established_files=[],
         kernel=SimpleNamespace(config=SimpleNamespace(paths=SimpleNamespace(
             skills=str(wt / "skills"), memory=str(tmp_path / "memory")))),

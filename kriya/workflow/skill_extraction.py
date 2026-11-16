@@ -179,7 +179,7 @@ def _filter_misattributed_extraction(extraction: Dict[str, Any], target: Any, si
     return {"rules": kept_rules, "examples": kept_examples, "conflicts": extraction.get("conflicts") or []}
 
 
-def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str = "unknown") -> None:
+def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str = "unknown", *, engine: Any = None) -> bool:
     """Writes newly extracted rules/examples straight into a skill's own files - per
     the design decision that user-supplied-in-response-to-a-direct-question content is
     a strong enough intent signal to skip the staged/approve flow used for unattended
@@ -190,10 +190,19 @@ def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str 
     per new rule in a parallel provenance file (kriya/skills/skill.py -
     record_rule_provenance) - not a rules.txt format change, so existing skills need
     no migration. Every newly-written rule starts unverified there until a passing
-    Runtime Verification run proves it (see mark_rules_verified)."""
-    from kriya.skills.skill import git_commit_if_tracked, record_rule_provenance
+    Runtime Verification run proves it (see mark_rules_verified).
+
+    C-04: every byte goes through ``engine`` (the Skills owner's one write entry, `SkillEngine.write_skill_path`). A write the owner
+    refuses (the shipped library, a root bound to another project) changes nothing and returns False; the run goes on."""
+    from kriya.skills.skill import SkillWriteRefused, record_rule_provenance, skill_write_owner
     if not skill.source_path:
-        return
+        return False
+    engine = skill_write_owner(engine, os.path.dirname(os.path.abspath(skill.source_path)))
+    try:
+        engine.authorize_skill_write(os.path.join(skill.source_path, "rules.txt"))
+    except SkillWriteRefused as refusal:
+        logger.warning(f"Extracted content for skill '{skill.name}' not written ({refusal.reason_code}): {refusal}")
+        return False
 
     new_rules = extraction.get("rules") or []
     if new_rules:
@@ -211,17 +220,14 @@ def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str 
             effective_existing.append(r)
         if to_add:
             rules_file = os.path.join(skill.source_path, "rules.txt")
-            with open(rules_file, "a", encoding="utf-8") as rf:
-                for r in to_add:
-                    rf.write(f"\n{r}")
-            git_commit_if_tracked(rules_file, f"Kriya: add {len(to_add)} rule(s) to skill '{skill.name}' from supplied reference material")
+            engine.write_skill_path(rules_file, _existing_text(rules_file) + "".join(f"\n{r}" for r in to_add))
+            engine.commit_skill_change(rules_file, f"Kriya: add {len(to_add)} rule(s) to skill '{skill.name}' from supplied reference material")
             for r in to_add:
-                record_rule_provenance(skill.source_path, r, source)
+                record_rule_provenance(skill.source_path, r, source, engine=engine)
 
     new_examples = extraction.get("examples") or {}
     if new_examples:
         examples_dir = os.path.join(skill.source_path, "examples")
-        os.makedirs(examples_dir, exist_ok=True)
         for basename, content in new_examples.items():
             safe_basename = os.path.basename(basename)
             if not safe_basename:
@@ -238,28 +244,42 @@ def _write_skill_extraction(skill: Any, extraction: Dict[str, Any], source: str 
             if os.path.exists(example_path):
                 logger.info(f"Skipping example '{safe_basename}' for skill '{skill.name}' - a file already exists at that path and existing examples are never overwritten by extraction.")
                 continue
-            with open(example_path, "w", encoding="utf-8") as ef:
-                ef.write(content)
-            git_commit_if_tracked(example_path, f"Kriya: add example '{safe_basename}' to skill '{skill.name}' from supplied reference material")
+            engine.write_skill_path(example_path, content)
+            engine.commit_skill_change(example_path, f"Kriya: add example '{safe_basename}' to skill '{skill.name}' from supplied reference material")
+    return True
 
 
-def _stage_skill_conflicts(skill: Any, conflicts: List[Dict[str, str]]) -> None:
+def _existing_text(path: str) -> str:
+    """The file's present text ('' when absent): an append is a whole-file write through the one entry."""
+    if not os.path.exists(path):
+        return ""
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def _stage_skill_conflicts(skill: Any, conflicts: List[Dict[str, str]], *, engine: Any = None) -> None:
     """Surfaces candidate rules that contradict a skill's existing rules into the same
     staged_rules.txt file (and 'kriya skills list' display) already used for
     auto-extracted lessons, so a human notices and resolves them - rather than either
     silently discarding the new information or silently overwriting the existing rule."""
     if not skill.source_path or not conflicts:
         return
-    from kriya.skills.skill import git_commit_if_tracked
+    from kriya.skills.skill import SkillWriteRefused, skill_write_owner
+    engine = skill_write_owner(engine, os.path.dirname(os.path.abspath(skill.source_path)))
     staged_file = os.path.join(skill.source_path, "staged_rules.txt")
-    with open(staged_file, "a", encoding="utf-8") as sf:
-        for c in conflicts:
-            candidate = _sanitize_for_flat_file_line(c.get("candidate_rule", ""))
-            existing = _sanitize_for_flat_file_line(c.get("conflicts_with", ""))
-            reason = _sanitize_for_flat_file_line(c.get("reason", ""))
-            if candidate:
-                sf.write(f"\n[CONFLICT] {candidate} -- conflicts with existing rule: '{existing}' ({reason})")
-    git_commit_if_tracked(staged_file, f"Kriya: flag {len(conflicts)} conflicting candidate rule(s) for skill '{skill.name}'")
+    lines = []
+    for c in conflicts:
+        candidate = _sanitize_for_flat_file_line(c.get("candidate_rule", ""))
+        existing = _sanitize_for_flat_file_line(c.get("conflicts_with", ""))
+        reason = _sanitize_for_flat_file_line(c.get("reason", ""))
+        if candidate:
+            lines.append(f"\n[CONFLICT] {candidate} -- conflicts with existing rule: '{existing}' ({reason})")
+    try:
+        engine.write_skill_path(staged_file, _existing_text(staged_file) + "".join(lines))
+    except SkillWriteRefused as refusal:
+        logger.warning(f"Conflicting candidate rule(s) for skill '{skill.name}' not staged ({refusal.reason_code}): {refusal}")
+        return
+    engine.commit_skill_change(staged_file, f"Kriya: flag {len(conflicts)} conflicting candidate rule(s) for skill '{skill.name}'")
 
 
 def _skill_verification_context(skill: Any, goal: str) -> str:

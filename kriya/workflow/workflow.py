@@ -2444,8 +2444,8 @@ class WorkflowEngine:
         the supplied values are used as-is - mirroring the EXISTING
         resume_state-driven bypass immediately below each stage (same shape,
         deliberately a SEPARATE, dedicated mechanism rather than overloading
-        resume_state itself: resume_state also flips knowledge_risk_confirmed
-        and participates in checkpoint/fingerprint-drift semantics that have
+        resume_state itself: resume_state participates in
+        checkpoint/fingerprint-drift semantics that have
         nothing to do with "the caller already knows the plan/design", and
         reusing it here would silently pull in those unrelated effects).
         Every OTHER stage (KnowledgeGuard, repository analysis, skill
@@ -2970,6 +2970,9 @@ class WorkflowEngine:
                         return {**decision.result(), "goal": goal, "workspace_path": workspace_path, "run_id": trace_id}
 
         protected_relpath = _resolve_protected_relpath(workspace_path, protected_source_file)
+        # C-04: the project's skills root, when it is inside the workspace, is a project-authority path no candidate write reaches.
+        from kriya.policy.filesystem import project_authority_relpaths as _project_authority_relpaths
+        project_authority_relpaths = _project_authority_relpaths(workspace_path, getattr(getattr(self.kernel.config, "paths", None), "skills", None))
 
         # Stages 0-3 of this work unit (full modularization W4, E3): KnowledgeGuard, analysis + skills + Graph RAG +
         # the learned reference, the Plan, the Architect incl. Stage 2A/2B, then the active-skill snapshot - driven by
@@ -3084,6 +3087,7 @@ class WorkflowEngine:
             run_trace=run_trace, grounding_goal=grounding_goal, work_unit=work_unit,
             verification_contract=verification_contract, resume_plan=resume_plan,
             resume_restored_ledger=resume_restored_ledger, protected_relpath=protected_relpath,
+            project_authority_relpaths=project_authority_relpaths,
             planned_source_files=planned_source_files, recovery_contract_block=recovery_contract_block,
             grounded_locations=grounded_locations, established_files=established_files,
             authorized_semantic_regions=authorized_semantic_regions, required_verification=required_verification,
@@ -3211,7 +3215,11 @@ class WorkflowEngine:
         if quality_passed and skill_engine is not None:
             skill_engine.hold_verifications(state.pending_skill_verifications.values())
             if skill_engine_override is None:
-                state.post_commit_persistence_errors.extend(skill_engine.apply_held_verifications())
+                # C-04: the run's whole learning (the held verifications and everything written through the one skill-write entry
+                # since Stage 1) becomes durable here, once, as one transaction - never earlier.
+                state.post_commit_persistence_errors.extend(skill_engine.persist_run_learning())
+        elif skill_engine is not None and skill_engine_override is None:
+            skill_engine.discard_run_learning()       # a run that did not pass leaves no skill it learned behind
         state.pending_skill_verifications.clear()
 
         return completed_result(

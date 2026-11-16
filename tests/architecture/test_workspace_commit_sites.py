@@ -116,7 +116,7 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
         "`kriya generate` knowledge-gap resolution (a human confirms the scaffold)", "<skills>/<library>-<version>/", SKILLS_IN_REPO, True, False,
         NEVER_IN_RUN, NEVER_IN_RUN, "no", "none", "CLI", "SAFE", "closed", "Before the run starts."),
     # --- the verification promotion (P-B) ---------------------------------------------------------------------------------
-    ("kriya/workflow/workflow.py", "WorkflowEngine.run_generation_workflow", "apply_held_verifications"): Site(
+    ("kriya/workflow/workflow.py", "WorkflowEngine.run_generation_workflow", "persist_run_learning"): Site(
         "P-B: standalone run after the terminal apply", "<skills>/<skill>/skill.yaml + rule provenance", SKILLS_IN_REPO, True, True,
         standalone=POST_TERMINAL, enforce="n/a: a controller-owned run only hands over", later_bound_gate="no",
         semantic="VERIFICATION", same_run_reader="none after the flush", disposition="SAFE", status="closed"),
@@ -134,9 +134,6 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
     ("kriya/skills/skill.py", "SkillEngine._set_skill_yaml_field", "_set_skill_yaml_fields"): Site(
         "SkillEngine", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
         "see callers", "FUNNEL", "CHAIN", "closed", "Reached from mark_gap_acknowledged (a stage_analysis row) and nothing else."),
-    ("kriya/skills/skill.py", "SkillEngine._set_skill_yaml_fields", "git_commit_if_tracked"): Site(
-        "SkillEngine", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
-        "see callers", "FUNNEL", "CHAIN", "closed", "Reached from mark_verified / mark_unverified / _set_skill_yaml_field."),
     ("kriya/skills/skill.py", "SkillEngine.mark_gap_acknowledged", "_set_skill_yaml_field"): Site(
         "SkillEngine", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
         "see callers", "FUNNEL", "CHAIN", "closed",
@@ -147,15 +144,17 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
     ("kriya/skills/skill.py", "SkillEngine.mark_unverified", "_set_skill_yaml_fields"): Site(
         "SkillEngine", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN, "no", "none",
         "CLI", "CHAIN", "closed", "Only `kriya skills unverify` (a CLI row) calls it."),
-    ("kriya/skills/skill.py", "SkillEngine.apply_held_verifications", "mark_verified"): Site(
+    ("kriya/skills/skill.py", "SkillEngine._apply_held", "mark_verified"): Site(
         "SkillEngine", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, POST_TERMINAL, POST_TERMINAL, "no", "none",
         "VERIFICATION", "SAFE", "closed", "The only in-run caller of mark_verified (P-B)."),
-    ("kriya/skills/skill.py", "SkillEngine.apply_held_verifications", "mark_rules_verified"): Site(
+    ("kriya/skills/skill.py", "SkillEngine._apply_held", "mark_rules_verified"): Site(
         "SkillEngine", "<skills>/<skill>/rule provenance", SKILLS_IN_REPO, True, True, POST_TERMINAL, POST_TERMINAL, "no", "none",
         "VERIFICATION", "SAFE", "closed", "The only in-run caller of mark_rules_verified (P-B)."),
-    ("kriya/skills/skill.py", "SkillEngine.create_skill", "git_commit_if_tracked"): Site(
-        "SkillEngine", "<skills>/<new skill>/", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers", "see callers",
-        "FUNNEL", "CHAIN", "closed", "Reached from create_skill_skeleton (the two stage rows above and `kriya skills create`) only; the analyzer bootstrap passes commit_message=None and commits nothing (WAVE8 OI-120)."),
+    ("kriya/skills/skill.py", "SkillEngine.commit_skill_change", "git_commit_if_tracked"): Site(
+        "SkillEngine", "the git work tree that holds the written skill path", SKILLS_IN_REPO, False, True, "see callers", "see callers",
+        "see callers", "see callers", "FUNNEL", "CHAIN", "closed",
+        "C-04 (S4): the ONE commit funnel of every skill writer. An operator's command commits here; a RUN's engine never does (its learning "
+        "is one commit after the terminal commit: persist_run_learning), so no writer below it moves a bound HEAD."),
     ("kriya/skills/skill.py", "SkillEngine.create_skill_skeleton", "create_skill"): Site(
         "SkillEngine", "<skills>/<new skill>/", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers", "see callers",
         "FUNNEL", "CHAIN", "closed", "The skeleton path of the one Skills creation function (WAVE8 OI-120); same callers as before."),
@@ -164,23 +163,8 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
         SKILLS_IN_REPO, True, False, PRE_SANDBOX, PRE_SANDBOX, "no", "the skill registry the run loads right after this one-time pre-run index", "LEARNING",
         "RUN_LOCAL_DEFER_DURABILITY", "closed",
         "WAVE8 OI-120: writes files through the Skills owner's create_skill with commit_message=None, exactly as the old plain-open writer did (no repository commit, so no HEAD move in the bound window); refused for the shared install directory."),
-    ("kriya/skills/skill.py", "mark_rules_verified", "git_commit_if_tracked"): Site(
-        "skills subsystem", "<skills>/<skill>/rule provenance", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
-        "see callers", "FUNNEL", "CHAIN", "closed", "Reached only from apply_held_verifications."),
-    ("kriya/skills/skill.py", "record_conflict_resolution", "git_commit_if_tracked"): Site(
-        "skills subsystem", "<skills>/.skill_conflicts.json", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
-        "see callers", "FUNNEL", "CHAIN", "closed", "Reached only from stage_analysis (classified)."),
-    ("kriya/skills/skill.py", "record_rule_provenance", "git_commit_if_tracked"): Site(
-        "skills subsystem", "<skills>/<skill>/rule provenance", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
-        "see callers", "FUNNEL", "CHAIN", "closed", "Reached from _write_skill_extraction (classified) and the CLI-only knowledge staging."),
-    ("kriya/workflow/skill_extraction.py", "_write_skill_extraction", "git_commit_if_tracked"): Site(
-        "stage 1.2 / 2B extraction writer", "<skills>/<skill>/rules.txt, examples/", SKILLS_IN_REPO, True, True, "see callers", "see callers",
-        "see callers", "see callers", "FUNNEL", "CHAIN", "closed", "Reached from the stage_analysis / stage_architecture rows."),
     ("kriya/workflow/skill_extraction.py", "_write_skill_extraction", "record_rule_provenance"): Site(
         "stage 1.2 / 2B extraction writer", "<skills>/<skill>/rule provenance", SKILLS_IN_REPO, True, True, "see callers", "see callers",
-        "see callers", "see callers", "FUNNEL", "CHAIN", "closed", "Reached from the stage_analysis / stage_architecture rows."),
-    ("kriya/workflow/skill_extraction.py", "_stage_skill_conflicts", "git_commit_if_tracked"): Site(
-        "stage 1.2 / 2B conflict staging writer", "<skills>/<skill>/staged_rules.txt", SKILLS_IN_REPO, True, True, "see callers", "see callers",
         "see callers", "see callers", "FUNNEL", "CHAIN", "closed", "Reached from the stage_analysis / stage_architecture rows."),
     # --- CLI-only (a human command, never inside a generation run) ----------------------------------------------------------
     ("kriya/cli.py", "skills_approve", "promote_staged"): Site(
@@ -192,24 +176,15 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
     ("kriya/cli.py", "skills_unverify", "mark_unverified"): Site(
         "`kriya skills unverify`", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN, "no", "none", "CLI",
         "SAFE", "closed"),
-    ("kriya/cli.py", "skills_promote", "git_commit_if_tracked"): Site(
-        "`kriya skills promote`", "<skills>/<skill>/rules.txt", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN, "no", "none", "CLI",
-        "SAFE", "closed"),
     ("kriya/cli.py", "skills_promote", "mark_verified"): Site(
         "`kriya skills promote`", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN, "no", "none", "CLI",
         "SAFE", "closed"),
     ("kriya/knowledge/scaffold.py", "record_scaffold_answer", "record_direct_fact"): Site(
         "`kriya skills scaffold`", "<skills>/<skill>/rules.txt + knowledge", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN, "no",
         "none", "CLI", "SAFE", "closed"),
-    ("kriya/knowledge/staging.py", "promote_staged", "git_commit_if_tracked"): Site(
-        "knowledge staging (human approval)", "<skills>/<skill>/rules.txt + knowledge", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN,
-        "no", "none", "CLI", "SAFE", "closed", "Reached only from `kriya skills approve`."),
     ("kriya/knowledge/staging.py", "promote_staged", "record_rule_provenance"): Site(
         "knowledge staging (human approval)", "<skills>/<skill>/rule provenance", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN,
         "no", "none", "CLI", "SAFE", "closed", "Reached only from `kriya skills approve`."),
-    ("kriya/knowledge/staging.py", "record_direct_fact", "git_commit_if_tracked"): Site(
-        "knowledge staging (human answer)", "<skills>/<skill>/rules.txt + knowledge", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN,
-        "no", "none", "CLI", "SAFE", "closed", "Reached only from `kriya skills scaffold`."),
     ("kriya/knowledge/staging.py", "record_direct_fact", "record_rule_provenance"): Site(
         "knowledge staging (human answer)", "<skills>/<skill>/rule provenance", SKILLS_IN_REPO, True, True, NEVER_IN_RUN, NEVER_IN_RUN,
         "no", "none", "CLI", "SAFE", "closed", "Reached only from `kriya skills scaffold`."),

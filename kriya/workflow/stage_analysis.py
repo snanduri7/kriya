@@ -121,12 +121,18 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
         )
     if skill_engine_override is None:
         se = SkillEngine.from_config(deps.config, workspace_path=workspace_path)
+        # C-04 (BYP-A4-07): the direct and milestone shapes have no controller that starts the run's skill-learning transaction, so the
+        # stage that builds the engine starts it. From here nothing this run learns reaches a durable skills directory or a repository;
+        # the run's end persists it (a candidate that passed and was applied) or drops it (workflow.py, after the terminal apply).
+        from kriya.core.state_paths import resolve_state_directory
+
+        se.begin_run_learning(workspace_path, resolve_state_directory(deps.config)[0])
         se.discover_and_load()
     else:
         se = skill_engine_override
-        # GIT-MIDRUN-COMMITS-S3-001: the conflict registry and every other same-run skills-root reader/writer below use the
-        # engine's effective root (the run-local shadow while one is active), never the canonical directory.
-        skills_dir = se.effective_skills_dir(skills_dir)
+    # GIT-MIDRUN-COMMITS-S3-001: the conflict registry and every other same-run skills-root reader/writer below use the
+    # engine's effective root (the run-local shadow while one is active), never the canonical directory.
+    skills_dir = se.effective_skills_dir(skills_dir)
         
     convention_prompt = ""
     if supplementary_context:
@@ -153,11 +159,16 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
                 f"  DO NOT invent API methods or configuration parameters. Restrict yourself strictly to known-good patterns.\n"
             )
         convention_prompt += "==========================================\n"
+    # BYP-A4-02 (S4): relevance is decided over the USER's goal (``grounding_goal``; a direct run's ``goal`` is that text already), the text the
+    # Planner's own selection reads (`planning_skill_constraints`). A unit's composed goal also holds the Planner's description, acceptance and
+    # verification text; reading it let model text add a skill the Planner never saw and let a version in Planner text REMOVE a skill the
+    # plan was made under (MEASURED, A4 P4). One selection text per run: the Planner and every unit apply the same skills.
+    selection_goal = ctx.grounding_goal or goal
     for skill in se.list_skills():
         # The selection and rendering are kriya/workflow/skill_conventions.py (SHARED-DECISION-AUTHORITY-001): the
         # Planner is given the same applicable skills through the same two functions, so there is one selection path.
         is_relevant, staleness_warnings = skill_applies_to_goal(
-            skill, goal, repo_slug=repo_slug, repo_model=repo_model, mentions_term=_mentions_term, fact_match=_fact_match,
+            skill, selection_goal, repo_slug=repo_slug, repo_model=repo_model, mentions_term=_mentions_term, fact_match=_fact_match,
             extract_library_versions=extract_library_versions, is_version_supported=is_version_supported,
             staleness_warning=_skill_staleness_warning, logger=logger)
         skill_staleness_warnings.extend(staleness_warnings)
@@ -353,10 +364,10 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
 
         for target, extraction, source in auto_resolutions + manual_resolutions:
             if extraction["conflicts"]:
-                _stage_skill_conflicts(target, extraction["conflicts"])
+                _stage_skill_conflicts(target, extraction["conflicts"], engine=se)
                 logger.info(f"Flagged {len(extraction['conflicts'])} conflicting candidate rule(s) for skill '{target.name}' for human review.")
             if extraction["rules"] or extraction["examples"]:
-                _write_skill_extraction(target, extraction, source=source)
+                _write_skill_extraction(target, extraction, source=source, engine=se)
                 # Fold the newly ingested content into THIS run's context
                 # immediately, not just future runs - labeled unverified since it
                 # was just extracted and hasn't been through Runtime Verification.
@@ -438,7 +449,7 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
                             raw = None
                         if raw in ("prefer_a", "prefer_b", "both_ok"):
                             resolution = raw
-                            record_conflict_resolution(skills_dir, name_a, rule_a, name_b, rule_b, resolution)
+                            record_conflict_resolution(skills_dir, name_a, rule_a, name_b, rule_b, resolution, engine=se)
                         else:
                             # No explicit human decision (e.g. -y, or a callback
                             # failure) - proceed without excluding either rule for

@@ -22,7 +22,7 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
     # the body used inside run_generation_workflow; the body below is that method's code, moved verbatim.
     goal, workspace_path, state, step_callback = ctx.goal, ctx.workspace_path, ctx.state, ctx.step_callback
     knowledge_risk_confirmed = ctx.knowledge_risk_confirmed
-    resolved_knowledge_coordinates, resume_state = ctx.resolved_knowledge_coordinates, ctx.resume_state
+    resolved_knowledge_coordinates = ctx.resolved_knowledge_coordinates
     trace_id, KnowledgeGuard = ctx.trace_id, deps.KnowledgeGuard
     unresolved_knowledge_report = deps.unresolved_knowledge_report
 
@@ -57,10 +57,10 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
     gap_report = unresolved_knowledge_report(
         all_gap_report, resolved_knowledge_coordinates,
     )
-    # A resumed checkpoint proves this gate was already cleared earlier in the
-    # same run (goal is drift-checked identical), so it shouldn't re-block here.
-    if resume_state:
-        knowledge_risk_confirmed = True
+    # INT-06 (S4): a checkpoint is not knowledge truth and records no acceptance. A resumed unit is judged like a fresh one: by the CURRENT
+    # coverage answer above and by the acceptance THIS invocation carries (``knowledge_risk_confirmed`` / the resolved coordinates). A gap that
+    # is still open therefore returns ``knowledge_gap`` again and the caller asks again (the CLI re-invokes with the acceptance and the same
+    # resume arguments); a checkpoint's existence never opens the gate.
     knowledge_gate_confirmed = (
         knowledge_risk_confirmed
         if resolved_knowledge_coordinates is None

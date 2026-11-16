@@ -51,7 +51,7 @@ def generate_gap_questions(readiness: SkillReadiness, threshold: int = QUESTION_
     return questions
 
 
-def record_scaffold_answer(skill_folder: str, category: str, answer: str) -> bool:
+def record_scaffold_answer(skill_folder: str, category: str, answer: str, *, engine: object = None) -> bool:
     """Writes a human's answer to one gap question straight into the skill's approved
     knowledge (bypassing staging - see module docstring). Returns whether it was newly
     written (False if it turned out to duplicate an existing rule)."""
@@ -63,4 +63,4 @@ def record_scaffold_answer(skill_folder: str, category: str, answer: str) -> boo
         extraction_confidence="human_supplied",
         provenance=f"human-answered scaffold question for category '{category}'",
     )
-    return staging.record_direct_fact(skill_folder, fact)
+    return staging.record_direct_fact(skill_folder, fact, engine=engine)

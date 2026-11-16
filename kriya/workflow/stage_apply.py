@@ -518,7 +518,7 @@ def prepare_lessons(ctx: StageContext, deps: StageDeps) -> Tuple[Optional[Dict[s
                         coord = f"{g.strip()}:{artifact_id}"
                         ver = v.strip()
                         logger.info(f"Auto-accrual: Automatically scaffolding verified skill for resolved dependency {coord}:{ver}")
-                        guard.generate_skill_template(coord, ver)
+                        guard.generate_skill_template(coord, ver, engine=ctx.se)
                     except Exception as ex:
                         logger.warning(f"Failed to auto-accrue skill for dependency: {ex}")
 
@@ -744,7 +744,7 @@ async def extract_lessons(
             if facts:
                 skills_dir = ctx.skills_dir or deps.config.paths.skills        # ctx.skills_dir: the engine's effective root
                 skill_folder = os.path.join(skills_dir, f"auto-{repo_slug}")
-                written = knowledge_staging.stage_facts(skill_folder, facts)
+                written = knowledge_staging.stage_facts(skill_folder, facts, engine=ctx.se)
                 if written:
                     logger.info(f"Staged {len(written)} structured knowledge fact(s) to {skill_folder}")
         except Exception as ex:

@@ -1411,6 +1411,7 @@ def _commit_staged_writes(deps: CandidateDeps, state: RunState, ctx: AttemptCtx,
         protected_relpaths=(ctx.protected_relpath,) if ctx.protected_relpath else (),
         allowed_relpaths=ctx.allowed_write_relpaths,
         write_scope_mode=ctx.write_scope_mode,
+        project_authority_relpaths=ctx.project_authority_relpaths,
     ).commit_batch(staged_writes)
     for staged in staged_writes:
         state.candidate_digests[os.path.relpath(staged.target_path, ctx.worktree_path)] = (

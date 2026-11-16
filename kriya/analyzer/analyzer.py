@@ -1148,9 +1148,11 @@ class RepositoryAnalyzer:
         skills_dir = getattr(cfg.paths, "skills", "./skills")
         # WAVE8 OI-120: the Skills owner is the only writer of a skill (kriya/skills/skill.py::SkillEngine.create_skill, through the canonical
         # atomic writer, with its shared-install-directory refusal); this method hands it the extracted text and writes nothing itself.
+        from kriya.config.resolution import is_project_skill_overlay
         from kriya.skills.skill import SkillEngine, SkillWriteRefused
 
-        skill_engine = SkillEngine(skills_dir, load_global=False, load_cwd=False, workspace_path=self.root_path)
+        skill_engine = SkillEngine(skills_dir, load_global=False, load_cwd=False, workspace_path=self.root_path,
+                                   project_overlay=skills_dir if is_project_skill_overlay(cfg) else None)   # C-04: the path class needs the overlay
         auto_skill_name = f"auto-{repo_slug}"
         auto_skill_dir = skill_engine.skill_path_for(auto_skill_name)
 

@@ -11,6 +11,7 @@ import subprocess
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _skill_owner import operator_owner
 from test_midrun_workspace_mutations import (
     ALPHA_RULE,
     BETA_RULE,
@@ -76,8 +77,10 @@ def test_a_skills_root_outside_the_candidate_repository_keeps_the_existing_behav
 
     assert engine.run_shadow_active is False and engine.skills_dir == str(elsewhere)
     assert engine.get_skill("widgetlib").source_path == str(elsewhere / "widgetlib")
-    assert engine.mark_gap_acknowledged("widgetlib") is True
-    assert "verification_gap_acknowledged: true" in (elsewhere / "widgetlib" / "skill.yaml").read_text()     # written in place, as before
+    # C-04: a skills root outside the project is the operator's. A run does not write it (so there is nothing to shadow); the decline is
+    # held for the run only.
+    assert engine.mark_gap_acknowledged("widgetlib") is True and engine.is_gap_acknowledged(engine.get_skill("widgetlib")) is True
+    assert "verification_gap_acknowledged" not in (elsewhere / "widgetlib" / "skill.yaml").read_text()
     assert not os.path.exists(os.path.join(_state(tmp_path), "run_shadow"))
 
 
@@ -164,8 +167,8 @@ def test_every_same_run_write_lands_in_the_shadow_and_none_in_the_candidate_repo
 
     engine.create_skill_skeleton("newlib")
     engine.mark_gap_acknowledged("widgetlib")
-    record_rule_provenance(widget.source_path, RULE, "human_text")
-    record_conflict_resolution(engine.skills_dir, "widgetlib", RULE, "otherlib", RULE, "prefer_a")
+    record_rule_provenance(widget.source_path, RULE, "human_text", engine=operator_owner(widget.source_path))
+    record_conflict_resolution(engine.skills_dir, "widgetlib", RULE, "otherlib", RULE, "prefer_a", engine=operator_owner(engine.skills_dir, is_root=True))
 
     assert _git(ws, "rev-parse", "HEAD") == before["head"] and manifest(str(ws / "skills")) == before["files"] and _canonical_unchanged(ws)
     assert {"newlib/skill.yaml", ".skill_conflicts.json", "widgetlib/rule_provenance.json"} <= set(manifest(engine.skills_dir))
@@ -451,7 +454,7 @@ def test_the_lesson_staging_of_a_shadowed_run_goes_to_the_shadow(tmp_path):
 
     class Staging:
         @staticmethod
-        def stage_facts(folder, facts):
+        def stage_facts(folder, facts, engine=None):
             staged.append(folder)
             return list(facts)
 
@@ -477,7 +480,7 @@ def test_the_auto_accrual_scaffold_of_a_shadowed_run_lands_in_the_shadow(tmp_pat
                            offline=True, memory_dir=str(tmp_path / "memory"))
     head = _git(ws, "rev-parse", "HEAD")
 
-    template = guard.generate_skill_template("org.example:mylib-core", "1.4.2")
+    template = guard.generate_skill_template("org.example:mylib-core", "1.4.2", engine=skills)
 
     assert template.startswith(skills.skills_dir) and os.path.isfile(os.path.join(template, "skill.yaml"))
     assert _canonical_unchanged(ws) and _git(ws, "status", "--porcelain") == "" and _git(ws, "rev-parse", "HEAD") == head
@@ -498,10 +501,13 @@ def test_the_shared_install_skills_write_refusal_is_judged_on_the_durable_path_n
     with patch("kriya.skills.skill.get_global_skills_dir", return_value=str(shared)):
         engine = SkillEngine(str(shared), load_global=False, workspace_path=str(workspace))
         engine.discover_and_load()
-        assert engine.activate_run_shadow(str(workspace), _state(tmp_path)) is True
-        assert engine.get_skill("sharedlib").source_path.startswith(os.path.realpath(_state(tmp_path)))
+        # C-04: the shipped library is read-only to a run, so it is not one of the roots the run's transaction shadows ...
+        assert engine.activate_run_shadow(str(workspace), _state(tmp_path)) is False
+        assert engine.get_skill("sharedlib").source_path == str(shared / "sharedlib")
 
-        assert engine.mark_gap_acknowledged("sharedlib") is False                 # refused, exactly as without a shadow
+        # ... and the decline is held for the run, never written there.
+        assert engine.mark_gap_acknowledged("sharedlib") is True and engine.is_gap_acknowledged(engine.get_skill("sharedlib")) is True
+        assert engine._set_skill_yaml_field("sharedlib", "verification_gap_acknowledged", True) is False      # the write itself is refused
 
     assert "verification_gap_acknowledged" not in open(os.path.join(engine.skills_dir, "sharedlib", "skill.yaml")).read()
 

@@ -1593,6 +1593,7 @@ class AttemptContext:
     # stdin, or a milestone/subtask's own synthesized text) - nothing to
     # protect, matches every existing call site's behavior unchanged.
     protected_relpath: Optional[str] = None
+    project_authority_relpaths: Tuple[str, ...] = ()     # C-04: project inputs no candidate write reaches (policy/filesystem.py)
     allowed_write_relpaths: List[str] = field(default_factory=list)
     # Explicit write-scope policy (kriya/policy/filesystem.py::WriteScopeMode)
     # - resolved ONCE, by run_generation_workflow(), before AttemptContext is

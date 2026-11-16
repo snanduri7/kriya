@@ -14,6 +14,7 @@ correctness requirement), but it now says whether the change was committed, and 
 promotion DISTINCTLY from one that could not be persisted at all.
 """
 import pytest
+from _skill_owner import operator_owner
 from test_skill_verification_deferral import (
     _engine,
     _git,
@@ -23,7 +24,7 @@ from test_skill_verification_deferral import (
     _yaml_text,
 )
 
-from kriya.skills.skill import git_commit_if_tracked, load_rule_provenance, record_rule_provenance
+from kriya.skills.skill import SkillEngine, git_commit_if_tracked, load_rule_provenance, record_rule_provenance
 
 
 def _lock_the_index(repo):
@@ -86,7 +87,7 @@ def test_a_clean_promotion_reports_nothing_and_a_not_persisted_one_keeps_its_own
 def test_a_failed_rule_provenance_commit_is_reported_and_the_rule_still_flips_in_the_file(tmp_path):
     folder = _skill_workspace(tmp_path)
     rule = "Widgets must be printed in uppercase."
-    record_rule_provenance(str(folder), rule, "human_text")
+    record_rule_provenance(str(folder), rule, "human_text", engine=operator_owner(str(folder)))
     engine = _engine(tmp_path)
     engine.hold_verifications([_held(rules=(rule,))])
 
@@ -121,7 +122,7 @@ async def test_a_run_reports_a_promotion_commit_failure_in_its_persistence_error
     real = skill_module.git_commit_if_tracked
 
     with patch.object(skill_module, "git_commit_if_tracked", lambda path, message: False if "mark skill" in message else real(path, message)):
-        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path))
+        res = await WorkflowEngine(kernel, llm).run_generation_workflow(goal=GOAL, workspace_path=str(tmp_path), knowledge_risk_confirmed=True)
 
     assert res["quality_gates_passed"] is True                                       # the candidate's verification truth is unchanged
     assert [e["operation"] for e in res["post_commit_persistence_errors"]] == ["skill_verification_commit"]
@@ -140,7 +141,8 @@ def test_a_commit_that_git_itself_rejects_after_a_successful_add_is_a_failure_to
 
 def test_the_engine_remembers_the_commit_outcome_of_its_last_write_and_clears_it_when_no_write_happened(tmp_path):
     _skill_workspace(tmp_path)
-    engine = _engine(tmp_path)
+    engine = SkillEngine(str(tmp_path / "skills"), load_global=False, workspace_path=str(tmp_path), operator=True)   # C-04: a person's command commits at once
+    engine.discover_and_load()
     assert engine.last_write_committed is None
     assert engine.mark_verified("widgetlib", context="c") is True and engine.last_write_committed is True
 

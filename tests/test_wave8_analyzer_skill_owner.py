@@ -26,7 +26,7 @@ def _app(tmp_path):
     (src / "index.py").write_text("class MyService: pass\n")
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
-    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.skills = str(src / "skills")        # C-04: a run writes only the project's own skills roots
     cfg.autonomy.run_verification_enabled = False
     return src, cfg
 
@@ -55,7 +55,8 @@ async def test_the_bootstrap_hands_the_skill_to_the_skills_owner_and_every_file_
 
     with patch.object(skill_module, "atomic_write_file", spy):
         await _index(RepositoryAnalyzer(str(src)), cfg)
-    assert sorted(written) == ["instructions.md", "rules.txt", "skill.yaml"], "the three skill files must go through the canonical writer"
+    # ... and the provenance record of the rules it wrote (C-06, S4 step 1: a rule a run writes is recorded as unverified).
+    assert sorted(written) == ["instructions.md", "rule_provenance.json", "rules.txt", "skill.yaml"], "every skill file must go through the canonical writer"
     skill_dir = Path(cfg.paths.skills) / "auto-myapp"
     assert (skill_dir / "rules.txt").read_text() == "Rule X: Use synch" and (skill_dir / "examples").is_dir()
     assert "Test Conventions" in (skill_dir / "skill.yaml").read_text()

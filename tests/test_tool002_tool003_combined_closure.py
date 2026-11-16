@@ -41,7 +41,7 @@ import sys
 import threading
 
 import pytest
-from _mcp_containment_standin import app_config
+from _mcp_containment_standin import app_config, bound
 
 from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
 from kriya.context.workspace_identity import workspace_identity
@@ -105,10 +105,10 @@ def _leftover_containers() -> list:
 
 
 def _oci_config(**autonomy_kwargs) -> AppConfig:
-    return AppConfig(
+    return bound(AppConfig(
         autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="oci", **autonomy_kwargs),
         mcp_lifecycle=MCPLifecycleConfig(),
-    )
+    ))
 
 
 @pytest.fixture(autouse=True)

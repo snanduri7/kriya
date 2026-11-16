@@ -268,7 +268,8 @@ def test_a_kriya_written_acknowledgement_copied_into_a_workspace_gains_no_author
     workspace, external = tmp_path / "ws", tmp_path / "operator-skills"
     workspace.mkdir()
     _skill(external, verified=None)
-    operator_engine = _engine(external, workspace)
+    operator_engine = SkillEngine(str(external), load_global=False, workspace_path=str(workspace), operator=True)   # C-04: a person's command
+    operator_engine.discover_and_load()
     assert operator_engine.mark_gap_acknowledged("widgetlib") is True      # Kriya writes the decline where it owns the skill
     assert "verification_gap_acknowledged: true" in (external / "widgetlib" / "skill.yaml").read_text()
     shutil.copytree(external / "widgetlib", workspace / "skills" / "widgetlib")

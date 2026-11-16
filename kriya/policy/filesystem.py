@@ -139,6 +139,29 @@ _FOLDED_CONTROL_NAMES = frozenset(fold_name(name) for name in TRUSTED_CONTROL_NA
 TRUSTED_CONTROL_PATH_DENIED = "TRUSTED_CONTROL_PATH_DENIED"
 
 
+# C-04 (A5 P5, exception 3): Kriya's own PROJECT INPUTS. A project's configuration file decides what a run of that project may do, and the
+# project's skills root holds what its runs are told; neither is ordinary source. A model-directed (candidate) write never reaches them:
+# a configuration file by its name, at any depth and under any spelling (the names `kriya.config.resolution` discovers; a tripwire test
+# keeps the two tables equal), and the workspace's skills root by the per-run relative path the run's owner hands the writer
+# (``project_authority_relpaths``). Changing them is the person's own edit, or - once the approval subject of C-03 exists - a candidate
+# change the person approved by path.
+PROJECT_AUTHORITY_FILE_NAMES: Tuple[str, ...] = ("kriya.yaml", "kriya.yml")
+_FOLDED_PROJECT_AUTHORITY_NAMES = frozenset(fold_name(name) for name in PROJECT_AUTHORITY_FILE_NAMES)
+PROJECT_AUTHORITY_PATH_DENIED = "PROJECT_AUTHORITY_PATH_DENIED"
+
+
+def project_authority_relpaths(workspace_root: str, skills_dir: Optional[str]) -> Tuple[str, ...]:
+    """The per-run half of the project-authority path class: the project's skills root as a path relative to ``workspace_root``, when it
+    lies inside the workspace (a skills root elsewhere is outside every writable root already). Empty when it does not, or when the
+    relation cannot be established."""
+    if not isinstance(skills_dir, str) or not skills_dir:
+        return ()
+    root, target = os.path.realpath(workspace_root), os.path.realpath(skills_dir)
+    if root == target or path_relation(root, target) is not PathRelation.WITHIN:
+        return ()
+    return (os.path.normpath(os.path.relpath(target, root)),)
+
+
 def is_trusted_control_name(name: str) -> bool:
     """Whether one path component is a name the PLAT-039 rule protects (any spelling)."""
     return fold_name(name) in _FOLDED_CONTROL_NAMES
@@ -373,8 +396,10 @@ class AuthorizedFileWriter:
         protected_relpaths: Sequence[str] = (),
         allowed_relpaths: Sequence[str] = (),
         write_scope_mode: Optional[WriteScopeMode] = None,
+        project_authority_relpaths: Sequence[str] = (),
     ) -> None:
         self._scope = make_workspace_scope(workspace_root, extra_writable_roots)
+        self._project_authority_relpaths = tuple(normalize_workspace_relpath(p) for p in project_authority_relpaths if p)
         # A dedicated ExecutionPolicy instance with the NARROWER
         # enforcement-only sensitive-path pattern set (see module
         # docstring) - MA4.15's own additive sensitive_path_patterns
@@ -433,6 +458,16 @@ class AuthorizedFileWriter:
             )
         if is_trusted_control_path(self._workspace_root, target_path, identities=identities):
             return trusted_control_path_denial(target_path)
+        if self._names_project_authority_path(target_path):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code=PROJECT_AUTHORITY_PATH_DENIED,
+                explanation=(
+                    f"'{target_path}' is a Kriya project input (the project's configuration file, or a file of its skills root): it "
+                    "decides what a run may do or is told, so a candidate write never reaches it."
+                ),
+                matched_rule="filesystem.authorized_writer.project_authority_path",
+            )
         if self._write_scope_mode == WriteScopeMode.DENY_ALL:
             # Unconditional - no persistent write is permitted in this mode,
             # regardless of allowed_relpaths/protected_relpaths content. The
@@ -483,6 +518,19 @@ class AuthorizedFileWriter:
         return self._execution_policy.evaluate(ActionRequest(
             action_type=ActionType.WRITE_FILE, target=target_path, workspace_path=self._scope.writable_roots[0],
         ))
+
+    def _names_project_authority_path(self, target_path: str) -> bool:
+        """C-04: the target is a project configuration file (by name, any depth, any spelling - of the path as written and of the path
+        it resolves to) or lies at or beneath one of this run's project-authority relative paths. A relation that cannot be
+        established counts (fail closed)."""
+        canonical = _canonical(target_path)
+        if fold_name(os.path.basename(os.path.normpath(target_path))) in _FOLDED_PROJECT_AUTHORITY_NAMES \
+                or fold_name(os.path.basename(canonical)) in _FOLDED_PROJECT_AUTHORITY_NAMES:
+            return True
+        return any(
+            path_relation(os.path.join(self._workspace_root, relpath), canonical) is not PathRelation.OUTSIDE
+            for relpath in self._project_authority_relpaths
+        )
 
     def _aliases_protected_path(self, target_path: str) -> bool:
         """PLAT-001: the target names a protected file under another

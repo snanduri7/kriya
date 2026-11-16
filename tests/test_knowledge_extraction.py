@@ -8,6 +8,7 @@ import os
 from unittest.mock import AsyncMock
 
 import pytest
+from _skill_owner import operator_owner
 
 from kriya.analyzer.analyzer import RepositoryModel
 from kriya.knowledge import scaffold, staging
@@ -214,19 +215,19 @@ async def test_live_failure_channel_returns_empty_list_on_llm_failure():
 
 def test_stage_facts_dedups_against_existing_staged_and_approved(tmp_path):
     skill_folder = str(tmp_path / "auto-test")
-    written = staging.stage_facts(skill_folder, [_fact(value="Always close the client.")])
+    written = staging.stage_facts(skill_folder, [_fact(value="Always close the client.")], engine=operator_owner(skill_folder))
     assert len(written) == 1
 
     # exact duplicate re-stage attempt is filtered
-    written_again = staging.stage_facts(skill_folder, [_fact(value="Always close the client.")])
+    written_again = staging.stage_facts(skill_folder, [_fact(value="Always close the client.")], engine=operator_owner(skill_folder))
     assert written_again == []
 
 
 def test_promote_staged_writes_rules_txt_and_knowledge_json_and_clears_staged(tmp_path):
     skill_folder = str(tmp_path / "auto-test")
-    staging.stage_facts(skill_folder, [_fact(category="Dependencies", value="Uses foo 1.0.")])
+    staging.stage_facts(skill_folder, [_fact(category="Dependencies", value="Uses foo 1.0.")], engine=operator_owner(skill_folder))
 
-    promoted = staging.promote_staged(skill_folder)
+    promoted = staging.promote_staged(skill_folder, engine=operator_owner(skill_folder))
     assert len(promoted) == 1
     assert not os.path.exists(staging._staged_path(skill_folder))
 
@@ -244,7 +245,7 @@ def test_promote_staged_writes_rules_txt_and_knowledge_json_and_clears_staged(tm
 
 def test_promote_staged_noop_when_nothing_staged(tmp_path):
     skill_folder = str(tmp_path / "auto-test")
-    assert staging.promote_staged(skill_folder) == []
+    assert staging.promote_staged(skill_folder, engine=operator_owner(skill_folder)) == []
 
 
 def test_record_direct_fact_skips_near_duplicate_of_existing_rule(tmp_path):
@@ -256,7 +257,7 @@ def test_record_direct_fact_skips_near_duplicate_of_existing_rule(tmp_path):
     written = staging.record_direct_fact(skill_folder, _fact(
         value="Always close the client connection after use in every code path.",
         confidence="human_supplied",
-    ))
+    ), engine=operator_owner(skill_folder))
     assert written is False
 
 
@@ -264,7 +265,7 @@ def test_record_direct_fact_writes_new_fact(tmp_path):
     skill_folder = str(tmp_path / "auto-test")
     written = staging.record_direct_fact(skill_folder, _fact(
         category="APIs", value="Use IgniteCache.put(K, V) for writes.", confidence="human_supplied",
-    ))
+    ), engine=operator_owner(skill_folder))
     assert written is True
     knowledge = staging.load_knowledge(skill_folder)
     assert knowledge[0].value == "Use IgniteCache.put(K, V) for writes."
@@ -289,7 +290,7 @@ def test_generate_gap_questions_empty_when_everything_ready():
 
 def test_record_scaffold_answer_round_trips_through_staging(tmp_path):
     skill_folder = str(tmp_path / "auto-test")
-    written = scaffold.record_scaffold_answer(skill_folder, "APIs", "IgniteCache.put(K, V) is the write method.")
+    written = scaffold.record_scaffold_answer(skill_folder, "APIs", "IgniteCache.put(K, V) is the write method.", engine=operator_owner(skill_folder))
     assert written is True
     knowledge = staging.load_knowledge(skill_folder)
     assert knowledge[0].source_channel == "human_scaffold"
