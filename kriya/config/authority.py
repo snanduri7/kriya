@@ -619,7 +619,7 @@ def compute_violations(
         if classification == FieldClassification.REPOSITORY_SAFE:
             continue
         field_path = leaf_key if top_key is None else f"{top_key}.{leaf_key}"
-        if not is_known_field(top_key, leaf_key):
+        if field_key not in overrides and not is_known_field(top_key, leaf_key):
             reason = (
                 "field has no explicit REPOSITORY_SAFE classification (unknown/future field) - "
                 "fails closed by default, no permissive default"

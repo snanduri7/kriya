@@ -809,14 +809,19 @@ TRIGGER_HUMAN_IN_THE_LOOP, TRIGGER_SENSITIVE_PATH, TRIGGER_DIFF_SIZE, TRIGGER_PR
 
 
 def sensitive_path_reason(paths: Any, patterns: Any) -> str:
-    """The first changed path that matches a configured sensitive pattern, as the gate's reason text; "" when none does."""
+    """The first changed path that matches a configured sensitive pattern, as the gate's reason text; "" when none does.
+
+    INT-09: a pattern that cannot be evaluated counts as MATCHED (fail closed). ``AutonomyConfig`` refuses such a pattern at load, so
+    this is reached only by a configuration object built without validation; it never silently protects nothing."""
     for filepath in paths:
         for pattern in patterns:
             try:
-                if re.match(pattern, filepath, re.IGNORECASE):
-                    return f"Sensitive path matched: {filepath} ({pattern})"
-            except Exception as e:
-                logger.warning(f"Invalid sensitive_paths regex '{pattern}' - this pattern is not being enforced: {e}")
+                matched = re.match(pattern, filepath, re.IGNORECASE) is not None
+            except (re.error, TypeError) as error:
+                logger.error(f"Invalid sensitive_paths pattern {pattern!r} ({error}) - it cannot be evaluated, so the change is treated as sensitive.")
+                return f"Sensitive path pattern cannot be evaluated: {pattern!r} (treated as matched)"
+            if matched:
+                return f"Sensitive path matched: {filepath} ({pattern})"
     return ""
 
 

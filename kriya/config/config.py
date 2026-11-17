@@ -475,6 +475,21 @@ class AutonomyConfig(BaseModel):
         r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile",
         r".*credentials.*", r".*password.*"
     ])
+
+    @field_validator("sensitive_paths")
+    @classmethod
+    def _sensitive_paths_must_compile(cls, patterns: List[str]) -> List[str]:
+        # INT-09: a pattern that cannot be compiled protects nothing. It is a configuration error, never a skipped pattern.
+        for pattern in patterns:
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                raise ValueError(
+                    f"autonomy.sensitive_paths: {pattern!r} is not a valid regular expression ({error}); "
+                    "a sensitive-path pattern that cannot be enforced is a configuration error"
+                ) from error
+        return patterns
+
     risk_threshold_lines: int = Field(default=100)
     sandbox_execution: bool = Field(default=True)
     sandbox_env_allowlist: List[str] = Field(default_factory=lambda: [

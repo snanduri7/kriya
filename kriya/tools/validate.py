@@ -2286,11 +2286,11 @@ class PolymorphicValidator:
             interpreter, install_error = self._resolve_python_interpreter()
             if self.python_environment_error is not None:
                 code, message = self.python_environment_error
-                return {"success": False, "output": message, "acceptance_environment_error": True,
+                return {"success": False, "output": message,
                         "environment_reason_code": code, "python_interpreter": self.python_interpreter_provenance,
                         "test_execution": test_execution.collect(binding).to_dict()}
             if install_error:
-                return {"success": False, "output": install_error, "acceptance_environment_error": True,
+                return {"success": False, "output": install_error,
                         "python_interpreter": self.python_interpreter_provenance,
                         "test_execution": test_execution.collect(binding).to_dict()}
             cmd = [interpreter, "-I", "-B", runner_script]
@@ -2309,8 +2309,6 @@ class PolymorphicValidator:
             raise
         binding.observe(res)
         result = self._validation_result(res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res)
-        if result.get("environment_reason_code"):
-            result["acceptance_environment_error"] = True  # R-13: the runner never started - the same typed "no verdict" as an unavailable interpreter above
         result["test_execution"] = test_execution.collect(binding).to_dict()
         return result
 
