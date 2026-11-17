@@ -3564,3 +3564,22 @@ own report. Git's ownership check is never weakened (no safe.directory, no retry
 that refusal when git refuses the repository and a definition would otherwise be judged without activation (a stale
 dormant `filter.media` in ~/.gitconfig was reported `GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN`, MEASURED at ea56d08):
 ownership is decided first, by the one detector `kriya.repository.git.refuse_dubious_ownership`.
+
+## 12. Architecture closure (2026-11): one owner per truth
+
+The closure program (slices S0 to S8, branch `implementation/closure-s0`) gave each result-bearing truth one owner. The authority set is
+`docs/architecture/` (maps of the baseline it started from, the required contracts `07`, the per-slice implementation records in `12`, and the
+state at the end in `13-FINAL-RECONCILIATION.md`); the per-subsystem invariants are in `handover/claude-context/`. Code is ground truth.
+
+| Truth | Owner | Rule |
+|---|---|---|
+| Runtime identity and production admission (C-09, S1) | `kriya/core/llm.py`, `model_runtime.py` | A model call names its binding; an unknown name is refused; a production-profile run is admitted only with qualified models |
+| Prompt trust (C-10, S2) | `kriya/workflow/untrusted_context.py` | Fetched text is a typed untrusted reference, fenced, routed to one consumer |
+| Project state (C-05, S3) | `kriya/config/resolution.py`, `kriya/memory/project_store.py` | Project-derived state belongs to one project identity; an unbound configuration opens no project store |
+| Knowledge and skill writes (C-06, C-04, S4) | `kriya/skills/`, `kriya/policy/filesystem.py` | Storage presence is not knowledge; one skill writer; project-authority paths are refused at the write gate |
+| Requirement semantics (C-01, S5) | `kriya/workflow/contract_compilation.py`, `requirements.py` | The sealed contract is the requirement truth; a generated test is evidence under it and never closes what the contract holds |
+| Result (C-02, S6) | `kriya/control/run_coordinator.py::evaluate_result_contract`, `run_record.py` | SUCCESS needs a resolved requirement truth on the RunRecord; applied with a requirement open is `applied_requirements_open` (exit 5) |
+| Approval (C-03, S7) | `kriya/policy/approval.py`, `kriya/workflow/terminal_commit.py` | An approval is sufficient only when bound to the exact final mutation subject, rechecked at the commit seam |
+| Work, retry and budget (C-07, C-08, S8) | `kriya/control/work_ledger.py` on the run lease, `kriya/workflow/retry_policy.py`, `accepted_candidate.py` | One durable ledger per piece of work; a resume continues it or is refused; accepted unit work resumes by replay through its own gates |
+
+What the user sees of these rules is in `docs/user_guide.md` section 2.0g.

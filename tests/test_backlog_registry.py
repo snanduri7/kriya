@@ -53,6 +53,24 @@ def weakened_severity(rows):
     return found
 
 
+def ragged_records(text):
+    """(id, width) of every record of CSV ``text`` whose cell count is not the header's. A by-name reader silently shifts or drops the
+    fields of such a record (an unquoted comma inside a field, or a missing last cell): REGISTRY-CSV-ROW-WIDTH-001."""
+    records = list(csv.reader(text.splitlines(keepends=True)))
+    return [(record[0] if record else "", len(record)) for record in records[1:] if len(record) != len(records[0])]
+
+
+def test_every_record_has_exactly_the_headers_columns():
+    with open(HANDOVER / "BACKLOG_REGISTRY.csv", newline="", encoding="utf-8") as handle:
+        text = handle.read()
+    assert text.startswith("id,") and ragged_records(text) == []
+    # the check itself: an unquoted comma in a field and a missing last cell are both found, a quoted comma is not
+    header = "id,title,priority\n"
+    assert ragged_records(header + 'A,"one, two",P3\n') == []
+    assert ragged_records(header + "A,one, two,P3\n") == [("A", 4)]
+    assert ragged_records(header + "A,one\n") == [("A", 2)]
+
+
 def test_every_item_carries_the_required_fields():
     rows = _rows("BACKLOG_REGISTRY.csv")
     assert rows

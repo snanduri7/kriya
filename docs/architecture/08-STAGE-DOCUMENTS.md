@@ -1,5 +1,10 @@
 # 08 - Stage documents (derivative views)
 
+> **Baseline note (final reconciliation, 2026-11-17).** This document describes the AS-IS at the closure baseline `3eded93`, before the
+> implementation slices S0 to S8. It is kept unchanged as the evidence the contracts were derived from. The owners and behaviours the slices
+> changed are stated per contract and per gap in `13-FINAL-RECONCILIATION.md` (sections 2 and 3); where a row here differs from `13` or from
+> the code at the certified revision, the code and `13` are authoritative.
+
 Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`. **A stage document defines nothing.**
 Every fact has its home in one of the six maps, the gap ledger, the audit (`06`) or the required contracts (`07`);
 a cell here names the row that holds it and adds only the few words needed to read the row in this stage's context.

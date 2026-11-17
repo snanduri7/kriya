@@ -1,5 +1,10 @@
 # 04 - Failure / recovery matrix
 
+> **Baseline note (final reconciliation, 2026-11-17).** This document describes the AS-IS at the closure baseline `3eded93`, before the
+> implementation slices S0 to S8. It is kept unchanged as the evidence the contracts were derived from. The owners and behaviours the slices
+> changed are stated per contract and per gap in `13-FINAL-RECONCILIATION.md` (sections 2 and 3); where a row here differs from `13` or from
+> the code at the certified revision, the code and `13` are authoritative.
+
 Canonical runtime baseline: commit `3eded93c0cfb50f8855d04510e3f9aa2cd5208f7`, tree
 `97a3da6b2ef664e2b7e25c4c6fe3fc3f42f253a0`. AS-IS.
 

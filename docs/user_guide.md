@@ -1268,6 +1268,59 @@ workflow_controller:
 
 ---
 
+### 2.0g What a run's result means: outcome words, exit codes, approval, resume and budgets
+
+These rules hold for every command that changes a workspace (`generate`, a milestone plan, proposal execution, `fix`) and for both
+executors. The design record is `docs/architecture/13-FINAL-RECONCILIATION.md`.
+
+**Success means the requirements are resolved, not that files were written.** A run ends `success` only when its own run record
+carries a resolved requirement truth: every mandatory requirement of the goal verified by evidence (`ALL_VERIFIED`), or accepted by you
+through a sealed acceptance (`RESOLVED_WITH_OPERATOR_ACCEPTANCE`: accepted, never "verified"). Nothing a model wrote can close a general
+behaviour requirement: a test the run itself generated is evidence, never the authority.
+
+| Result `status` | Meaning | Exit code |
+|---|---|---|
+| `success` | Applied (or nothing needed changing) and every mandatory requirement is resolved | 0 |
+| `applied_requirements_open` | The change was applied and its technical gates passed, and at least one requirement is still open. It stays applied; nothing is rolled back. `quality_gates_passed` is `false`, `technical_gates_passed` is `true` | 5 |
+| any other (`failed`, `approval_required`, `needs_review`, `resume_refused`, a typed refusal) | Nothing counts as done; read `reason_codes`, `failure_category` and the message | 1 |
+| knowledge gap (proposal execution and `fix` only) | Unchanged | 3 |
+
+For `applied_requirements_open` Kriya prints each open requirement and what would close it (`open_requirement_authorities`): a stated
+example line in the goal, an acceptance file (`--acceptance`), an acceptance approval (`--acceptance-approval`) or a sealed
+verification authority (`--verification-authority`). A plain-wording behaviour goal with none of these normally ends this way: the
+work is there, and Kriya says exactly what it could not verify. A `fix` run closes its one requirement only when Kriya's own gate
+failed on the untouched workspace and passes on the candidate; a failure Kriya could not reproduce stays open. The final review is
+advisory on every executor: a refused or failed review is recorded and shown and never changes the outcome.
+
+**What your approval covers.** When an approval is required (human-in-the-loop mode, a sensitive path, the size threshold, a process
+profile), it is bound to the exact change being applied: every path, operation, byte digest, mode and base revision. Kriya recomputes
+that identity immediately before it writes and refuses (`APPROVAL_SUBJECT_STALE` and related codes, nothing written) if anything
+differs from what you were shown. Under a multi-unit plan the size and sensitivity triggers are evaluated on the whole change, and if
+the final change is not exactly what you already approved you are asked once more for the complete change. An approval is never
+stored as authority: a resumed run asks again. A `sensitive_paths` pattern that is not a valid regular expression is a configuration
+error at load (it used to be skipped, which protected nothing).
+
+**Resume continues the same work, or is refused.** Every piece of work has one durable ledger in the workspace
+(`.kriya/control/work_ledger.json`): generation time consumed, Developer attempts, invocations per unit, and each unit's retry
+history. `--resume` / `--resume-id` continues that ledger; the time and attempts already spent stay spent, and a unit keeps the retry
+allowance it had. If the ledger is missing, unreadable or belongs to other work, the resume ends `resume_refused`
+(`WORK_LEDGER_MISSING`, `WORK_LEDGER_UNREADABLE`, `WORK_LEDGER_NOT_THIS_WORK`) before any model call: it is never quietly turned into a
+fresh run with a fresh allowance. State saved by a Kriya version from before the ledger existed is therefore not resumable; start a
+new run (run the command without `--resume`). A resume that finds nothing reusable (a deleted checkpoint) still continues the ledger
+and generates the work again. Under a structured plan, units whose work was accepted before the interruption are replayed through
+their own gates without asking the model again; a replay that no longer passes is generated again.
+
+**Bounds.** One planned unit is invoked at most 7 times across retries, recovery and resumes; reaching that is the typed stop
+`WORK_CEILING_EXHAUSTED`. `autonomy.generation_time_budget_seconds` set by a repository's own `kriya.yaml` may be 1 to 3600; a larger
+value or `null` (unbounded) needs your approval like any other security-authority field (`kriya authority approve`), because a
+repository must not be able to remove the run's time bound. Your own operator configuration may set any value.
+
+**Knowledge and skills.** A library counts as covered only by a loaded skill that names it and holds at least one trusted rule; a
+folder, a scaffold or an unverified rule does not clear the knowledge gate. A run writes skills only into the project's own skill
+roots and commits nothing before it ends; the shipped skill library is read-only to every run. A model-directed change to a Kriya
+project input (`kriya.yaml`, the workspace skills root) is refused (`PROJECT_AUTHORITY_PATH_DENIED`), also when the goal names the
+file: edit those yourself.
+
 ## 3. Core Commands
 
 ### 3.1 Indexing the Codebase (`analyze`)
