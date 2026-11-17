@@ -281,6 +281,7 @@
    "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [],
+   "work_ledger": null,
    "work_unit_states": {
     "M1": {
      "blocked_by": [],
@@ -452,6 +453,7 @@
    "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [],
+   "work_ledger": null,
    "work_unit_states": {
     "M1": {
      "blocked_by": [],

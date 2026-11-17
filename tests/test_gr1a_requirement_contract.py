@@ -229,6 +229,8 @@ async def test_r5_enforce_resume_never_reuses_subtasks_recorded_under_another_co
     save_control_state(str(workspace), ControlState(
         schema_version=CURRENT_SCHEMA_VERSION, run_id="earlier", subtask_states={"s1": "completed"},
         subtask_completion_scope="workspace", requirement_contract_digest="0" * 64))
+    from _work_ledger_seed import seed_work_ledger
+    seed_work_ledger(workspace, "earlier")   # S8: a resume continues the earlier run's work ledger or is refused before the rule under test
     with patch.object(wc, "parse_planner_structured_output", return_value=(MagicMock(), None)), \
          patch.object(wc, "build_engineering_plan_from_planner_output", return_value=plan), \
          patch.object(wc, "validate_plan", new=AsyncMock(return_value=valid(valid=True))):

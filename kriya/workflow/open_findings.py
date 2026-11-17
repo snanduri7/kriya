@@ -72,6 +72,40 @@ class OpenFinding:
         return f"- [{self.failure_type}{code}]{subject}\n{self.evidence}"
 
 
+# S8 (C-07, GAP-A1-07): the failure types that may OPEN a failure family, i.e. earn the fresh scoped (targeted / fallback-targeted) allowance of a genuinely different
+# failure. A closed allow-list, enumerated from the types the validators, gates and orchestrator produce today (tests/test_s8_failure_family_authority.py fails when a
+# producer names a type that is in neither table). An UNLISTED type inherits the family the repair was already addressing: an unknown failure never widens a budget.
+# Deliberately a separate question from ``replaces_open_finding`` (what the next request must REMEMBER, where an unknown type stays remembered): MEASURED, an
+# orchestrator ``no_progress_retry`` replaced the open finding and, as a "different failure", replenished the scoped budgets.
+FAMILY_OPENING_FAILURE_TYPES = frozenset({
+    "api_contract_evidence_restore_required", "api_contract_recovery_incomplete", "artifact_registry", "brownfield_ownership_redirect",
+    "brownfield_public_api_changed", "candidate_runtime_entrypoint_invalid", "compile", "contract_registry", "cross_package_symbol_mismatch",
+    "deterministic_contract_violation", "duplicate_type_across_files", "file_integrity", "file_integrity_unsupported",
+    "goal_insufficient_for_verification", "goal_spec_compliance", "incomplete_generation", "managed_service_runtime_plan_gap", "pom_semantic_validation",
+    "process_terminating_behavior_tested_in_process", "prose_contamination", "regression_test", "regression_unattributed", "requirements_unresolved",
+    "run_verification", "run_verification_hung", "semantic_region_unauthorized", "static_analysis_blocked", "static_analysis_unavailable",
+    "static_analysis_unknown", "static_rule_violation", "targeted_test", "test", "test_acceptance", "test_obligation_not_preserved",
+    "unrequested_architectural_surface", "unsafe_exception_masking", "unverified_no_change", "verification_authority_required",
+    "verification_authority_unavailable", "verification_tree_mutated", "verified_no_change_refused", "verifier_semantic_authority_required",
+    "verifier_semantic_expectation_invalid",
+})
+# The produced types that never open a family, named so that the enumeration is total: the orchestrator's own statements (no new evidence about the candidate), the
+# delivery failures, and the operational / resource / internal / environment types the deny-lists below already exclude.
+NON_OPENING_FAILURE_TYPES = frozenset({
+    "no_progress_retry", "verifier_replay_refused",
+    "context_budget_unsatisfiable", "context_edit_protocol_unsatisfiable", "fallback_incompatible", "general_error", "internal_framework_error",
+    "output_budget_unsatisfiable", "plan_scope_conflict", "provider_contract", "retry_identity_not_qualified", "test_verification_infrastructure_failure",
+    "time_budget_exhausted", "verification_infrastructure_failure", "work_ceiling_exhausted", "workspace_commit", "containment_setup_failed",
+}) | DELIVERY_FAILURE_TYPES
+
+
+def may_open_failure_family(failure: Any) -> bool:
+    """Whether ``failure`` may open a NEW failure family (retry_strategy._record_attempt_failure's one question). Typed: the failure's type must be on the allow-list
+    AND it must be an authoritative statement about the candidate (``replaces_open_finding``). Within an eligible type the family identity stays the normalized
+    validator signature (C-07); this decides only whether the type is eligible at all."""
+    return failure.type in FAMILY_OPENING_FAILURE_TYPES and replaces_open_finding(failure)
+
+
 def is_candidate_finding(failure_type: str) -> bool:
     return (failure_type not in DELIVERY_FAILURE_TYPES and failure_type not in _NON_CANDIDATE_TYPES
             and categorize_failure(failure_type) not in _NON_CANDIDATE_CATEGORIES)

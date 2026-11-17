@@ -93,22 +93,29 @@ from kriya.control.decisions import (
 from kriya.control.ownership_audit import audit_control_ownership, refusal_fields
 from kriya.control.persistence import (
     UnreadableRunRecordError,
+    load_accepted_candidate,
     load_artifact_registry,
     load_contract_registry,
     load_control_state,
     load_control_state_run_reference,
     load_run_record,
+    save_accepted_candidate,
     save_approved_plan,
     save_artifact_registry,
     save_control_state,
 )
 from kriya.control.run_coordinator import (
+    ResumeLedgerRefused,
     annotate_run,
     authorize_candidate_workspace,
     coordinated_mutation,
     current_run_context,
+    grant_unit_invocation,
     mark_run_stage,
     project_refusal_payload,
+    resume_ledger_refused_result,
+    resume_work_ledger,
+    work_unit_scope,
 )
 from kriya.control.run_record import RunLifecycle
 from kriya.control.state import (
@@ -557,6 +564,8 @@ def _enforce_deps(controller: WorkflowController) -> Any:
         load_control_state=load_control_state, load_control_state_run_reference=load_control_state_run_reference,
         load_run_record=load_run_record, save_approved_plan=save_approved_plan,
         save_artifact_registry=save_artifact_registry, save_control_state=save_control_state,
+        load_accepted_candidate=load_accepted_candidate, save_accepted_candidate=save_accepted_candidate,
+        grant_unit_invocation=grant_unit_invocation, work_unit_scope=work_unit_scope, resume_work_ledger=resume_work_ledger,
         annotate_run=annotate_run, authorize_candidate_workspace=authorize_candidate_workspace,
         mark_run_stage=mark_run_stage, RunLifecycle=RunLifecycle, attempt_evidence_scope=attempt_evidence_scope,
         InferenceDeadlineError=InferenceDeadlineError, WriteScopeMode=WriteScopeMode,
@@ -1411,6 +1420,14 @@ class WorkflowController:
                         goal, workspace_path, route, run_id, control_context, control_state, legacy_kwargs,
                     )
                 )
+            except ResumeLedgerRefused as refusal:
+                # S8 (C-08): the requested resume cannot continue the work ledger that owns the earlier consumption - the typed ``resume_refused`` result, before
+                # planning and any model call. Returned here, WITHOUT saving this run's ControlState: the earlier run's state (and the accepted work it names) stays
+                # exactly as it was, and nothing about this run can later be mistaken for the work a resume continues.
+                logger.error(f"WorkflowController enforce run {run_id!r}: {refusal}")
+                legacy_result = resume_ledger_refused_result(refusal.reason_code, run_id=run_id)
+                self._write_enforce_trace(run_id, goal, legacy_result, enforce_started)
+                return WorkflowResult(run_id=run_id, control_state=control_state, route=route, legacy_result=legacy_result)
             except _UnsafeStructuredPlan as e:
                 logger.error(f"WorkflowController enforce run {run_id!r}: unsafe structured plan: {e}")
                 legacy_result = {

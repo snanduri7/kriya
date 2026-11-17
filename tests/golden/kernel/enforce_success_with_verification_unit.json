@@ -1603,6 +1603,7 @@
  "result": {
   "control_state": {
    "acceptance_approval_digest": null,
+   "accepted_units": {},
    "base_commit": "9feb8d6e4a285cf42532663f0e23150071dbba90",
    "created_at": "<clock>",
    "current_artifact_registry_hash": null,
@@ -2643,6 +2644,15 @@
     "commit:<run:1>-<txn:1>",
     "static_analysis:DISABLED:eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18"
    ],
+   "work_ledger": {
+    "developer_attempts": 1,
+    "ledger_id": "<run:1>",
+    "resumed_from": null,
+    "unit_invocations": {
+     "s1": 1,
+     "sv": 1
+    }
+   },
    "work_unit_states": null,
    "workspace_identity": "<workspace_id:1>"
   }

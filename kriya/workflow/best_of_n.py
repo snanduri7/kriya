@@ -102,6 +102,7 @@ def reset_state_for_independent_candidate(state) -> None:
     # (possibly interactive, network-calling) lookup for a candidate that's
     # about to be thrown away anyway.
     state.budgets.last_failure_signature = None
+    state.budgets.inherited_failure_signature = None   # S8: a declared reset - an independent candidate inherits no earlier invocation's family either
     state.budgets.seen_failure_signatures = set()
     state.budgets.scoped_full_set_failure_signature = None
     state.budgets.fallback_targeted_requested = False

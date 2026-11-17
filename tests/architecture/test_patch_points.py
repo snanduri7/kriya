@@ -218,7 +218,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # (_development_deps -> _stage_deps, no new load).
     # W3-3 R1: 36 -> 37, the one logger call of _membership_authority_stop (the typed membership-authority stop).
     # W3-5: 37 -> 38, the one logger call of _design_stage_deadline_stop (the typed design-stage deadline stop).
-    (W, 'logger'): P(6, W, ((W, 38),), ()),
+    # S8: 38 -> 39, the one logger call of the direct resume's work-ledger refusal (a checkpoint whose ledger cannot be continued is not resumed).
+    (W, 'logger'): P(6, W, ((W, 39),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),

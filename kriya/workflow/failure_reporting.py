@@ -146,6 +146,8 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
 
     # RESOURCE - operational constraint, not a code defect
     "time_budget_exhausted": FailureCategory.RESOURCE,
+    # S8 (C-08): the work ledger refused the next unit invocation or Developer attempt (ceiling reached, or the grant could not be durably recorded).
+    "work_ceiling_exhausted": FailureCategory.RESOURCE,
     # PRD-032: the verified candidate's terminal commit did not commit
     # (a concurrent edit, an I/O failure, an uncertain state, refused evidence).
     "workspace_commit": FailureCategory.RESOURCE,

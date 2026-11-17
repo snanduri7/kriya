@@ -217,6 +217,14 @@ class RetryBudgets:
     # defect by re-breaking another) is charged like a repeat
     # (STATE-FAILURE-FAMILY-CYCLE-001).
     seen_failure_signatures: Set[Tuple[str, Any]] = field(default_factory=set)
+    # S8 (C-07): the unit's earlier invocations recorded a scoped allowance that could not be read back exactly
+    # (retry_policy.continue_scoped_allowance): this invocation has no targeted allowance and no failure counts as a
+    # new family. Never set on a readable record or a first invocation.
+    scoped_allowance_unaccounted: bool = False
+    # S8 (C-07): the failure family the unit's EARLIER invocations ended on (from the work ledger). The first failure of
+    # this invocation is compared with it, so the same family is charged against the allowance already used instead of
+    # starting a new one. Deliberately not last_failure_signature (which means "this invocation's previous attempt").
+    inherited_failure_signature: Optional[Tuple[str, Any]] = None
     # How many independent candidates kriya/workflow/best_of_n.py discarded before
     # this run's winning (or final) attempt. Unlike retry_count, this is NEVER reset
     # between candidates - it's a running total across the whole run, since it exists
@@ -280,6 +288,10 @@ class GenerationState:
     # and retry of one run; generation_started_monotonic stays this
     # invocation's own start (its wall-time metrics).
     budget_started_monotonic: float = field(default_factory=time.monotonic)
+    # S8 (C-07, C-08): the work-ledger unit this invocation works for (run_coordinator.begin_generation_invocation) and,
+    # when the ledger refused the invocation, the typed refusal: no Developer work starts (attempt.py's budget check).
+    work_unit_key: Optional[str] = None
+    work_refusal: Optional[str] = None
     # Completed/failed Developer calls used to refine the conservative configured
     # per-file estimate without persisting prompt or proprietary source content.
     # R1 Deliverable 5 (2026-09-08): each dict also carries prompt_tokens/

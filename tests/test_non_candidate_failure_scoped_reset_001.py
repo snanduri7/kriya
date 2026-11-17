@@ -260,3 +260,28 @@ async def test_a_changed_workspace_resets_only_the_no_progress_counter(tmp_path)
     assert run.resets == [2]
     assert five.family == four.family
     assert five.targeted == four.targeted and five.fallback_used is True
+
+
+# ----------------------------------------------------------------------------- S8 (C-07, GAP-A1-07), added; the tests above are unchanged.
+
+def _no_progress_retry():
+    """The orchestrator's own refusal of an identical candidate. Unlike the refusals above it is NOT excluded by the memory predicate's deny-lists: it replaces
+    the open finding - and, before S8, the same predicate let it open a new failure family."""
+    raw = "NO_PROGRESS: the repair produced the same candidate as the previous attempt"
+    return QualityGateFailure(Failure(
+        type="no_progress_retry", message=raw, raw_output=raw, source="orchestrator", likely_files=[TEST_FILE], file_locations=[FileLocation(TEST_FILE)]))
+
+
+@pytest.mark.asyncio
+async def test_s8_a_no_progress_retry_replenishes_nothing_on_the_real_failure_recorder(tmp_path):
+    assert replaces_open_finding(_no_progress_retry().failure) is True     # the memory predicate is unchanged
+    run = await _after_attempt_5(tmp_path)
+    before = run.rows[-1]
+
+    await run.play([(_no_progress_retry, None)])
+
+    after = run.rows[-1]
+    assert run.resets == [2], "pre-fix (MEASURED on the pure owners): a second reset here - the scoped budgets were replenished"
+    assert after.family == before.family                                           # it inherited the family the repair was addressing
+    assert after.targeted == before.targeted and after.targeted >= TARGETED_MAX
+    assert after.fallback_used is True

@@ -1043,3 +1043,124 @@ lines; no other line; the guard refuses any other delta). **Proof.** `tests/test
 unit and terminal (modify and create), every material difference is another subject (byte, path, mode, base revision, create vs modify of an
 existing empty file, delete), a declared base existence is authoritative, the ledger matches the whole digest, and the one-unit run through the
 real controller still asks once. Ten targeted mutants: `~/kriya-evidence/s7-7370d76/mutants_s7_correction_run2.txt`.
+
+## 20. Slice S8: one work ledger; accepted work resumes by replay; the run budget has one owner (C-07, C-08; R-07, R-08; 2026-11-17, implementation branch)
+
+Scope as ruled by the owner on 2026-11-17 (the S8 stop and its three rulings), which corrects section 6 where they differ. Evidence:
+`~/kriya-evidence/s8-b6ac020/`.
+
+### 20.1 What was measured before any change (b6ac020, pristine archive)
+
+`prefix_s8_characterization.txt`, each `MEASURED`:
+
+| Symptom | Baseline |
+|---|---|
+| Budget across a resume | A run consumed 1,300 s of generation time; the run after it started its clock at 0.0. The lease held only a monotonic start; nothing on disk carried consumption, attempts or a parent |
+| Budget value (A5 P6) | `autonomy.generation_time_budget_seconds` was `REPOSITORY_SAFE` at any value: 999,999 and `null` needed no approval |
+| Family predicate (`GAP-A1-07`) | An orchestrator `no_progress_retry` opened a "new family" and reset `targeted_retry_count` 3 -> 0 and the fallback-targeted flag |
+| Accepted work (Scenario-04 run 1's shape) | Three units, the third stops: the resume answered `COMPLETIONS_NOT_IN_WORKSPACE` and asked the Developer for the two accepted units again |
+
+**Disproved premise (`TRACED`).** Stale accepted candidate work was NOT reused at the baseline: candidate-scope completions were always refused
+and their bytes deleted with the sandbox. S8 therefore ADDS safe reuse; the stale-state cases are negative controls of the new path, not
+pre-fix reproducers.
+
+### 20.2 What changed
+
+**One ledger (`kriya/control/work_ledger.py`, held on the run lease in `run_coordinator.py`).** One durable document per piece of work
+(`.kriya/control/work_ledger.json`, written through the control store, fsync and atomic replace): consumed generation seconds, Developer
+attempts, invocations per unit, the open grant, each unit's retry-family state, the runs that worked under it.
+
+| Rule | Mechanism |
+|---|---|
+| Grant before work | `grant_unit_invocation` / `grant_developer_attempt` count and durably write BEFORE the work starts; a grant that cannot be written is refused (`WORK_LEDGER_NOT_PERSISTED`) |
+| A crash restores nothing | A Developer grant records the time the pass reserves (the estimate plus gate reserve the existing budget check just admitted). A ledger adopted with a grant still open is charged that reservation on top of the consumption recorded at the grant; counts stay |
+| A resume continues or is refused; only a new run starts over | `resume_work_ledger(prior run)` adopts the whole ledger or REFUSES the resume. The earlier consumption moves the lease's ONE clock back, so every existing reader of the clock (model deadline, embeddings, validators, the attempt budget check) sees the same remaining budget. There is no reset flag and no fallback to a fresh run: a fresh allowance is a new run, asked for as one |
+| Unit ceiling | 7 invocations per planned unit (the bound the enforce loop's own caps imply; `UNIT_INVOCATION_CEILING`). Reaching it is the typed stop `WORK_CEILING_EXHAUSTED` (failure type and category `work_ceiling_exhausted`, a resource-limit stop like the time budget) |
+| No destructive first write | A run may grant work before it reaches its resume decision (the direct pipeline opens its state first). Its new ledger carries the one it displaced (`previous`) until the run adopts it or ends; a process that dies undecided leaves both, and whoever continues either is charged for both |
+| Ledger that cannot be continued (owner ruling 2026-11-17, second S8 ruling) | A requested resume whose ledger is missing (`WORK_LEDGER_MISSING`), unreadable, corrupt or internally inconsistent (`WORK_LEDGER_UNREADABLE`) or names another run than the one the checkpoint / ControlState records (`WORK_LEDGER_NOT_THIS_WORK`) fails closed with the typed result `status: resume_refused`, `reason_codes: [code]` (the shape PRD-008's refused resume already returns). It is decided once per run on the lease (`resume_refusal`), BEFORE any grant, planning or model call: the direct pipeline asks at entry and again when it has read the checkpoint; the enforce loop asks where it loads the prior ControlState and raises `ResumeLedgerRefused`, which the controller returns without saving a ControlState (the earlier state and its accepted work stay as found). After a refusal every grant is refused (`WORK_LEDGER_RESUME_REFUSED`), nothing is written for a missing or unreadable ledger, and a ledger the run displaced before the decision is put back with the run's charge added. Never a new ledger, never a fresh run |
+| Lost work is not a refund | A resume that finds nothing to reuse (no checkpoint, no ControlState, a deleted accepted snapshot) still continues the ledger the workspace holds: the work is generated again and every earlier charge stands (`parent_found=False`) |
+| Pre-ledger state | A checkpoint or ControlState written before the ledger existed has no ledger, and nothing persisted then records consumption, attempts or a parent (20.1), so the ledger cannot be reconstructed exactly: such state is NOT resumable (`WORK_LEDGER_MISSING`). A new run is the remedy; no migration guesses consumed work |
+
+Grant points are single: the enforce loop's unit funnel (`_invoke_bounded_subtask`, every planned run, recovery, retry and replay), the run
+state's opening for the direct and milestone shapes (`run_lifecycle.open_run_state`), and the one place Developer work is admitted
+(`attempt._ensure_generation_time_budget`). The terminal RunRecord carries the derived `work_ledger` reference (ledger id, parent run, counts;
+no clock value); the document is the authority.
+
+**Retry-family continuity (C-07).** `open_findings.may_open_failure_family`: a closed allow-list of the candidate-failure types the producers
+emit today, AND an authoritative statement about the candidate; an unlisted type inherits the family. Inside an eligible type the family
+identity is unchanged (the normalized validator signature). `retry_policy.scoped_allowance_state` / `continue_scoped_allowance`: a unit's next
+invocation, in the same run or in a run that resumes the ledger, continues the families already seen and the scoped charges already made; the
+full-set counter stays per invocation. The earlier family is carried in its own field (`RetryBudgets.inherited_failure_signature`), read only
+by the family comparison. A recorded state that cannot be read back exactly leaves no targeted allowance and lets no family count as new.
+
+**Accepted work (ruling 9, `kriya/workflow/accepted_candidate.py`).** At each ControlState save of a plan sandbox the loop first writes one
+cumulative snapshot (`.kriya/control/accepted_candidate.json`): per accepted unit its exact files, base facts and the existing S7 subject
+(`bind_candidate(...).digest`); only then is the state that names each digest (`ControlState.accepted_units`) saved. No verdict is stored. On
+resume, after the existing plan, requirement-contract, acceptance-approval and verification-contract checks and under the continued ledger, a
+unit is replayable only when the state's digest, the document's entry and the digest recomputed from the document's bytes agree, the workspace
+base (revision and existence) is still the recorded one, and the files are in the unit's planned scope. A replayable unit is not restored: it is
+handed to the unit's normal invocation as a carried candidate (the existing verifier-replay path), staged by the candidate writer and judged by
+the unit's own gates in a fresh sandbox, with no Developer call. A replay whose gates do not pass is discarded and the unit is generated again.
+The terminal gates and the atomic commit run on the whole candidate as before.
+
+**Budget value (C-08, X-14).** `autonomy.generation_time_budget_seconds` left `_REPOSITORY_SAFE_FIELDS` and joined `_VALUE_BOUNDED_FIELDS`. One
+constant (`authority.GENERATION_TIME_BUDGET_CEILING_SECONDS` = 3600) is both the packaged ceiling and the production seal's value.
+
+### 20.3 Readings taken, and what S8 did not build
+
+| Item | Reading or decision |
+|---|---|
+| Ceiling counting | Per planned unit, counted on every invocation of that unit including replays; a new unit has its own ceiling and shares the one clock |
+| Open-grant charge | The reservation is the estimate plus gate reserve of the pass, the quantity the existing budget check admits; no per-second state is written |
+| Snapshot granularity | One cumulative document with one digest PER UNIT (the ruling named one digest): a write that fails between the two halves costs the newest unit, not all of them |
+| Proof of acceptance | Not persisted and not trusted: the replay reruns the unit's own gates. A unit that deleted a file, wrote a non-UTF-8 file or wrote nothing is not captured and is generated again |
+| Direct-shape ceiling | A direct resume continues the ledger at entry, before its state opens, so an eighth invocation is refused where it is asked for and is not counted; no Developer work starts |
+| Resume intent | Explicit only: `--resume` / `--resume-id` (`resume`, `resume_id`). Re-running a milestone plan without them is a new run that reuses committed milestones and has its own ledger; inside a milestone plan the ledger is continued by the unit whose checkpoint is selected |
+| Work that passes no grant | Planning and TOOL subtasks pass no grant. `MEASURED` while proving the fail-closed rule: an enforce run stopped at a TOOL subtask had written no ledger, so its resume (the D1 crash resume, the operator's TOOL retry) was refused `WORK_LEDGER_MISSING`. Root fix: the enforce loop opens the run's ledger durably where it starts, before planning (`run_coordinator.open_work_ledger`), so a missing ledger only ever means removed or pre-ledger state. The direct and milestone shapes already grant when their state opens |
+| Enforce parent identity | The ledger must name the prior ControlState's own `run_id`, not its RunRecord reference: an operator's TOOL disposition rewrites the state outside any run (`MEASURED`: with the reference, the resume after a `retry` disposition was refused `WORK_LEDGER_NOT_THIS_WORK`) |
+| Hand-seeded state in tests | A test that writes an earlier run's ControlState by hand seeds its ledger (`tests/_work_ledger_seed.py`). Three `tests/test_workflow.py` tests seed a checkpoint with no run and no ledger (`..._resumes_from_plan_checkpoint_...`, `..._resumes_from_design_checkpoint_...`, `..._refuses_resume_on_goal_drift`): pre-ledger checkpoints, now refused by design; all three were already red at pristine `b6ac020` (`S6-STALE-SUCCESS-EXPECTATION-TESTS-001`) and are carried with that family as `CERTIFICATION-MECHANICAL-CLEANUP` (`S8-RESUME-FIXTURES-WITHOUT-LEDGER-001`) |
+| `AUTH-A1-14` | `TRACED`: every recovery invocation (owner recovery, consumer retry, replay, verifier repair) passes through the one unit funnel, so the durable per-unit grant bounds what the in-memory cycle counters bound; the counters, reopened-owner sets, replay handles and the verifier semantic ledger are not persisted (a resumed run rebuilds them and stays inside the unit ceiling). Human recovery decisions (narrow trace, 2026-11-17, `TRACED`): a person's in-run recovery or review answer is held in memory only and is lost at a restart - the person is asked again (stage document row 15), so none is reused. The one persisted human decision a later run reads is the operator's TOOL disposition (`kriya/control/tool_disposition.py`): `abandon` only removes work authority; `retry` only re-arms the subtask (`pending`, attempt N+1) under a durable identity (run id, subtask, action and the attempt inspected, with the prior state's digest, under the workspace run lock), and the effect is decided afresh by the tool's own authority path when the resumed loop reaches it, inside the unit's ledger ceiling. Durable identity and revalidation are both present: nothing to fix |
+| Not built (rows stay open) | Per-grant run events and evidence records (`GAP-A1-03`): the ledger holds the grants. Repair after a terminal requirement gap (`GAP-A3-02`). The `outcome.py` reason-prefix readers other than the new work stop. `ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001`: unchanged by S8 (a replay is bound to the same contracts and passes the same gates); it still needs a statement-to-file authority and stays for the final closure |
+| Known limit | The ledger is not bound to the goal: a resume with no checkpoint continues whatever ledger the workspace holds (it can only charge more, never less). Deleting every control file and starting a NEW run is a new run by definition; S8 does not defend against deletion of control state by the workspace owner, only against a resume turning it into a refund |
+
+### 20.4 Own defects found and fixed inside the slice
+
+| Defect (found by) | Fix |
+|---|---|
+| A run that granted before its resume decision overwrote the earlier ledger (the direct pipeline tests) | The displaced ledger is carried (`previous`) until adopted or the run ends |
+| The direct resume adopted the ledger after its run state had been opened, so its retry budgets were not continued (`test_a_resumed_direct_run_continues_the_units_family_history`) | `continue_recorded_allowance` at the adoption point |
+| The carried family was written into `last_failure_signature`, which other owners read as "this invocation is repairing"; a resumed direct run's first attempt was refused `CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE` | The separate `inherited_failure_signature` field |
+| A resume whose ledger was missing ran under a NEW ledger (a fresh hour, fresh attempts, fresh unit ceilings, an empty family history), and one whose ledger was unreadable or foreign ran the work again as a fresh run - both a refund the S8 invariant forbids (owner review of the uncommitted slice, 2026-11-17; the first form of this section called the missing case a "known limit") | The fail-closed rule in 20.2: the typed `resume_refused`, decided before any grant or model call; the tests that pinned the old behaviour (`..._is_never_adopted`, `..._is_a_new_run`, `test_without_the_continued_ledger_...`) now assert the refusal |
+
+### 20.5 Goldens (the one authorized additive migration)
+
+Candidates were written to evidence, compared as JSON trees, and applied by a guard that accepts only the S8 leaves
+(`golden_leaf_update_s8.py`, `golden_leaf_apply.txt`): 39 goldens gained the RunRecord `work_ledger` leaf (and, where the result carries a
+ControlState, the empty `accepted_units`); 1 is unchanged. One golden was REFUSED by the guard at first:
+`legacy_resume_after_failure`, whose resumed RunRecord's `retry_counters.targeted_retry_count` goes 0 -> 3. That is the C-07 continuity itself
+on the real pipeline (the resumed run inherits the first run's three targeted charges), but it is a changed value outside the additive leaves.
+The owner authorized exactly that leaf on 2026-11-17 (`tests/golden/kernel/legacy_resume_after_failure.json`,
+`$.run_records[1].retry_counters.targeted_retry_count`, 0 -> 3). The guard was extended for exactly that file, path and value pair (any other
+delta in the file still refuses it), the form was regenerated on the final code (byte-identical to the earlier candidate) and applied:
+`golden_forms_ruling2/`, `golden_leaf_dryrun_ruling2.txt`, `golden_leaf_apply_ruling2.txt` (3 S8 leaves + the one authorized value, 0 refused).
+
+One already-migrated golden moved inside the additive leaf: `enforce_plan_invalid`, whose RunRecord `work_ledger` was `null` (the run granted
+nothing) and is now the ledger reference with zero counts, because an enforce run opens its ledger before planning (20.3, "Work that passes no
+grant"). The file was restored to its committed form and the leaf applied by the same guard against it (`golden_forms_ruling2b/`,
+`golden_leaf_apply_ruling2b.txt`: the `work_ledger` reference and the empty `accepted_units`, 0 refused). No other golden changed: all 41
+scenarios pass on the final code.
+
+### 20.6 Proof
+
+| Proof | Result |
+|---|---|
+| S8 tests | `tests/test_s8_work_ledger.py` (42), `test_s8_accepted_work_resume.py` (13), `test_s8_accepted_candidate_snapshot.py` (26), `test_s8_failure_family_authority.py` (9), one loop-level test added to `test_non_candidate_failure_scoped_reset_001.py` |
+| Mutants (scratch copy, real tree unchanged) | 44 of 44 killed: ledger and budget 15, retry family 10 (one void kill replaced and re-run), snapshot 8, pipeline 11 (`mutants_s8_*.txt`) |
+| Focused gate | `focused_gate_s8_a.txt` 969 passed; `focused_gate_s8_b.txt` 92 passed; `tests/architecture` green; ruff and pylint clean |
+| A/B on the affected boundary | Three multi-invocation verifier-replay scenarios: statuses, Developer call sequences, events, builds and approvals identical to b6ac020 (`probe_replay_baseline.txt` = `probe_replay_s8.txt`) |
+| Reds, all identical at pristine b6ac020 | `S6-STALE-SUCCESS-EXPECTATION-TESTS-001` representatives: `test_run_record` (1), `test_sm_failure_families` (1), `test_sm_budget_transitions` (1), `test_verifier_replay_unit_001` (4), `test_file_integrity_contract_001b` (1), `test_w37_human_wait_clock` (2) |
+| Fail-closed resume (second ruling, final code) | `tests/test_s8_work_ledger.py` now 49 and `test_s8_accepted_work_resume.py` 16: the five negatives (resume with the ledger deleted, corrupt, inconsistent or foreign is `resume_refused` with zero model calls and no new ledger, on the lease, the direct pipeline and the enforce loop; the exact ledger preserves time, attempts and family history; a new run afterwards gets its own ledger; a deleted checkpoint, ControlState or accepted snapshot under a valid ledger recomputes the work and refunds nothing). Final gate `focused_gate_s8_ruling2.txt`: 222 passed, 2 golden reds that were the one `enforce_plan_invalid` leaf (20.5), green after the guarded apply |
+| Mutants of the fail-closed branch (scratch copy) | 14 of 14 killed, each by the assertion it targets (`mutants_s8_resume_run1.txt`); they succeed A06, D03, D04, D09 and D10, whose sites the rule replaced. D07's guard is now covered by its own lease test (R08) |
+| A/B at the resume boundary | 177 resume, crash and disposition tests across 17 files: 24 red, 19 of them red at pristine `b6ac020` (`adjacent_resume_before_fix.txt`, `adjacent_resume_baseline_b6ac020.txt`). The 5 new reds were 2 product defects of the first form of the rule (no ledger after a TOOL-only stop; the ControlState's RunRecord reference used as the parent identity), both fixed at the root, and 3 hand-seeded states without a ledger (seeded). After the fixes: 16 red, all inside the pristine-red set (`adjacent_resume_after_fix.txt`); the only ones that log a ledger refusal are the three of `S8-RESUME-FIXTURES-WITHOUT-LEDGER-001` |
+| Guards on the final tree | `tests/architecture`, `test_backlog_registry.py`, `test_strict_doubles.py`: 231 passed; ruff and pylint clean (`lint_s8_ruling2.txt`) |
+| Not run | The full suite, the whole state-machine tier, any live model, the UI suite. The 44 earlier mutants were not re-run (their surviving sites are unchanged) |

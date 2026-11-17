@@ -515,7 +515,10 @@ def test_a_kept_pre_s6_golden_differs_from_the_current_one_only_where_s6_writes(
         assert _extras(kinds_before, kinds_after) in ([], ["result.reconciled"]), name
     assert sum(e["kind"] == "result.reconciled" for row in after["run_events"] for e in row["events"]) >= 1, name
     for record_before, record_after in zip(before["run_records"], after["run_records"], strict=True):
-        assert set(record_after) - set(record_before) <= {"requirement_truth", "model_admission"}
+        # S8 (C-08; the one authorized additive migration, 2026-11-17): every RunRecord also gains the ``work_ledger`` reference (null when the run
+        # granted no work) - a leaf-only update of 39 goldens, guarded by ~/kriya-evidence/s8-b6ac020/golden_leaf_update_s8.py (section 20.5 of
+        # docs/architecture/12-D0-CLOSURE-HARDENING.md).
+        assert set(record_after) - set(record_before) <= {"requirement_truth", "model_admission", "work_ledger"}
         assert record_after.get("model_admission") is not None or name == "enforce_plan_invalid" or record_after.get("model_admission") is None
         assert (record_before["lifecycle_state"] == "SUCCESS") <= (record_after["terminal_status"] in ("SUCCESS", "APPLIED_REQUIREMENTS_OPEN"))
 

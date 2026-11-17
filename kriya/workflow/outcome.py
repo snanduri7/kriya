@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from kriya.control.run_coordinator import WORK_LEDGER_STOP_PREFIXES
 from kriya.workflow.contract_lifecycle import CONTRACT_REGISTRY_STOP_REASON_CODES
 from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.file_integrity import DETERMINISTIC_FILE_INTEGRITY_STOPS, VERIFICATION_TREE_STOP_CODES
@@ -182,6 +183,8 @@ def terminal_failure_category(state: RunState) -> str:
         else "unauthorized_generation_target" if is_scope_defect_stop
         else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure
         else "generation_budget_exhausted" if is_generation_budget_exhausted_stop
+        # S8 (C-08): the work ledger refused the next grant (the unit's invocation ceiling, or a grant that could not be durably recorded).
+        else "work_ceiling_exhausted" if state.environment_failure and state.environment_failure.startswith(WORK_LEDGER_STOP_PREFIXES)
         else "containment_setup_failed" if is_containment_setup_failed_stop
         else "regression_unattributed" if is_regression_unattributed_stop
         else "fallback_model_incompatible" if is_fallback_incompatible_stop

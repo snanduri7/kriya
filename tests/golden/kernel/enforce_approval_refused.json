@@ -929,6 +929,7 @@
  "result": {
   "control_state": {
    "acceptance_approval_digest": null,
+   "accepted_units": {},
    "base_commit": "9feb8d6e4a285cf42532663f0e23150071dbba90",
    "created_at": "<clock>",
    "current_artifact_registry_hash": null,
@@ -1630,6 +1631,14 @@
    "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [],
+   "work_ledger": {
+    "developer_attempts": 1,
+    "ledger_id": "<run:1>",
+    "resumed_from": null,
+    "unit_invocations": {
+     "s1": 1
+    }
+   },
    "work_unit_states": null,
    "workspace_identity": "<workspace_id:1>"
   }

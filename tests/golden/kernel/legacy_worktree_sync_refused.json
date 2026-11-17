@@ -516,6 +516,7 @@
  "result": {
   "control_state": {
    "acceptance_approval_digest": null,
+   "accepted_units": {},
    "base_commit": null,
    "created_at": "<clock>",
    "current_artifact_registry_hash": null,
@@ -874,6 +875,14 @@
    "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [],
+   "work_ledger": {
+    "developer_attempts": 0,
+    "ledger_id": "<run:1>",
+    "resumed_from": null,
+    "unit_invocations": {
+     "direct": 1
+    }
+   },
    "work_unit_states": {
     "direct": {
      "blocked_by": [],

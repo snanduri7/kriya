@@ -63,6 +63,16 @@ SUBTASK_STATE_TOOL_FAILED = "tool_failed"
 # The operator's terminal disposition of a TOOL subtask: never executed again, never "completed"; it keeps the plan from completing.
 SUBTASK_STATE_TOOL_ABANDONED = "tool_abandoned"
 
+def _validated_accepted_units(raw: Any) -> Dict[str, str]:
+    """S8: unit id -> 64-hex candidate binding digest. Anything else is an invalid state (never a partly trusted reference)."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"accepted_units must be an object, got {type(raw).__name__}")
+    for key, value in raw.items():
+        if not isinstance(key, str) or not isinstance(value, str) or len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+            raise ValueError(f"accepted_units[{key!r}] must be a sha256 hex digest, got {value!r}")
+    return dict(raw)
+
+
 def _validated_tool_attempts(raw: Any) -> Dict[str, int]:
     """A persisted attempt counter is exactly {non-empty str: int >= 1}; anything else is a malformed state and raises (ControlState.from_dict's callers turn that into the
     typed ControlStateUnreadableError - the bytes are never read as "no attempts")."""
@@ -176,6 +186,13 @@ class ControlState:
     # compatibility contract: a state that never held an attempt serializes and hashes exactly as before the field existed.
     tool_attempts: Dict[str, int] = field(default_factory=dict)
 
+    # S8 (C-07, ruling 9): unit id -> the candidate binding digest (verification_binding.bind_candidate) of the unit's ACCEPTED work as it is recorded in the accepted-
+    # candidate snapshot (.kriya/control/accepted_candidate.json). The second half of an ordered pair: the snapshot is durably written first, this reference second. A
+    # resume may replay a unit's accepted bytes only when this digest, the snapshot's own entry and the digest recomputed from the snapshot's bytes are all equal;
+    # either half alone proves nothing. Survives the discard of a stopped plan's sandbox (the completion states do not); cleared when the plan commits. Omitted from
+    # to_dict (and so from content_hash) while empty: a state that never recorded one serializes and hashes exactly as before the field existed.
+    accepted_units: Dict[str, str] = field(default_factory=dict)
+
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
 
@@ -249,6 +266,8 @@ class ControlState:
         }
         if self.tool_attempts:  # compatibility contract: omitted while empty (see the field)
             payload["tool_attempts"] = {k: self.tool_attempts[k] for k in sorted(self.tool_attempts)}
+        if self.accepted_units:  # compatibility contract: omitted while empty (see the field)
+            payload["accepted_units"] = {k: self.accepted_units[k] for k in sorted(self.accepted_units)}
         return payload
 
     @classmethod
@@ -283,6 +302,7 @@ class ControlState:
             requirement_contract_digest=data.get("requirement_contract_digest"),
             verification_contract_digest=data.get("verification_contract_digest"),
             tool_attempts=_validated_tool_attempts(data.get("tool_attempts", {})),
+            accepted_units=_validated_accepted_units(data.get("accepted_units", {})),
             created_at=data.get("created_at", _now_iso()),
             updated_at=data.get("updated_at", _now_iso()),
         )

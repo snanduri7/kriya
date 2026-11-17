@@ -724,3 +724,37 @@ def load_artifact_registry(workspace_path: str) -> ArtifactRegistry:
         return ArtifactRegistry.from_dict(data)
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise ArtifactRegistryCorruptError(path, f"invalid registry: {type(error).__name__}: {error}") from error
+
+
+# ----------------------------------------------------------------------------- S8 (C-07, C-08): the work ledger and the
+# accepted-candidate snapshot. Two control documents of the workspace's authority root, written through the one control
+# writer (private, atomic, durable). A document that is absent, not this workspace's or not parseable loads as None:
+# its reader then reuses nothing (kriya/control/work_ledger.py, kriya/workflow/accepted_candidate.py).
+_WORK_LEDGER_FILENAME = "work_ledger.json"
+_ACCEPTED_CANDIDATE_FILENAME = "accepted_candidate.json"
+
+
+def work_ledger_path(workspace_path: str) -> str:
+    return os.path.join(_control_dir(workspace_path), _WORK_LEDGER_FILENAME)
+
+
+def accepted_candidate_path(workspace_path: str) -> str:
+    return os.path.join(_control_dir(workspace_path), _ACCEPTED_CANDIDATE_FILENAME)
+
+
+def save_work_ledger(workspace_path: str, payload: Dict[str, Any]) -> None:
+    """Durable (fsync + atomic replace): a grant is authoritative only once this returns."""
+    _save_json_document(workspace_path, work_ledger_path(workspace_path), payload, durable=True)
+
+
+def load_work_ledger(workspace_path: str) -> Optional[Dict[str, Any]]:
+    return _load_json_document(work_ledger_path(workspace_path), workspace_path)
+
+
+def save_accepted_candidate(workspace_path: str, payload: Dict[str, Any]) -> None:
+    """Durable: the snapshot is written before the ControlState that refers to it."""
+    _save_json_document(workspace_path, accepted_candidate_path(workspace_path), payload, durable=True)
+
+
+def load_accepted_candidate(workspace_path: str) -> Optional[Dict[str, Any]]:
+    return _load_json_document(accepted_candidate_path(workspace_path), workspace_path)

@@ -216,7 +216,8 @@ AUDITED_REPOSITORY_SAFE = {
     "autonomy.developer_investigation_max_turns": "bound of a read-only loop",
     "autonomy.generation_gate_reserve_seconds": "time budget",
     "autonomy.generation_seconds_per_file_estimate": "time budget",
-    "autonomy.generation_time_budget_seconds": "time budget",
+    # S8 (C-08, X-14): autonomy.generation_time_budget_seconds is no longer repository-safe at any value: it is value-bounded (1..3600), pinned by
+    # tests/test_s8_work_ledger.py.
     "autonomy.max_consecutive_no_progress_attempts": "stop rule",
     "autonomy.run_verification_enabled": "default True: a repository can only restrict",
     "autonomy.self_correction_loop_max_turns": "bound; matters only once enabling the loop is authorized",

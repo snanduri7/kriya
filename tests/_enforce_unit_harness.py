@@ -36,6 +36,7 @@ class Run:
     grader_prompts: List[str] = field(default_factory=list)                               # user prompts sent to the run-verification grader (the captured-output evidence it judged)
     builds: List[Any] = field(default_factory=list)                                       # ("compile"|"tests", on_build() result) for every build/test gate execution, in order
     developer_calls: List[Optional[str]] = field(default_factory=list)                    # the unit of EVERY Developer request, in order (a replayed verifier makes none)
+    planner_calls: int = 0                                                                # how many times the Planner was asked for the plan
     developer_requests: List[Tuple[Optional[str], str, str]] = field(default_factory=list)  # (unit, the file the request was answered for, the system prompt's first line)
 
 
@@ -44,9 +45,11 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
                 base_files: Optional[Dict[str, str]] = None, app_output: str = "ok\n", callback: Optional[Callable] = None,
                 record_steps: bool = False, on_execute: Optional[Callable[[Any], None]] = None, on_build: Optional[Callable[[], Any]] = None,
                 run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None, init_git: bool = True,
-                on_tests: Optional[Callable[[Any], Dict[str, Any]]] = None) -> Run:
+                on_tests: Optional[Callable[[Any], Dict[str, Any]]] = None, existing_workspace: Any = None,
+                execute_kwargs: Optional[Dict[str, Any]] = None, configure: Optional[Callable[[Any], None]] = None) -> Run:
     """``units``: a source may be a callable (called once per Developer request of that unit). ``on_tests(validator)``: the tests gate's answer for that
-    validator's tree (default: PASSING)."""
+    validator's tree (default: PASSING). ``existing_workspace``: run again in the workspace an earlier call created (a later run of the same work: nothing is
+    created or committed), with ``execute_kwargs`` passed to the controller (``resume=True``). ``configure(cfg)``: adjust the run's configuration."""
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -62,12 +65,15 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
     cfg.paths.memory = str(tmp_path / "memory")
     cfg.logging.file_enabled = False
     cfg.logging.run_file_enabled = False
-    workspace = tmp_path / "ws"
-    workspace.mkdir(parents=True)
-    for name, text in (base_files or {"README.md": "base\n"}).items():
-        (workspace / name).parent.mkdir(parents=True, exist_ok=True)
-        (workspace / name).write_text(text)
-    if init_git:      # W3-3 U4: False leaves the folder as a plain NO_GIT directory (the production admission cases)
+    if configure is not None:
+        configure(cfg)
+    workspace = existing_workspace if existing_workspace is not None else tmp_path / "ws"
+    if existing_workspace is None:
+        workspace.mkdir(parents=True)
+        for name, text in (base_files or {"README.md": "base\n"}).items():
+            (workspace / name).parent.mkdir(parents=True, exist_ok=True)
+            (workspace / name).write_text(text)
+    if init_git and existing_workspace is None:      # W3-3 U4: False leaves the folder as a plain NO_GIT directory (the production admission cases)
         git(workspace, "init", "-q")
         git(workspace, "add", "-A")
         git(workspace, "commit", "-qm", "base")
@@ -163,7 +169,8 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
          patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", new=run_app), \
          patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(object(), None)), \
          patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output", return_value=plan):
-        run.result = asyncio.run(WorkflowController(engine).execute(goal, str(workspace), migration_mode="enforce", approval_callback=callback or default_callback, **({"run_id": run_id} if run_id else {})))
+        run.result = asyncio.run(WorkflowController(engine).execute(goal, str(workspace), migration_mode="enforce", approval_callback=callback or default_callback, **({"run_id": run_id} if run_id else {}), **(execute_kwargs or {})))
+    run.planner_calls = engine.planner.run.await_count
     return run
 
 

@@ -3675,7 +3675,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 # advice must not fire for it.
                 if res.get("environment_failure") and res.get("failure_category") not in (
                     "unauthorized_generation_target", "candidate_independent_deterministic_failure",
-                    "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
+                    "generation_budget_exhausted", "work_ceiling_exhausted", "containment_setup_failed", "regression_unattributed",
                     "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
                     "requirements_unresolved", "contract_registry_blocked", "goal_insufficient_for_verification",
                     "verification_authority_required", "verification_authority_unavailable",
@@ -4867,7 +4867,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             # problem, and must not print this Java/Maven-specific advice.
             if res.get("environment_failure") and res.get("failure_category") not in (
                 "unauthorized_generation_target", "candidate_independent_deterministic_failure",
-                "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
+                "generation_budget_exhausted", "work_ceiling_exhausted", "containment_setup_failed", "regression_unattributed",
                 "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
                 "requirements_unresolved", "contract_registry_blocked", "goal_insufficient_for_verification",
                     "verification_authority_required", "verification_authority_unavailable",

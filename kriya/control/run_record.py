@@ -169,6 +169,8 @@ _ANNOTATABLE_FIELDS = frozenset({
     # S6 (C-02): the run's final requirement truth (the result contract's input) and, C-09, the model admission the run was
     # admitted under (a reference to the S1 decision: digests and status, never the qualification record itself).
     "requirement_truth", "model_admission",
+    # S8 (C-08): the work ledger the run worked under (kriya/control/work_ledger.py::WorkLedger.reference): derived, written with the terminal transition.
+    "work_ledger",
 })
 
 # Requirement 2: every persistent store is authoritative for its own content,
@@ -272,6 +274,9 @@ class RunRecord:
     requirement_truth: Optional[Dict[str, Any]] = None
     # C-09 / S6: the model admission decision of this run (``ModelAdmissionDecision.event_details()``); evidence only.
     model_admission: Optional[Dict[str, Any]] = None
+    # S8 (C-08): {"ledger_id", "resumed_from", "unit_invocations", "developer_attempts"} of the work ledger this run worked under, written with the terminal
+    # transition. Derived: the ledger document is the authority. Optional (earlier records load unchanged; a run that granted no work has none).
+    work_ledger: Optional[Dict[str, Any]] = None
     commits: List[Dict[str, Any]] = field(default_factory=list)
     # The CURRENT commit cycle (reset by each begin_commit); run-level
     # commit_result is the summary over ``commits`` once terminal.

@@ -1,7 +1,7 @@
 """Pure retry-state reduction with no filesystem, model, or network effects."""
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 API_CONTRACT_RECOVERY_MAX_ATTEMPTS = 3
 # Consecutive attempts without material progress (PRD-026) after which the
@@ -185,7 +185,9 @@ def _state_inputs(state, *, max_retries: int, targeted_max_retries: int, has_fal
     return dict(
         retry_count=state.budgets.retry_count,
         max_retries=max_retries,
-        targeted_retry_count=state.budgets.targeted_retry_count,
+        # S8 (C-07): a unit whose recorded allowance could not be read back has none left (continue_scoped_allowance).
+        targeted_retry_count=(max(state.budgets.targeted_retry_count, targeted_max_retries)
+                              if state.budgets.scoped_allowance_unaccounted else state.budgets.targeted_retry_count),
         targeted_max_retries=targeted_max_retries,
         has_implicated_files=bool(state.last_implicated_files),
         has_missing_files=bool(state.last_missing_files),
@@ -261,9 +263,82 @@ def observe_failure_family(budgets, previous_signature, current_signature) -> bo
         previous_signature is not None
         and current_signature != previous_signature
         and current_signature not in budgets.seen_failure_signatures
+        # S8 (C-07): with the unit's family history unreadable, no family can be shown to be new.
+        and not budgets.scoped_allowance_unaccounted
     )
     budgets.seen_failure_signatures.add(current_signature)
     return new_family
+
+
+# ----------------------------------------------------------------------------- S8 (C-07): the allowance continues across invocations of one unit.
+# What a unit's next invocation (in this run, or in a run that resumes its work ledger) must not get back: the failure families it has already seen and what it has
+# already charged against the scoped allowances. The full-set counter and the per-invocation attempt ceiling stay per invocation (the unit's invocation ceiling on the
+# work ledger bounds their sum). The signature stays what it is (the normalized validator evidence, C-07's allowance identity); this only carries it.
+
+def _encode_signature(value: Any) -> Any:
+    if isinstance(value, tuple):
+        return {"t": [_encode_signature(item) for item in value]}
+    if isinstance(value, (list, set, frozenset)):
+        items = [_encode_signature(item) for item in value]
+        return {"l" if isinstance(value, list) else "s": items if isinstance(value, list) else sorted(items, key=repr)}
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return {"r": repr(value)}
+
+
+def _decode_signature(value: Any) -> Any:
+    if isinstance(value, dict):
+        if "t" in value:
+            return tuple(_decode_signature(item) for item in value["t"])
+        if "l" in value:
+            return [_decode_signature(item) for item in value["l"]]
+        if "s" in value:
+            return frozenset(_decode_signature(item) for item in value["s"])
+        return ("__unrepresentable__", value.get("r"))
+    return value
+
+
+def scoped_allowance_state(budgets) -> dict:
+    """The part of ``budgets`` a later invocation of the same unit continues, as a JSON document."""
+    return {
+        "seen_failure_signatures": sorted((_encode_signature(signature) for signature in budgets.seen_failure_signatures), key=repr),
+        "last_failure_signature": _encode_signature(
+            budgets.last_failure_signature if budgets.last_failure_signature is not None else budgets.inherited_failure_signature),
+        "targeted_retry_count": budgets.targeted_retry_count,
+        "api_contract_recovery_count": budgets.api_contract_recovery_count,
+        "fallback_targeted_attempted": budgets.fallback_targeted_attempted,
+        "fallback_targeted_requested": budgets.fallback_targeted_requested,
+    }
+
+
+def continue_scoped_allowance(budgets, recorded: Optional[dict]) -> bool:
+    """Start ``budgets`` (a new invocation's) from what the unit's earlier invocations recorded; True when something was continued. With nothing recorded the unit
+    has not failed before and starts as before. A record that cannot be read back exactly is not guessed at: the scoped allowances start EXHAUSTED (the invocation may
+    still make full-set attempts under its own ceiling) - never a silent full grant."""
+    if not recorded:
+        return False
+    try:
+        seen = {_decode_signature(signature) for signature in recorded["seen_failure_signatures"]}
+        last = _decode_signature(recorded["last_failure_signature"])
+        targeted, api_contract = recorded["targeted_retry_count"], recorded["api_contract_recovery_count"]
+        attempted, requested = recorded["fallback_targeted_attempted"], recorded["fallback_targeted_requested"]
+        if type(targeted) is not int or type(api_contract) is not int or type(attempted) is not bool or type(requested) is not bool:
+            raise TypeError("counter types")
+        if last is not None:
+            hash(last)
+    except (KeyError, TypeError):
+        budgets.scoped_allowance_unaccounted = True
+        budgets.fallback_targeted_attempted = True
+        return True
+    budgets.seen_failure_signatures = seen
+    # NOT last_failure_signature: that field says "the previous attempt of THIS invocation failed like this" and other owners read it that way (the repeat-failure
+    # lookup, the repair context). The family the earlier invocations ended on is carried apart and read only by the family comparison of the first failure.
+    budgets.inherited_failure_signature = last
+    budgets.targeted_retry_count = targeted
+    budgets.api_contract_recovery_count = api_contract
+    budgets.fallback_targeted_attempted = attempted
+    budgets.fallback_targeted_requested = requested
+    return True
 
 
 def reset_scoped_budgets_for_new_family(budgets) -> None:

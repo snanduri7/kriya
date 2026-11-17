@@ -31,6 +31,8 @@ from kriya.control.run_coordinator import (
     coordinated_mutation,
     owning_run_work_unit,
     project_refusal_payload,
+    resume_ledger_refused_result,
+    resume_work_ledger,
 )
 from kriya.core.kernel import Kernel
 from kriya.core.llm import InferenceDeadlineError, LLMClient
@@ -2483,8 +2485,15 @@ class WorkflowEngine:
         # WAVE8 OI-134/OI-154: before any run state is written, every private root (state directory, authority home, Kriya's home, the workspace's .kriya
         # control/checkpoints) is a directory only this user can enter - a legacy wider one this user owns is tightened, another owner's is refused.
         ensure_private_roots(workspace_path, self.kernel.config)
+        # S8 (C-08): a requested resume continues the workspace's work ledger or is refused - decided here, before the run grants anything, indexes, plans or calls a
+        # model. A missing or unreadable ledger is the typed ``resume_refused`` result, never a fresh run under a new allowance (that is a new run, asked for as one).
+        # The ledger is continued whether or not a checkpoint is found later (lost work is not a refund); the checkpoint's own run is checked against it below.
+        if resume or resume_id:
+            ledger_refusal = resume_work_ledger(None, parent_found=False)
+            if ledger_refusal is not None:
+                return resume_ledger_refused_result(ledger_refusal, run_id=resume_id)
         if work_unit is None:
-            call_args = {name: value for name, value in locals().items() if name not in ("self", "work_unit")}
+            call_args = {name: value for name, value in locals().items() if name not in ("self", "work_unit", "ledger_refusal")}
             from kriya.workflow.plan_executor import execute_direct_goal
             return await execute_direct_goal(self.run_generation_workflow, call_args)
         if (predetermined_plan is not None or predetermined_design is not None
@@ -2716,12 +2725,22 @@ class WorkflowEngine:
         resume_restored_ledger: Any = None
         if resume or resume_id:
             target_id = resume_id or find_latest_checkpoint(workspace_path)
+            candidate = load_checkpoint(workspace_path, target_id) if target_id else None
+            # S8 (C-08): a resume continues the SAME work ledger (consumed generation time, Developer attempts, unit invocations, retry-family history) or it is
+            # REFUSED - the typed ``resume_refused`` result, never a fresh run. With a checkpoint the ledger must name the run that saved it; with none, nothing is
+            # reused and the work is generated again, still under the ledger the workspace holds (lost work is not a refund of what was consumed).
+            ledger_refusal = resume_work_ledger(
+                (candidate.get("_run_record") or {}).get("run_id") if candidate and isinstance(candidate.get("_run_record"), dict) else None,
+                parent_found=bool(candidate),
+            )
+            if ledger_refusal is not None:
+                logger.error(f"Resume refused: the work ledger of the earlier run cannot be continued ({ledger_refusal}). Nothing is generated.")
+                return resume_ledger_refused_result(ledger_refusal, run_id=target_id)
             if not target_id:
-                logger.warning("No saved checkpoint found for this workspace - starting a fresh run instead.")
+                logger.warning("No saved checkpoint found for this workspace - nothing is reused; the run continues the workspace's work ledger.")
             else:
-                candidate = load_checkpoint(workspace_path, target_id)
                 if not candidate:
-                    logger.warning(f"Checkpoint '{target_id}' not found or unreadable - starting a fresh run instead.")
+                    logger.warning(f"Checkpoint '{target_id}' not found or unreadable - nothing is reused; the run continues the workspace's work ledger.")
                 else:
                     # PRD-008: the checkpoint is judged only by
                     # validate_resume_against_reality(). Workspace content,

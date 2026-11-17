@@ -490,6 +490,8 @@ def _enforce(tmp_path, monkeypatch, *, correct, approved, prior_digest=None):
         save_control_state(str(workspace), ControlState(
             schema_version=CURRENT_SCHEMA_VERSION, run_id="earlier", subtask_states={"s1": "completed"},
             subtask_completion_scope="workspace", acceptance_approval_digest=prior_digest))
+        from _work_ledger_seed import seed_work_ledger
+        seed_work_ledger(workspace, "earlier")   # S8: a resume continues the earlier run's work ledger or is refused before the rule under test
 
     async def check(**kwargs):
         prompt = "\n".join(f"{r.id}: {r.text}" for r in kwargs["requirements"].requirements)

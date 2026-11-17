@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
 
+from kriya.config.authority import GENERATION_TIME_BUDGET_CEILING_SECONDS as _GENERATION_TIME_BUDGET_CEILING_SECONDS
 from kriya.config.environment import (
     KRIYA_DIRECTORY_NAME,
     Environment,
@@ -403,7 +404,9 @@ class RemovedConfigFieldError(ValueError):
 # generous enough for local-model generation while still preventing an
 # unbounded run.  The reserve and per-file estimates remain independently
 # configurable only outside the sealed profile.
-PRODUCTION_GENERATION_TIME_BUDGET_SECONDS = 3600
+# S8 (C-08): ONE constant. It is defined by the field-authority owner (kriya/config/authority.py), where it is also the
+# packaged ceiling a repository configuration may not exceed; the production seal below reads the same value.
+PRODUCTION_GENERATION_TIME_BUDGET_SECONDS = _GENERATION_TIME_BUDGET_CEILING_SECONDS
 
 # These guarantees have no weakening configuration knob: generation already
 # refuses to run in the application workspace when isolated-worktree creation

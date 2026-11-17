@@ -1568,6 +1568,14 @@
     "commit:<hex:1>",
     "static_analysis:DISABLED:eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18"
    ],
+   "work_ledger": {
+    "developer_attempts": 1,
+    "ledger_id": "<run:2>",
+    "resumed_from": null,
+    "unit_invocations": {
+     "direct": 1
+    }
+   },
    "work_unit_states": {
     "direct": {
      "blocked_by": [],

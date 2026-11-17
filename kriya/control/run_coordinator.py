@@ -35,7 +35,13 @@ from kriya.control.commit_state import (
     UncertainWorkspaceStateError,
     assess_workspace_commit_state,
 )
-from kriya.control.persistence import load_run_record, save_run_record
+from kriya.control.persistence import (
+    load_run_record,
+    load_work_ledger,
+    save_run_record,
+    save_work_ledger,
+    work_ledger_path,
+)
 from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import (
     COMMIT_COMMITTED,
@@ -49,6 +55,33 @@ from kriya.control.run_record import (
     summarize_commit_result,
 )
 from kriya.control.source_identity import SourceIdentity, run_source_identity
+from kriya.control.work_ledger import (
+    DIRECT_UNIT,
+    GRANT_DEVELOPER_ATTEMPT,
+    GRANT_UNIT_INVOCATION,
+    UNIT_INVOCATION_CEILING,
+    WORK_CEILING_EXHAUSTED,
+    WORK_LEDGER_MISSING,
+    WORK_LEDGER_NOT_PERSISTED,
+    WORK_LEDGER_RESUME_REFUSED,
+    WorkLedger,
+    WorkLedgerError,
+)
+from kriya.control.work_ledger import (
+    WORK_LEDGER_NOT_THIS_WORK as WORK_LEDGER_NOT_THIS_WORK,  # re-exported: the reason codes of a refused resume
+)
+from kriya.control.work_ledger import (
+    WORK_LEDGER_STOP_PREFIXES as WORK_LEDGER_STOP_PREFIXES,  # re-exported: the terminal classification's reason-code prefixes
+)
+from kriya.control.work_ledger import (
+    WORK_LEDGER_UNREADABLE as WORK_LEDGER_UNREADABLE,
+)
+from kriya.control.work_ledger import (
+    ResumeLedgerRefused as ResumeLedgerRefused,  # re-exported: the enforce path's typed stop for a refused resume
+)
+from kriya.control.work_ledger import (
+    resume_ledger_refused_result as resume_ledger_refused_result,  # re-exported: the one ``resume_refused`` result both pipelines return
+)
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
 from kriya.foundation.human_wait import register_human_wait_scope
@@ -88,6 +121,18 @@ class _RunLease:
     # controller's ``.enforce`` row): (db path, row id, the row writer's corrector), in first-write order. Each is reconciled with the record after the terminal
     # decision (``_reconcile_trace_rows``).
     trace_rows: list = field(default_factory=list)
+    # S8 (C-07, C-08): the run's work ledger (kriya/control/work_ledger.py), created at the first grant or adopted by a resume. ``prior_consumed_seconds`` is the generation
+    # time the ledger had consumed before this process; it is folded into ``generation_clock`` when the clock starts, so every reader of the clock sees the same remaining
+    # budget. ``work_unit`` is the plan unit whose invocation is granted now (None: the direct shape).
+    work_ledger: Optional[WorkLedger] = None
+    # Why this run's own new ledger had no valid earlier ledger to carry (WORK_LEDGER_MISSING / WORK_LEDGER_UNREADABLE), None when it carries one.
+    displaced_ledger_reason: Optional[str] = None
+    # The run's ONE resume-ledger decision: ``resume_adopted`` once it continues the workspace's ledger, ``resume_refusal`` (the reason code) once its resume was refused.
+    # A refusal is final for the run: it is granted nothing afterwards.
+    resume_adopted: bool = False
+    resume_refusal: Optional[str] = None
+    prior_consumed_seconds: float = 0.0
+    work_unit: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +190,14 @@ def _git_revision(workspace_path: str, revision: str) -> Optional[str]:
 def transition_mutating_run(context: RunContext, state: RunLifecycle, *, durable: bool = False, **updates: Any) -> RunRecord:
     """Persist one validated lifecycle transition for the active capability. ``durable=True`` (D1): an authoritative TOOL lifecycle transition - temp write, file fsync, atomic
     replace, parent-directory fsync, every step required (a failure raises kriya.repository.atomic_write.DurableWriteError and the record is not advanced)."""
+    ledger = context._lease.work_ledger
+    if ledger is not None and state in (RunLifecycle.SUCCESS, RunLifecycle.FAILURE, RunLifecycle.UNCERTAIN):
+        # S8 (C-08): the terminal record names the ledger the run worked under and its final counts (derived; the ledger document is the authority). The run's last
+        # granted work is over, so its grant is settled with the clock's real consumption first.
+        ledger.open_grant = None
+        ledger.previous = None      # the run ends without having adopted the ledger it displaced: it was a new run
+        _save_work_ledger(context)
+        updates.setdefault("work_ledger", ledger.reference())
     return _persist(context, lambda record: record.transition(state, **updates), durable=durable)
 
 
@@ -274,8 +327,9 @@ def claim_run_generation_clock() -> Optional[float]:
     lease = context._lease
     paused_since = lease.human_wait_started
     if lease.generation_clock is None:
-        # a claim inside a wait starts a clock that is frozen until the wait ends (effective start == now, see below)
-        lease.generation_clock = paused_since if paused_since is not None else _now()
+        # a claim inside a wait starts a clock that is frozen until the wait ends (effective start == now, see below).
+        # S8: a resumed ledger's consumption is already spent, so the clock starts that far in the past.
+        lease.generation_clock = (paused_since if paused_since is not None else _now()) - lease.prior_consumed_seconds
     if paused_since is not None:
         return lease.generation_clock + (_now() - paused_since)
     return lease.generation_clock
@@ -319,6 +373,304 @@ def follow_run_generation_clock(state: Any) -> None:
     context = current_run_context()
     if context is not None:
         context._lease.clock_followers.append(weakref.ref(state))
+
+
+# ----------------------------------------------------------------------------- S8 (C-07, C-08): the work ledger on the lease.
+# The lease is the ledger's one owner inside a run; ``kriya/control/work_ledger.py`` is its state, ``persistence`` its writer.
+# Outside a run every function is a no-op (None / nothing): pure owners and their tests stay unchanged.
+
+def _consumed_seconds(lease: _RunLease) -> float:
+    """The generation time the ledger has consumed: what earlier runs consumed plus this process's clock (a human wait excluded, exactly like the clock itself)."""
+    if lease.generation_clock is None:
+        return lease.prior_consumed_seconds
+    moment = lease.human_wait_started if lease.human_wait_started is not None else _now()
+    return max(0.0, moment - lease.generation_clock)
+
+
+def _ledger_on_disk(context: RunContext) -> Tuple[Optional[WorkLedger], Optional[str]]:
+    """(the workspace's ledger document as a ledger, None) or (None, why there is none to continue)."""
+    if not os.path.lexists(work_ledger_path(context.workspace_path)):
+        return None, WORK_LEDGER_MISSING
+    try:
+        payload = load_work_ledger(context.workspace_path)
+        if payload is None:
+            raise WorkLedgerError("not a readable document")
+        return WorkLedger.from_dict(payload), None
+    except Exception as error:
+        logger.warning("Run %s: the work ledger cannot be read (%s).", context.run_id, error)
+        return None, WORK_LEDGER_UNREADABLE
+
+
+def _work_ledger(context: RunContext) -> WorkLedger:
+    """The run's ledger; created at its first grant. Creating it must not destroy what a later resume decision of this same run would continue: the ledger found on
+    disk is carried inside the new one (``previous``) until the run adopts it or ends."""
+    lease = context._lease
+    if lease.work_ledger is None:
+        fresh = WorkLedger.new(context.run_id)
+        earlier, lease.displaced_ledger_reason = _ledger_on_disk(context)
+        if earlier is not None:
+            fresh.previous = earlier.folded().to_dict()
+        lease.work_ledger = fresh
+    return lease.work_ledger
+
+
+def _save_work_ledger(context: RunContext) -> Optional[str]:
+    """Write the ledger with the clock's current consumption; an error string instead of raising (the caller decides what a failed write means)."""
+    ledger = _work_ledger(context)
+    ledger.consumed_seconds = max(ledger.consumed_seconds, _consumed_seconds(context._lease))
+    try:
+        save_work_ledger(context.workspace_path, ledger.to_dict())
+    except Exception as error:
+        logger.error("Run %s: work ledger not persisted: %s", context.run_id, error)
+        return f"{type(error).__name__}: {error}"
+    return None
+
+
+def open_work_ledger() -> Optional[str]:
+    """The run's ledger exists durably from here on, before the run does any work of its own. A plan run calls this where it starts (and after its resume decision): work
+    that passes no grant (planning, a TOOL subtask) must still leave the ledger a later resume continues - without it, a resume of a run that stopped at such work would
+    find no ledger and be refused. None when the ledger is written (or already was, or outside a run); otherwise the error, and nothing is kept in memory."""
+    context = current_run_context()
+    if context is None or context._lease.resume_refusal is not None or context._lease.work_ledger is not None:
+        return None
+    _work_ledger(context)
+    error = _save_work_ledger(context)
+    if error is not None:
+        context._lease.work_ledger = None
+    return error
+
+
+def _resume_refused(context: RunContext, reason: str) -> str:
+    """The run's resume is refused, once and for the whole run: nothing is granted to it afterwards. A ledger this run displaced before it learned that (a grant made before
+    the resume decision) is put back as the workspace's ledger, with what this run already charged added - a refused resume never costs the earlier work its history."""
+    lease = context._lease
+    lease.resume_refusal = reason
+    current = lease.work_ledger
+    if current is not None and current.previous is not None:
+        restored = WorkLedger.from_dict(current.previous)
+        restored.absorb(current)
+        restored.runs = [run for run in restored.runs if run != context.run_id]   # this run charged the ledger; it did not continue it
+        lease.work_ledger = restored
+        _save_work_ledger(context)
+    elif current is not None and lease.resume_adopted and len(current.runs) > 1:
+        # The ledger was continued before the earlier work was identified, and that work turned out to be another run's: this run is not one of the ledger's runs.
+        current.runs = [run for run in current.runs if run != context.run_id]
+        _save_work_ledger(context)
+    logger.error("Run %s: resume refused - the work ledger cannot be continued (%s). Nothing is granted to this run.", context.run_id, reason)
+    return reason
+
+
+def _resume_refusal_stop(context: RunContext) -> Optional[str]:
+    """The typed refusal of every grant asked by a run whose resume was refused, else None."""
+    reason = context._lease.resume_refusal
+    if reason is None:
+        return None
+    return f"{WORK_LEDGER_RESUME_REFUSED}: this run's resume was refused ({reason}); no work is granted to it."
+
+
+def resume_work_ledger(prior_run_id: Optional[str], *, parent_found: bool = True) -> Optional[str]:
+    """The active run was asked to resume: it continues the workspace's ledger, or its resume is REFUSED. None when the ledger is adopted (or already was); otherwise the
+    reason code, and the caller must stop with the typed refusal - a refused resume is never continued as a fresh run (a new allowance is a new run, asked for as one).
+
+    ``parent_found``: the resume identified the earlier work (a checkpoint, a ControlState) and ``prior_run_id`` is the run that recorded it; the ledger must name that run.
+    False: the earlier work is not identified (yet, or at all) - the run continues the ledger the workspace holds, which owns what was consumed whether or not any of the
+    earlier work can be reused. The direct pipeline asks this first, before it grants anything (a missing or unreadable ledger is refused with nothing written), and asks
+    again with the checkpoint's run once it has read one.
+
+    Never a partial adoption: time, attempts, unit invocations and retry-family history continue together. Whatever this run already recorded under its own ledger is
+    added, never dropped."""
+    context = current_run_context()
+    if context is None:
+        return None
+    lease = context._lease
+    if lease.resume_refusal is not None:
+        return lease.resume_refusal
+    current = lease.work_ledger
+    if current is not None and (prior_run_id in current.runs or (lease.resume_adopted and not parent_found)):
+        return None
+    if current is None:
+        # Nothing was granted yet: the disk holds the earlier state.
+        earlier, reason = _ledger_on_disk(context)
+        earlier = earlier.folded() if earlier is not None else None
+    else:
+        # This run already works under its own ledger; the earlier state is the one that ledger displaced.
+        earlier = WorkLedger.from_dict(current.previous) if current.previous is not None else None
+        reason = lease.displaced_ledger_reason
+    if earlier is None:
+        return _resume_refused(context, reason or WORK_LEDGER_NOT_THIS_WORK)
+    if parent_found and (not prior_run_id or prior_run_id not in earlier.runs):
+        # The earlier work names no run, or another one: nothing ties it to the ledger the workspace holds.
+        return _resume_refused(context, WORK_LEDGER_NOT_THIS_WORK)
+    adopted = earlier.continued_by(context.run_id)
+    if current is not None:   # work this run already granted before it learned what it resumes (its time is on the live clock)
+        adopted.developer_attempts += current.developer_attempts
+        for unit, count in current.unit_invocations.items():
+            adopted.unit_invocations[unit] = adopted.unit_invocations.get(unit, 0) + count
+        for unit, state in current.retry.items():
+            adopted.retry.setdefault(unit, state)
+        adopted.open_grant = current.open_grant
+    # The earlier consumption is spent: move the clock (and every state that copied it) that far back, once.
+    added = adopted.consumed_seconds
+    lease.prior_consumed_seconds += added
+    if lease.generation_clock is not None:
+        lease.generation_clock -= added
+        for reference in lease.clock_followers:
+            follower = reference()
+            if follower is not None:
+                follower.budget_started_monotonic = lease.generation_clock
+    lease.work_ledger = adopted
+    error = _save_work_ledger(context)
+    if error is not None:
+        # The continuation is not durable: this run would work under a ledger a later resume cannot see.
+        lease.work_ledger = current
+        lease.prior_consumed_seconds -= added
+        if lease.generation_clock is not None:
+            lease.generation_clock += added
+            for reference in lease.clock_followers:
+                follower = reference()
+                if follower is not None:
+                    follower.budget_started_monotonic = lease.generation_clock
+        return _resume_refused(context, WORK_LEDGER_UNREADABLE)
+    lease.resume_adopted = True
+    logger.info("Run %s: continuing work ledger %s (%.1fs consumed, %d Developer attempt(s), unit invocations %s).",
+                context.run_id, adopted.ledger_id, adopted.consumed_seconds, adopted.developer_attempts, dict(sorted(adopted.unit_invocations.items())))
+    return None
+
+
+def _grant(context: RunContext, change: Callable[[WorkLedger], None], undo: Callable[[WorkLedger], None]) -> Optional[str]:
+    ledger = _work_ledger(context)
+    previous_grant = ledger.open_grant
+    change(ledger)
+    error = _save_work_ledger(context)
+    if error is not None:
+        undo(ledger)
+        ledger.open_grant = previous_grant
+        return f"{WORK_LEDGER_NOT_PERSISTED}: the grant could not be durably recorded ({error}); the work is not started."
+    return None
+
+
+def grant_unit_invocation(unit_id: str) -> Optional[str]:
+    """Durably count one invocation of ``unit_id`` BEFORE it starts. None when granted (or outside a run); otherwise the typed refusal: the unit's ceiling is exhausted
+    (WORK_CEILING_EXHAUSTED) or the grant could not be written (WORK_LEDGER_NOT_PERSISTED). The count is never given back - not by a failure, a crash or a resume."""
+    context = current_run_context()
+    if context is None:
+        return None
+    refusal = _resume_refusal_stop(context)
+    if refusal is not None:
+        return refusal
+    ledger = _work_ledger(context)
+    refusal = ledger.invocation_refusal(unit_id)
+    if refusal is not None:
+        return refusal
+
+    def change(target: WorkLedger) -> None:
+        target.unit_invocations[unit_id] = target.unit_invocations.get(unit_id, 0) + 1
+        target.open_grant = {"kind": GRANT_UNIT_INVOCATION, "unit_id": unit_id, "reserved_seconds": 0.0}
+
+    def undo(target: WorkLedger) -> None:
+        target.unit_invocations[unit_id] -= 1
+        if not target.unit_invocations[unit_id]:
+            del target.unit_invocations[unit_id]
+
+    return _grant(context, change, undo)
+
+
+@contextmanager
+def work_unit_scope(unit_id: str) -> Iterator[None]:
+    """The plan unit whose granted invocation runs inside this scope: nested generation work is attributed to it (its Developer attempts, its retry-family state) instead of
+    being counted as a unit of its own. The exit settles the grant with the clock's real consumption."""
+    context = current_run_context()
+    if context is None:
+        yield
+        return
+    lease = context._lease
+    previous, lease.work_unit = lease.work_unit, unit_id
+    try:
+        yield
+    finally:
+        lease.work_unit = previous
+        settle_work()
+
+
+def begin_generation_invocation() -> Tuple[str, Optional[str]]:
+    """(unit id, refusal) for one generation invocation that starts now. Inside ``work_unit_scope`` the plan's unit loop already granted it. Otherwise (the direct pipeline,
+    a milestone unit) the invocation IS the unit's: it is granted here, under the run's active work unit (``direct`` for a plain goal). Outside a run: no ledger, no refusal."""
+    context = current_run_context()
+    if context is None:
+        return DIRECT_UNIT, None
+    lease = context._lease
+    if lease.work_unit is not None:
+        return lease.work_unit, None
+    active = lease.record.active_work_unit if lease.record is not None else None
+    unit_id = (active or {}).get("work_unit_id") or DIRECT_UNIT
+    return unit_id, grant_unit_invocation(unit_id)
+
+
+def current_work_unit() -> Optional[str]:
+    context = current_run_context()
+    return context._lease.work_unit if context is not None else None
+
+
+def grant_developer_attempt(reserved_seconds: float, unit_id: Optional[str] = None) -> Optional[str]:
+    """Durably count one Developer attempt BEFORE the model is called, with the time the attempt reserves (the estimate the budget check just admitted). A process that dies
+    inside the attempt leaves the grant open, and the run that resumes the ledger is charged the reservation. None when granted (or outside a run), else the typed refusal."""
+    context = current_run_context()
+    if context is None:
+        return None
+    refusal = _resume_refusal_stop(context)
+    if refusal is not None:
+        return refusal
+    unit_id = context._lease.work_unit or unit_id or DIRECT_UNIT
+    # An invocation granted before the run learned what it resumes (the direct pipeline opens its state first) may have taken the unit past its ceiling once the
+    # earlier ledger was adopted: it does no Developer work.
+    used = _work_ledger(context).unit_invocations.get(unit_id, 0)
+    if used > UNIT_INVOCATION_CEILING:
+        return (f"{WORK_CEILING_EXHAUSTED}: unit {unit_id!r} has used all {UNIT_INVOCATION_CEILING} invocations its work ledger grants "
+                f"({used} recorded, ledger {_work_ledger(context).ledger_id}); a resume continues the same ledger.")
+
+    def change(target: WorkLedger) -> None:
+        target.developer_attempts += 1
+        target.open_grant = {"kind": GRANT_DEVELOPER_ATTEMPT, "unit_id": unit_id, "reserved_seconds": max(0.0, float(reserved_seconds))}
+
+    def undo(target: WorkLedger) -> None:
+        target.developer_attempts -= 1
+
+    return _grant(context, change, undo)
+
+
+def settle_work() -> None:
+    """Granted work ended in this process: close the open grant with the clock's real consumption. Best-effort (an unwritten settlement leaves the grant open, which only ever
+    charges MORE on a resume)."""
+    context = current_run_context()
+    if context is None or context._lease.work_ledger is None:
+        return
+    context._lease.work_ledger.open_grant = None
+    _save_work_ledger(context)
+
+
+def unit_retry_state(unit_id: str) -> Optional[Dict[str, Any]]:
+    """The retry-family state recorded for ``unit_id`` under the active ledger (None: none recorded, or outside a run)."""
+    context = current_run_context()
+    if context is None or context._lease.work_ledger is None:
+        return None
+    state = context._lease.work_ledger.retry.get(unit_id)
+    return dict(state) if state is not None else None
+
+
+def record_unit_retry_state(unit_id: str, state: Dict[str, Any]) -> None:
+    """Durably record ``unit_id``'s retry-family state (written at every recorded failure). Best-effort: the in-memory ledger stays authoritative for this process, and an
+    unwritten state costs a resumed run its family history only in the direction of less allowance (kriya/workflow/retry_ledger.py restores an absent state as exhausted)."""
+    context = current_run_context()
+    if context is None or context._lease.resume_refusal is not None:   # a run whose resume was refused did no work and writes no ledger
+        return
+    _work_ledger(context).retry[unit_id] = dict(state)
+    _save_work_ledger(context)
+
+
+def work_ledger_resumed() -> bool:
+    """Whether the active run continues an earlier run's ledger."""
+    context = current_run_context()
+    return bool(context is not None and context._lease.work_ledger is not None and len(context._lease.work_ledger.runs) > 1)
 
 
 def owning_run_committed_work_units(workspace_path: str) -> Optional[List[str]]:

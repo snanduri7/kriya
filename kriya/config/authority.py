@@ -99,7 +99,8 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     ("llm", "extra_body"), ("llm", "capabilities"),
     # llm.base_url is SECURITY_AUTHORITY (below) - picking a model/tuning
     # sampling never grants new capability, but redirecting the endpoint does.
-    ("autonomy", "generation_time_budget_seconds"),
+    # S8 (C-08, X-14): generation_time_budget_seconds is NOT here - see _VALUE_BOUNDED_FIELDS (a repository may lower the
+    # run's time bound, never raise or remove it).
     ("autonomy", "generation_gate_reserve_seconds"),
     ("autonomy", "generation_seconds_per_file_estimate"),
     ("autonomy", "spec_compliance_enabled"),
@@ -277,6 +278,8 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("autonomy", "sandbox_cpu_seconds"), ("autonomy", "sandbox_memory_mb"),
     ("autonomy", "acquisition_cpu_seconds"), ("autonomy", "acquisition_memory_mb"),
     ("autonomy", "shell_command_timeout_seconds"), ("autonomy", "run_verification_timeout_seconds"),
+    # S8 (C-08, X-14): the run's generation time bound is value-bounded too (see _VALUE_BOUNDED_FIELDS): this is its closed fallback.
+    ("autonomy", "generation_time_budget_seconds"),
 })
 
 # NOTE: there is currently no AppConfig field for an "LSP executable path" -
@@ -373,6 +376,10 @@ _VALUE_GATED_FIELDS: Dict[FieldPath, Any] = {
 #     OCI --memory); acquisition_*: dependency acquisition; shell_command_timeout_seconds: ShellTool wall clock;
 #     run_verification_timeout_seconds: the Runtime Verification Gate's wall clock (sibling audit: the same class as
 #     the shell timeout - the OCI backend honours cpu_seconds only as a rate cap, so the wall clock IS its time bound).
+# S8 (C-08): the one constant for the run's generation time bound: the production seal's value and the packaged ceiling
+# of the value-bounded field below (one hour: generous for local-model generation, never unbounded).
+GENERATION_TIME_BUDGET_CEILING_SECONDS = 3600
+
 _VALUE_BOUNDED_FIELDS: Dict[FieldPath, int] = {
     ("autonomy", "sandbox_cpu_seconds"): 240,
     ("autonomy", "sandbox_memory_mb"): 4096,
@@ -380,6 +387,10 @@ _VALUE_BOUNDED_FIELDS: Dict[FieldPath, int] = {
     ("autonomy", "acquisition_memory_mb"): 2048,
     ("autonomy", "shell_command_timeout_seconds"): 300,
     ("autonomy", "run_verification_timeout_seconds"): 90,
+    # S8 (C-08, X-14): the run's generation time bound. A repository value of 1..3600 only tightens; a larger value or
+    # ``null`` (no bound) needs the operator's approval. The production seal (kriya/config/resolution.py) reads this
+    # same constant.
+    ("autonomy", "generation_time_budget_seconds"): GENERATION_TIME_BUDGET_CEILING_SECONDS,
 }
 
 

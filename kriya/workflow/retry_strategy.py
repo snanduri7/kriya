@@ -30,6 +30,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Sequence
 
+from kriya.control.run_coordinator import record_unit_retry_state
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.egress import web_lookup_allowed
 from kriya.policy.errors import PolicyDeniedError
@@ -75,9 +76,9 @@ from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_
 from kriya.workflow.model_transition import fallback_routing_for_context
 from kriya.workflow.open_findings import (
     DELIVERY_FAILURE_TYPES,
+    may_open_failure_family,
     open_finding_files,
     open_finding_locations,
-    replaces_open_finding,
     update_open_findings,
 )
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
@@ -90,6 +91,7 @@ from kriya.workflow.retry_policy import (
     force_strategy_transition,
     observe_failure_family,
     reset_scoped_budgets_for_new_family,
+    scoped_allowance_state,
 )
 from kriya.workflow.retry_progress import (
     NO_PROGRESS_TERMINAL_REASON,
@@ -754,6 +756,8 @@ async def _record_attempt_failure(
         failure.message
         if failure.type in {
             "time_budget_exhausted", "verification_infrastructure_failure",
+            # S8 (C-08): the work ledger refused the grant - no retry can change that.
+            "work_ceiling_exhausted",
             # PRV-06 completion (2026-08-29): an internal Kriya exception
             # is exactly as unfixable-by-retrying as these two - stop
             # immediately (RetryAction.STOP_ENVIRONMENT) rather than
@@ -903,11 +907,19 @@ async def _record_attempt_failure(
     # keeps the finding open (NON-CANDIDATE-FAILURE-SCOPED-RESET-001: run 10's
     # context-budget refusal replenished the targeted and fallback-targeted
     # budgets while the assertion finding was still open).
-    if previous_failure_signature is not None and not replaces_open_finding(failure):
-        current_failure_signature = previous_failure_signature
+    # S8 (C-07, GAP-A1-07): whether a failure may OPEN a family is its own fail-closed question (an allow-list of
+    # candidate-failure types, open_findings.may_open_failure_family); a type nobody listed inherits the family too.
+    # The family this failure is compared with: the previous attempt's, or - on an invocation's FIRST failure - the family
+    # the unit's earlier invocations ended on (S8, C-07: carried by the work ledger in its own field, so that nothing else
+    # mistakes a new invocation for one that is already repairing).
+    family_previous = (
+        previous_failure_signature if previous_failure_signature is not None else state.budgets.inherited_failure_signature
+    )
+    if family_previous is not None and not may_open_failure_family(failure):
+        current_failure_signature = family_previous
 
     failure_family_changed = observe_failure_family(
-        state.budgets, previous_failure_signature, current_failure_signature,
+        state.budgets, family_previous, current_failure_signature,
     )
     if failure_family_changed:
         logger.info(
@@ -1705,6 +1717,10 @@ async def _record_attempt_failure(
         terminal_policy_denial=state.unrecoverable_scope_denial_count > 0,
         environment_verdict=failure.type in ENVIRONMENT_VERDICT_FAILURE_TYPES,  # R-13: nothing about the candidate was observed
     )
+    # S8 (C-07): the unit's family history and scoped charges are durably recorded with every charged failure, so the unit's next invocation - in this run or in a
+    # run that resumes its work ledger - continues them (run_lifecycle.open_run_state) instead of starting from a full allowance.
+    if state.work_unit_key is not None:
+        record_unit_retry_state(state.work_unit_key, scoped_allowance_state(state.budgets))
     if state.api_contract_recovery and not api_contract_recovery_handed_back(state):
         # Later compiler/test failures remain diagnostic history; they cannot
         # replace the authoritative owner/signature/call-site recovery scope.

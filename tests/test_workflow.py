@@ -18294,7 +18294,9 @@ async def test_workflow_refuses_resume_on_goal_drift(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_workflow_resume_with_no_checkpoint_falls_back_to_fresh_run(tmp_path):
+async def test_workflow_resume_with_no_checkpoint_and_no_work_ledger_is_refused_not_run_fresh(tmp_path):
+    """S8 (owner ruling 2026-11-17): a requested resume continues the work ledger or fails closed with the typed ``resume_refused``; only an explicit new run
+    gets a new allowance. Until S8 this case fell back to a fresh run (``..._falls_back_to_fresh_run``)."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -18312,8 +18314,8 @@ async def test_workflow_resume_with_no_checkpoint_falls_back_to_fresh_run(tmp_pa
     we = WorkflowEngine(kernel, llm)
     res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path), resume=True)
 
-    assert res["quality_gates_passed"] is True
-    assert llm.complete.await_count == 4
+    assert res["status"] == "resume_refused" and res["reason_codes"] == ["WORK_LEDGER_MISSING"] and res["quality_gates_passed"] is False
+    assert llm.complete.await_count == 0 and not (tmp_path / "math.py").exists()
 
 
 def test_checkpoint_save_load_delete_roundtrip(tmp_path):

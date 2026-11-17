@@ -21,12 +21,15 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence
 
 from kriya.control.run_coordinator import (
+    begin_generation_invocation,
     claim_run_generation_clock,
     follow_run_generation_clock,
     record_model_admission,
+    unit_retry_state,
 )
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.state_paths import trace_db_path
+from kriya.workflow.retry_policy import continue_scoped_allowance
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.stage_context import RunState, StageContext, StageDeps
 
@@ -67,6 +70,14 @@ class TerminalTrace(NamedTuple):
     failure_report: List[Dict[str, Any]]
 
 
+def continue_recorded_allowance(state: RunState) -> None:
+    """S8 (C-07): ``state``'s retry budgets continue what the work ledger records for its unit (the families already seen, the scoped allowances already charged).
+    Called when the state is opened: a requested resume has continued the workspace's ledger by then (the direct pipeline decides it at entry, before it opens
+    its state), so the earlier run's history is already on the ledger."""
+    if state.work_unit_key is not None:
+        continue_scoped_allowance(state.budgets, unit_retry_state(state.work_unit_key))
+
+
 async def open_run_state(
     deps: StageDeps, *, error_context: Optional[str], engineering_route: Any, process_profile: Any,
 ) -> RunState:
@@ -82,6 +93,10 @@ async def open_run_state(
     if run_clock is not None:
         state.budget_started_monotonic = run_clock
         follow_run_generation_clock(state)   # W3-7: a human wait's credit reaches this copy
+    # S8 (C-07, C-08): this invocation is counted on the run's work ledger before it does anything (a refusal stops it at its first Developer pass), and its retry
+    # budgets continue what the unit's earlier invocations recorded - the one place a run state gets its scoped allowance from.
+    state.work_unit_key, state.work_refusal = begin_generation_invocation()
+    continue_recorded_allowance(state)
     # PRD-012: every outbound channel's configured authority (capability
     # class, destinations, the trusted field they come from, the
     # containment they run under) is persisted with the run. Telemetry

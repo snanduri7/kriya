@@ -6894,7 +6894,9 @@ async def test_enforce_resume_refused_when_workspace_has_drifted(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_enforce_resume_with_no_prior_state_behaves_like_a_fresh_run(tmp_path):
+async def test_enforce_resume_with_no_prior_state_and_no_work_ledger_is_refused_not_run_fresh(tmp_path):
+    """S8 (owner ruling 2026-11-17): a requested resume continues the work ledger or fails closed; only an explicit new run gets a new allowance. Until S8 this
+    case ran the plan as a fresh run (``..._behaves_like_a_fresh_run``)."""
     _init_git_repo(tmp_path)
     plan = _two_subtask_plan()
     we = _workflow_engine()
@@ -6913,8 +6915,8 @@ async def test_enforce_resume_with_no_prior_state_behaves_like_a_fresh_run(tmp_p
         controller = WorkflowController(we)
         result = await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
 
-    assert result.legacy_result["quality_gates_passed"] is True
-    assert len(calls) == 2
+    assert result.legacy_result["status"] == "resume_refused" and result.legacy_result["reason_codes"] == ["WORK_LEDGER_MISSING"]
+    assert result.legacy_result["quality_gates_passed"] is False and calls == []
 
 
 # --- extension_points exemption during a real resume (2026-08-24 live-validation finding) ---
@@ -6975,7 +6977,9 @@ async def test_enforce_resume_does_not_claim_own_progress_when_nothing_completed
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3 as mock_validate_plan:
         controller = WorkflowController(we)
-        # No prior ControlState exists for this workspace at all.
+        # No prior ControlState exists for this workspace at all (S8: the earlier run's work ledger does - without one the resume is refused before planning).
+        from _work_ledger_seed import seed_work_ledger
+        seed_work_ledger(tmp_path, "earlier")
         await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
 
     assert mock_validate_plan.await_args.kwargs["resuming_own_established_progress"] is False

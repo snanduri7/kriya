@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.config.authority import AutonomyModeError, is_human_in_the_loop
+from kriya.control.run_coordinator import ResumeLedgerRefused, open_work_ledger
 from kriya.core.state_paths import resolve_state_directory
 from kriya.memory.project_store import project_store_path
 from kriya.policy.approval import (
@@ -53,6 +54,7 @@ from kriya.repository.atomic_write import DurableWriteError
 from kriya.repository.bound_tree import BoundTreeError, admit_workspace_for_mutation
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.tools.tool import ToolEffectBoundary
+from kriya.workflow.accepted_candidate import capture_unit, replayable_units, snapshot_document
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.outcome import workspace_commit_failure_fields
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
@@ -178,10 +180,15 @@ class EnforceDeps:
     save_approved_plan: Callable[..., Any]
     save_artifact_registry: Callable[..., Any]
     save_control_state: Callable[..., Any]
+    load_accepted_candidate: Callable[..., Any]      # S8: the accepted-candidate snapshot document
+    save_accepted_candidate: Callable[..., Any]
     # kriya.control.run_coordinator
     annotate_run: Callable[..., Any]
     authorize_candidate_workspace: Callable[..., Any]
     mark_run_stage: Callable[..., Any]
+    grant_unit_invocation: Callable[..., Any]        # S8: the run's work ledger (grant before work, the unit ceiling, resume continuity)
+    work_unit_scope: Callable[..., Any]
+    resume_work_ledger: Callable[..., Any]
     # kriya.control.run_record
     RunLifecycle: Any
     # kriya.core.attempt_evidence
@@ -479,6 +486,51 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         workspace by that point. Only a genuine bug in this method's own
         code propagates as a real (uncaught) exception."""
 
+        def _with_accepted_snapshot(cs: Any) -> Any:
+            """S8 (C-07, ruling 9): ``cs`` with ``accepted_units`` naming exactly the accepted work the durable snapshot holds. Called by the one ControlState
+            writer of this loop, so the order can never be reversed: a unit that just completed in the plan sandbox is captured (its exact files and candidate
+            binding digest), the snapshot document is durably written, and only then does the state that names the unit's digest get saved. A capture or a write
+            that fails leaves the unit unnamed (it is generated again on a resume) and never fails the run. A unit that is reopened (any state other than completed
+            or pending) loses its entry: its earlier work is being replaced. Only a plan sandbox has a snapshot; once the plan commits its completions are the
+            workspace's and the snapshot is emptied."""
+            nonlocal accepted_snapshot_units
+            if cs.subtask_completion_scope is None:
+                return cs   # before the plan sandbox exists: what a resume carried in (the replayable units) stays named
+            if cs.subtask_completion_scope != "candidate":
+                if accepted_snapshot_units or cs.accepted_units:
+                    try:
+                        deps.save_accepted_candidate(workspace_path, snapshot_document(cs.current_plan_hash, {}))
+                    except Exception as error:
+                        deps.logger.warning(f"WorkflowController enforce run {run_id!r}: the accepted-candidate snapshot could not be emptied: {error}")
+                    accepted_snapshot_units = {}
+                return cs.with_updates(accepted_units={}) if cs.accepted_units else cs
+            entries = dict(accepted_snapshot_units)
+            creates = {pf.path for st in plan.subtasks for pf in st.planned_files if pf.action == deps.FileAction.CREATE}
+            deletes = {pf.path for st in plan.subtasks for pf in st.planned_files if pf.action == deps.FileAction.DELETE}
+            for unit_id, status in cs.subtask_states.items():
+                if status not in (deps.SubtaskStatus.COMPLETED.value, "pending"):
+                    entries.pop(unit_id, None)
+                elif status == deps.SubtaskStatus.COMPLETED.value and unit_id not in entries:
+                    written = cs.subtask_written_files.get(unit_id) or ()
+                    entry = None if set(written) & deletes else capture_unit(
+                        paths=written, creates=creates, candidate_root=plan_workspace_path, workspace_path=workspace_path,
+                        base_revisions=original_plan_revisions,
+                    )
+                    if entry is not None:
+                        entries[unit_id] = entry
+            if entries != accepted_snapshot_units:
+                try:
+                    deps.save_accepted_candidate(workspace_path, snapshot_document(cs.current_plan_hash, entries))
+                except Exception as error:
+                    deps.logger.warning(
+                        f"WorkflowController enforce run {run_id!r}: the accepted-candidate snapshot could not be written "
+                        f"({type(error).__name__}: {error}); the newly accepted work is not resumable."
+                    )
+                    entries = {unit_id: entry for unit_id, entry in entries.items() if accepted_snapshot_units.get(unit_id) == entry}
+                else:
+                    accepted_snapshot_units = entries
+            return cs.with_updates(accepted_units={unit_id: entry["digest"] for unit_id, entry in entries.items()})
+
         def _persist_control_state(cs: Any, *, durable: bool = False) -> Any:
             """STATE-001 (2026-09-14): every real save of ControlState
             WITHIN this method's own per-subtask loop must reflect CURRENT
@@ -507,6 +559,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             closure is the correct, narrow place: the ONE method whose own
             control flow actually needs per-save freshness."""
             cs = cs.with_updates(workspace_content_hash=deps.compute_workspace_content_hash(workspace_path))
+            cs = _with_accepted_snapshot(cs)   # S8: the snapshot is durably written BEFORE the state that names it
             # durable=True (D1): an authoritative TOOL lifecycle transition - temp write, file fsync, atomic replace, parent-directory fsync, every step required.
             deps.save_control_state(workspace_path, cs, **({"durable": True} if durable else {}))
             return cs
@@ -607,11 +660,29 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         prior_control_state: Optional[Any] = None
         if legacy_kwargs.get("resume") or legacy_kwargs.get("resume_id"):
             prior_control_state = deps.load_control_state(workspace_path)
+            # S8 (C-08): a requested resume continues the SAME work ledger - consumed generation time, Developer attempts, unit invocations and retry-family history -
+            # or it is REFUSED, here, before planning and before any model call (the controller returns the typed ``resume_refused`` result). It is never continued
+            # as a fresh run: a new allowance is a new run, asked for as one. With a prior ControlState the ledger must name the run that recorded it; with none,
+            # nothing is reused and the plan runs from its first unit, still under the ledger the workspace holds.
+            # The run is the state's own ``run_id`` (the run that recorded it), not its RunRecord reference: an operator's TOOL disposition rewrites the state
+            # outside any run, and the state it leaves still belongs to that run.
+            ledger_refusal = deps.resume_work_ledger(
+                prior_control_state.run_id if prior_control_state is not None else None,
+                parent_found=prior_control_state is not None,
+            )
+            if ledger_refusal is not None:
+                raise ResumeLedgerRefused(ledger_refusal)
             if prior_control_state is None:
                 deps.logger.info(
                     f"WorkflowController enforce run {run_id!r}: resume requested but no prior "
                     "ControlState found for this workspace - starting the plan fresh."
                 )
+        # S8 (C-08): the run's ledger is durable before the plan does anything. Planning and TOOL subtasks pass no grant, and a run that stops at one of them must still
+        # leave the ledger its resume continues (MEASURED: without this, the resume of a run stopped at a TOOL subtask was refused WORK_LEDGER_MISSING). An unwritable
+        # ledger is not fatal here: every MODEL grant refuses it (WORK_LEDGER_NOT_PERSISTED), and a later resume of this run then fails closed.
+        ledger_error = open_work_ledger()
+        if ledger_error is not None:
+            deps.logger.error(f"WorkflowController enforce run {run_id!r}: the work ledger could not be opened: {ledger_error}")
 
         # Real live-validation finding, 2026-08-24, protocol_encoder_java:
         # after subtask s1 genuinely completed (real Protocol.java on disk)
@@ -1374,6 +1445,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # PRD-008: the structured record of what this resume reused (logged,
         # annotated on the RunRecord and returned), one per resume request.
         enforce_resume_decision: Optional[Dict[str, Any]] = None
+        # S8 (ruling 9): unit id -> the accepted work a resume may REPLAY (never restore), and the snapshot entries this run holds (the durable half written before
+        # ControlState.accepted_units names them; see _persist_control_state).
+        resume_replay_candidates: Dict[str, Any] = {}
+        accepted_snapshot_units: Dict[str, Dict[str, Any]] = {}
         if prior_control_state is not None:
             enforce_resume_decision = {
                 "source": "control_state",
@@ -1384,6 +1459,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             }
             current_approval_digest = getattr(deps.bound_approval(deps.workflow_engine), "digest", None)
             current_contract_digest = getattr(deps.bound_requirement_contract(deps.workflow_engine), "digest", None)
+            # S8 (C-08): the work ledger was continued where the resume was requested (above, before planning); a ledger that could not be continued refused the run.
+            enforce_resume_decision["work_ledger"] = "CONTINUED"
             if prior_control_state.requirement_contract_digest != current_contract_digest:
                 # GR-R1A: subtasks recorded under another (or no) explicit
                 # requirement contract are never reused under this one.
@@ -1424,12 +1501,40 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # nothing about the real workspace; a legacy state cannot say
                 # where its completions live.
                 enforce_resume_decision["reason"] = "COMPLETIONS_NOT_IN_WORKSPACE"
-                deps.logger.warning(
-                    f"WorkflowController enforce run {run_id!r}: reusing no subtask - the recorded "
-                    "completions were never applied to the real workspace (scope "
-                    f"{prior_control_state.subtask_completion_scope or 'unrecorded'!s}). "
-                    "Starting the plan fresh."
-                )
+                # S8 (C-07, ruling 9): accepted work of a stopped plan is reusable only through its durable snapshot, exactly bound and revalidated
+                # (kriya/workflow/accepted_candidate.py), under the continued work ledger. Nothing is restored: a unit that survives every check is REPLAYED
+                # through its own gates in the fresh sandbox (no Developer call); every other unit is generated again. The plan, requirement-contract, acceptance-
+                # approval and verification-contract identities were already required equal by the branches above.
+                if prior_control_state.subtask_completion_scope == "candidate" and prior_control_state.accepted_units:
+                    try:
+                        accepted_document = deps.load_accepted_candidate(workspace_path)
+                    except Exception as error:   # another workspace's document, an unreadable store: nothing is reused
+                        deps.logger.warning(f"WorkflowController enforce run {run_id!r}: the accepted-candidate snapshot cannot be read: {error}")
+                        accepted_document = None
+                    resume_replay_candidates, replay_refused = replayable_units(
+                        accepted_document, referenced=prior_control_state.accepted_units, plan_hash=current_plan_hash,
+                        workspace_path=workspace_path, current_revision=deps.read_file_revision,
+                        planned_paths={st.id: [pf.path for pf in st.planned_files] for st in plan.subtasks},
+                    )
+                    accepted_snapshot_units = {
+                        unit_id: dict(accepted_document["units"][unit_id]) for unit_id in resume_replay_candidates
+                    }
+                    enforce_resume_decision["replayable_subtasks"] = sorted(resume_replay_candidates)
+                    enforce_resume_decision["replay_refused"] = dict(sorted(replay_refused.items()))
+                    if resume_replay_candidates:
+                        enforce_resume_decision["reason"] = "ACCEPTED_CANDIDATE_REPLAY"
+                if resume_replay_candidates:
+                    deps.logger.info(
+                        f"WorkflowController enforce run {run_id!r}: resuming - the accepted work of subtask(s) "
+                        f"{sorted(resume_replay_candidates)!r} is bound to its durable snapshot and will be replayed through its own gates."
+                    )
+                else:
+                    deps.logger.warning(
+                        f"WorkflowController enforce run {run_id!r}: reusing no subtask - the recorded "
+                        "completions were never applied to the real workspace (scope "
+                        f"{prior_control_state.subtask_completion_scope or 'unrecorded'!s}). "
+                        "Starting the plan fresh."
+                    )
             else:
                 # PRD-008: the record the prior ControlState was derived
                 # under must still say its commit state is settled; a
@@ -1560,6 +1665,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # Reused completions are in the real workspace; the scope becomes
             # "candidate" once a separate plan sandbox is created below.
             subtask_completion_scope="workspace" if resumed_subtask_states else None,
+            # S8: the accepted work this resume may replay stays named until each unit is replayed or replaced.
+            accepted_units={unit_id: entry["digest"] for unit_id, entry in accepted_snapshot_units.items()},
             acceptance_approval_digest=getattr(deps.bound_approval(deps.workflow_engine), "digest", None),
             requirement_contract_digest=getattr(deps.bound_requirement_contract(deps.workflow_engine), "digest", None),
             verification_contract_digest=verification_contract.digest,
@@ -1845,7 +1952,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 return "", ADVISORY_REVIEW_STALE
             return record["review"], ADVISORY_REVIEW_INCLUDED
 
-        async def _invoke_bounded_subtask(
+        async def _invoke_bounded_subtask(target: Subtask, target_position: int, **options: Any) -> Dict[str, Any]:
+            """S8 (C-08): the ONE way a unit of this plan is invoked (planned run, owner recovery, consumer retry, replay, verifier repair). The invocation is durably
+            granted on the run's work ledger BEFORE it starts; a unit that has used its ceiling - in this run or in the runs this one resumes - is not invoked again
+            and ends on the typed stop. Everything the invocation does (its Developer attempts, its retry-family state) is attributed to the unit."""
+            work_refusal = deps.grant_unit_invocation(target.id)
+            if work_refusal is not None:
+                deps.logger.error("WorkflowController enforce run %r: subtask %r is not invoked: %s", run_id, target.id, work_refusal)
+                return {
+                    "status": "failure", "quality_gates_passed": False, "files": [],
+                    "failure_category": "work_ceiling_exhausted", "environment_failure": work_refusal,
+                }
+            with deps.work_unit_scope(target.id):
+                return await _invoke_granted_subtask(target, target_position, **options)
+
+        async def _invoke_granted_subtask(
             target: Subtask,
             target_position: int,
             *,
@@ -2658,7 +2779,37 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     execution_role="dependent_reverification",
                 )
             else:
-                call_result = await _invoke_bounded_subtask(subtask, position)
+                # S8 (C-07, ruling 9): a unit whose accepted work a resume bound to its durable snapshot is REPLAYED - the snapshot's exact bytes are staged by
+                # the candidate writer and judged by this unit's own gates in the fresh sandbox, with no Developer call. Only a replay whose gates pass stands;
+                # anything else (the bytes were not the carried ones, a gate refused them now) and the unit is generated again, like any pending unit.
+                call_result = None
+                resume_candidate = resume_replay_candidates.pop(subtask.id, None)
+                if resume_candidate is not None:
+                    resume_handle = ReplayHandle(
+                        run_id=run_id, plan_hash=current_plan_hash, unit_id=subtask.id, goal_digest=replay_goal_digest(goal),
+                        verification_contract_digest=verification_contract.digest, candidate=resume_candidate,
+                    )
+                    resume_refusal = resume_handle.refusal(
+                        run_id=run_id, plan_hash=current_plan_hash, unit_id=subtask.id, goal_digest=replay_goal_digest(goal),
+                        verification_contract_digest=verification_contract.digest, planned_paths=predetermined_files,
+                    )
+                    if resume_refusal is None:
+                        deps.logger.info(
+                            "ACCEPTED_CANDIDATE_REPLAY_STARTED subtask=%s paths=%s", subtask.id, sorted(resume_candidate.paths),
+                        )
+                        replay_result = await _invoke_bounded_subtask(
+                            subtask, position, execution_role="accepted_candidate_replay", carried_candidate=resume_handle,
+                        )
+                        if isinstance(replay_result, Mapping) and replay_result.get("quality_gates_passed") is True:
+                            call_result = replay_result
+                        else:
+                            resume_refusal = "ACCEPTED_CANDIDATE_REPLAY_NOT_ACCEPTED"
+                    if call_result is None:
+                        deps.logger.warning(
+                            "ACCEPTED_CANDIDATE_REPLAY_REFUSED subtask=%s reason=%s - the unit is generated again.", subtask.id, resume_refusal,
+                        )
+                if call_result is None:
+                    call_result = await _invoke_bounded_subtask(subtask, position)
             reverification_result = call_result if is_reentry else None
             scope_conflict = call_result.get("plan_scope_conflict") or {}
             if scope_conflict.get("reason_code") == "PLANNED_PREREQUISITE_OWNER_REQUIRED":

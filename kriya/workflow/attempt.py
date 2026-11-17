@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
+from kriya.control.run_coordinator import current_work_unit, grant_developer_attempt
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.inference_settings import role_binding_for_model
 from kriya.core.kernel import Kernel
@@ -691,10 +692,6 @@ def _ensure_generation_time_budget(
 ) -> None:
     autonomy = ctx.kernel.config.autonomy
     budget = autonomy.generation_time_budget_seconds
-    if budget is None:
-        return
-    elapsed = time.monotonic() - state.budget_started_monotonic
-    remaining = max(0.0, budget - elapsed)
     estimate = _estimated_generation_seconds(
         state,
         file_count=file_count,
@@ -702,6 +699,18 @@ def _ensure_generation_time_budget(
         active_model=active_model,
     )
     required = estimate + autonomy.generation_gate_reserve_seconds
+    remaining = None if budget is None else max(0.0, budget - (time.monotonic() - state.budget_started_monotonic))
+    if remaining is None or remaining >= required:
+        # S8 (C-07, C-08): the Developer attempt is durably granted on the run's work ledger BEFORE the model is called - counted, with the time this pass reserves (what
+        # the check above admitted), so a process that dies inside it is charged on resume. The invocation's own refusal (its unit's ceiling) stops here too: one place
+        # decides whether Developer work may start. A no-op outside a run.
+        refusal = state.work_refusal or grant_developer_attempt(required, state.work_unit_key)
+        if refusal is not None:
+            raise QualityGateFailure(Failure(
+                type="work_ceiling_exhausted", source="orchestrator", message=refusal,
+                raw_output=f"unit={current_work_unit() or 'direct'}", attempt=state.attempt_number,
+            ))
+        return
     if remaining < required:
         failure = Failure(
             type="time_budget_exhausted",
