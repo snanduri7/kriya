@@ -4,6 +4,7 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _requirement_truth import with_resolved_truth
 from _strict_doubles import strict_config, strict_engine
 
 from kriya.agents.contracts import (
@@ -48,7 +49,8 @@ def _committing(*results):
     committed through the terminal-commit seam (the RunRecord is the only authority for committed output; a result
     that merely reports files completes nothing). Each call takes the next result and the LAST result repeats for
     every further call (the integration pass); a dict with files commits a unique content for each (or the
-    ``_content`` bytes given); an exception is raised."""
+    ``_content`` bytes given); an exception is raised. S6 (C-02): a result that claims a pass states the resolved
+    requirement truth a real engine's passing result carries (``with_resolved_truth``); one that states its own keeps it."""
     from _milestone_proof_harness import _apply
 
     queue = list(results)
@@ -64,7 +66,7 @@ def _committing(*results):
             content = item.get("_content") or {}
             _apply(workspace_path, {path: content.get(path, f"{path} written {counter['n']}\n".encode())
                                     for path in item["files"]})
-        return {key: value for key, value in item.items() if key != "_content"}
+        return with_resolved_truth({key: value for key, value in item.items() if key != "_content"})
 
     return run
 

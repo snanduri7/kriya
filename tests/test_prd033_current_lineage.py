@@ -7,6 +7,7 @@ wrote, and checks the typed fields the metrics depend on are present and mean wh
 import json
 from unittest.mock import patch
 
+import pytest
 from _chaos_harness import (
     CALC,
     CALC_WITH_SUB,
@@ -31,6 +32,7 @@ def _runtime():
     return ChaosRuntime(lambda role, request: CALC_WITH_SUB if role == "developer" else benign_roles(role, request))
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_the_real_engines_persisted_evidence_derives_typed_metrics(tmp_path):
     runtime = _runtime()
     ok = git_workspace(tmp_path, {"calc.py": CALC, "test_calc.py": TEST_SUB}, name="ok")
@@ -40,7 +42,9 @@ def test_the_real_engines_persisted_evidence_derives_typed_metrics(tmp_path):
         success = run_direct(engine, GOAL, ok)
         with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
                    return_value={"success": False, "output": "BUILD ERROR: rejected."}):
-            failure = run_direct(engine, GOAL, bad)
+            # C-05 (S3): a configuration belongs to ONE project (the run binds it at entry; another project is PROJECT_IDENTITY_MISMATCH),
+            # so the second workspace gets its own engine and configuration; both write to the same state directory's trace store.
+            failure = run_direct(chaos_engine(chaos_config()), GOAL, bad)
     assert success["quality_gates_passed"] is True and failure["quality_gates_passed"] is not True
 
     runs = load_trace_runs(str(trace_db_path(chaos_config())))

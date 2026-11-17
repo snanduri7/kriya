@@ -98,6 +98,7 @@ def _events(run: Any, kind: str) -> List[Any]:
     return [event for event in run.events if event.kind == kind]
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_real_run7_shape_the_consumers_refused_candidate_is_replayed_without_the_developer(tmp_path):
     run = _run(tmp_path, [BROKEN, STILL_BROKEN, FIXED])
     legacy = run.result.legacy_result
@@ -116,18 +117,24 @@ def test_real_run7_shape_the_consumers_refused_candidate_is_replayed_without_the
     assert {item.subtask_id: item.status.value for item in run.result.subtask_results} == {"s3": "completed", "s6": "completed"}
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_real_replay_reruns_the_approval_and_the_gates_and_reuses_neither(tmp_path):
     """Items 22-26, 36-38: the earlier source approval is not reused (it was attempt-scoped and bound to a base the owner changed), and no
     gate result is carried: the person is asked again for the same bytes and the tests run again on the repaired tree."""
     run = _run(tmp_path, [BROKEN, STILL_BROKEN, FIXED])
-    consumer_approvals = [(unit, paths) for unit, paths, _reason in run.approvals if unit == "s6"]
+    consumer_approvals = [(unit, paths) for unit, paths, _reason in run.approvals if unit == "s6" and paths == [TEST]]
     assert consumer_approvals == [("s6", [TEST])] * 3            # the generated candidate, then each of the two replays
+    # S7 (C-03): the final mutation subject is the cumulative change of BOTH units, which no unit approval covers, so the terminal puts
+    # the complete change to the person exactly once (the harness labels a call with the last active unit).
+    assert [paths for _unit, paths, _reason in run.approvals if set(paths) == {LIB, TEST}] == [[LIB, TEST]]
+    assert len(run.approvals) == len([entry for entry in run.approvals if entry[1] in ([TEST], [LIB])]) + 1
     tests_runs = [kind for kind, _ in run.builds if kind == "tests"]
     assert len(tests_runs) >= 3 + 3                                # every s6 invocation and every s3 invocation ran its tests gate
     refused = [outcome for outcome in run.gate_outcomes if outcome.get("success") is False]
     assert len(refused) == 2 and all("BufferOverflowException" in str(outcome.get("output")) for outcome in refused)
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_real_replay_that_fails_without_naming_the_owner_stops_typed_and_reopens_the_owner(tmp_path):
     """Items 22-29, 65: the first repair renames the function; the carried test no longer imports. The unit makes no Developer request to
     'fix' its test; it stops typed, and the loop gives the new evidence to the owner, whose next repair passes the SAME test."""
@@ -155,6 +162,7 @@ def test_real_run_whose_owner_is_never_repaired_ends_at_the_unchanged_cap_with_o
     assert not (run.workspace / TEST).exists() and not (run.workspace / LIB).exists()     # nothing committed
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_real_replay_whose_staged_bytes_are_not_the_carried_ones_is_refused_before_any_gate_and_the_consumer_regenerated(tmp_path):
     """Items 9, 46, 62 on the real path: the check sits between candidate authority's staging and the first gate. Here it is told the staged
     bytes differ (once); the replay unit runs no gate and stops typed; the loop discards the handle and generates the consumer again."""

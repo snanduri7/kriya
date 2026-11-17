@@ -50,7 +50,14 @@ def indexed(tmp_path):
                                      "    public Object findPetTypes() { return null; }\n}\n")):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         (repo / rel).write_text(text)
-    db = str(tmp_path / "dependency_graph.db")
+    from types import SimpleNamespace
+
+    from _strict_doubles import for_project
+
+    from kriya.memory.project_store import claim_project_store
+
+    # C-05 (S3): the index is this project's store, claimed the way the indexer claims it before it is filled (an unclaimed file is ignored)
+    db = claim_project_store(for_project(SimpleNamespace(paths=SimpleNamespace(memory=str(tmp_path))), repo), "dependency_graph.db", str(repo))
     service = CodeIntelligenceService(str(repo), db)
     service.refresh()
     ids = {key: service.find_symbol(key)[0].symbol_id for key in ("cacheManager", "findPetTypes")}

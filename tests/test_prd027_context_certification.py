@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from _strict_doubles import for_project
 from click.testing import CliRunner
 
 from kriya.config import AppConfig
@@ -128,10 +129,11 @@ def test_certification_covers_every_production_retrieval_policy():
 
 
 def _index(config, dimensions=3):
+    from kriya.memory.project_store import claim_project_store
     from kriya.memory.vector import LocalVectorStore
 
-    os.makedirs(config.paths.memory, exist_ok=True)
-    store = LocalVectorStore(os.path.join(config.paths.memory, "vector_index.db"))
+    # C-05 (S3): the fixture index is this project's store, claimed the way the indexer claims it (an unstamped file is ignored)
+    store = LocalVectorStore(claim_project_store(config, "vector_index.db", config._project_root))
     store.conn.execute("DELETE FROM vector_chunks")
     store.conn.commit()
     store.add_document("a.py", "x", [0.1] * dimensions, chunk_index=0, model_name=config.embedding.model,
@@ -141,14 +143,14 @@ def _index(config, dimensions=3):
 
 @pytest.fixture
 def indexed_config(tmp_path):
-    config = AppConfig()
+    config = for_project(AppConfig(), tmp_path)
     config.paths.memory = str(tmp_path / "memory")
     _index(config)
     return config
 
 
 def test_status_not_applicable_without_a_code_index(tmp_path):
-    config = AppConfig()
+    config = for_project(AppConfig(), tmp_path)
     config.paths.memory = str(tmp_path / "none")
     assert cc.certification_status(config)[0] == cc.STATUS_NOT_APPLICABLE
 
@@ -358,7 +360,7 @@ def test_certify_runs_with_the_chat_endpoint_unavailable(tmp_path, monkeypatch):
 
 
 def test_an_index_without_a_single_dimension_fails_closed(tmp_path, monkeypatch):
-    config = AppConfig()
+    config = for_project(AppConfig(), tmp_path)
     config.paths.memory = str(tmp_path / "memory")
     os.makedirs(config.paths.memory)
     open(os.path.join(config.paths.memory, "vector_index.db"), "wb").close()

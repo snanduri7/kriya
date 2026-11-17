@@ -24,6 +24,7 @@ import pytest
 from _chaos_harness import inject_before_terminal_commit, snapshot_tree
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS, FakeRegistration
 from _milestone_proof_harness import _milestone, git_workspace  # noqa: F401 - pytest fixture
+from _strict_doubles import for_project
 from test_prd008a_plan_executor import (  # noqa: F401 - pytest fixture
     CALC,
     CALC_WITH_SUB,
@@ -260,6 +261,7 @@ def test_a_candidate_changed_after_the_gates_is_never_committed(mode, calc_works
     assert "calc.py" in failure["error"]
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_the_control_run_without_tampering_commits(calc_workspace, monkeypatch):  # noqa: F811 - pytest fixture
     result, developer_calls = _invoke("direct", calc_workspace, monkeypatch, lambda state: None)
     assert result["quality_gates_passed"] is True and result["workspace_commit_failure"] is None
@@ -277,6 +279,7 @@ def test_the_cli_names_the_refusal(calc_workspace, monkeypatch, capsys):  # noqa
 
 # --- Enforce: the real controller, static analysis disabled ------------------------------
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tamper", [False, True])
@@ -318,6 +321,9 @@ async def test_enforce_refuses_a_candidate_changed_after_its_gates_bound(tmp_pat
         ),
     )
     we.kernel.registry.list_components.return_value = []
+    # C-05 (S3): a hand-built configuration is bound to no project and opens no project store (PROJECT_IDENTITY_MISSING); this one is the
+    # configuration of the test's workspace, stated the way load_config states it.
+    for_project(we.kernel.config, tmp_path)
 
     import kriya.workflow.workflow_controller as controller_module
 

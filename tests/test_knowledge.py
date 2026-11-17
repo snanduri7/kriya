@@ -305,6 +305,7 @@ def test_workflow_stage_2a_gap_with_no_approval_decision_is_approval_required_no
     assert "APPROVAL_LAUNCH_CANNOT_ASK" in result["reason"] and "nobody declined" in result["reason"] and "rejected" not in result["reason"].lower()
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.usefixtures("bound_workspace")
 def test_workflow_auto_accrual(tmp_path):
     from unittest.mock import AsyncMock
@@ -392,6 +393,7 @@ def test_workflow_auto_accrual(tmp_path):
         assert os.path.exists(expected_skill_path / "skill.yaml")
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.usefixtures("bound_workspace")
 def test_workflow_auto_accrual_skipped_when_suggestion_never_actually_used(tmp_path):
     """Regression test for a real bug found via a live golden-use-case run

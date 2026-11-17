@@ -66,8 +66,13 @@ def _kernel(tmp_path):
     memory.mkdir(exist_ok=True)
     from _strict_doubles import for_project
 
-    # C-05 (S3): below the run entry; the project is the directory that holds this test's memory and workspace
-    return strict_kernel(for_project(strict_config(paths={"memory": str(memory)}), tmp_path))
+    from kriya.memory.project_store import claim_project_store
+
+    # C-05 (S3): below the run entry; the project is the directory that holds this test's memory and workspace, and its index is the
+    # project's own store, claimed the way the indexer claims it (a file nobody claimed is ignored: the readers then see no index)
+    config = for_project(strict_config(paths={"memory": str(memory)}), tmp_path)
+    claim_project_store(config, "dependency_graph.db", str(tmp_path))
+    return strict_kernel(config)
 
 
 def _ctx(tmp_path, **fields):
@@ -545,8 +550,9 @@ def test_the_workspace_type_index_degrades_to_empty_on_attempts_logger(tmp_path,
     ctx.kernel.config.paths.memory = str(tmp_path / "plain-file")          # the graph cannot be opened
     with caplog.at_level(logging.DEBUG, logger="kriya.workflow.attempt"):
         assert attempt._build_workspace_type_index(_state(), ctx) == {}
-    assert [(r.name, r.getMessage().split(":")[0]) for r in caplog.records] == [
-        ("kriya.workflow.attempt", "_build_workspace_type_index")]
+    # C-05 (S3): a memory location that holds no store of this project is "no index" - the reader is handed no path, so there is
+    # nothing to fail to open and nothing is logged (before S3 the path was opened blindly and the failure logged)
+    assert [(r.name, r.getMessage().split(":")[0]) for r in caplog.records] == []
 
 
 class _Attribution:

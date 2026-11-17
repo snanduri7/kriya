@@ -46,6 +46,7 @@ def _stage_2a_run(tmp_path, *, wait, budget):
     return result, outcome
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.parametrize("wait", [0, 14])
 def test_a_human_wait_longer_than_the_budget_does_not_exhaust_it(wait, tmp_path):
     # The wait alone exceeds the budget (pre-fix: generation_budget_exhausted, MEASURED); the 12 s budget leaves the non-wait work (planning, design, the Developer pass)

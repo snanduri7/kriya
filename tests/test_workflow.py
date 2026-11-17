@@ -1331,6 +1331,20 @@ def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, fingerprint_inputs=None
     inputs = dict(fingerprint_inputs or {})
     inputs.setdefault("verification_contract_digest",
                       _compile(_NS(), goal, goal, str(tmp_path), _derive(goal)).digest)
+    # S8 (C-08): a checkpoint is the state of a RUN, and a requested resume continues that run's work ledger or is refused
+    # (``resume_refused`` / WORK_LEDGER_MISSING: state written before the ledger existed is not resumable). So the checkpoint is
+    # saved the way a run saves it - inside a mutating run, whose record the production writer stamps on it - and the ledger that
+    # run would have left (it consumed nothing) is seeded beside it.
+    from _work_ledger_seed import seed_work_ledger
+
+    from kriya.control.run_coordinator import begin_mutating_run
+
+    with begin_mutating_run(str(tmp_path)) as saving_run:
+        _save_seeded_checkpoint(tmp_path, cfg, goal, run_id, stage, inputs, extra)
+    seed_work_ledger(tmp_path, saving_run.run_id)
+
+
+def _save_seeded_checkpoint(tmp_path, cfg, goal, run_id, stage, inputs, extra):
     save_checkpoint(str(tmp_path), run_id, {
         "stage": stage,
         RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
@@ -10108,6 +10122,7 @@ async def test_workflow_rejected_candidate_reviewer_gets_disposition_override(tm
     assert "workspace_applied: false" in override
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_workflow_accepted_candidate_reviewer_gets_no_disposition_override(tmp_path):
     """Non-regression: an ordinary, accepted candidate must not receive the
@@ -17529,6 +17544,7 @@ async def test_workflow_successful_run_deletes_its_own_checkpoint(tmp_path):
     assert find_latest_checkpoint(str(tmp_path)) is None
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_workflow_resumes_from_plan_checkpoint_skips_planner_only(tmp_path):
     _init_git_repo(tmp_path)
@@ -17555,6 +17571,7 @@ async def test_workflow_resumes_from_plan_checkpoint_skips_planner_only(tmp_path
     assert llm.complete.await_count == 3  # Planner call skipped
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_workflow_resumes_from_design_checkpoint_skips_planner_and_architect(tmp_path):
     _init_git_repo(tmp_path)
@@ -18260,6 +18277,7 @@ async def test_workflow_regenerates_an_unverifiable_candidate_but_keeps_its_plan
     assert llm.complete.await_count == 2  # Developer + Reviewer only
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_workflow_refuses_resume_on_goal_drift(tmp_path):
     """Strict drift detection: any goal-text difference since the checkpoint was

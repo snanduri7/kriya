@@ -174,6 +174,7 @@ def test_a_genuine_process_kill_between_the_ledger_record_and_the_state_write_is
     assert load_control_state(str(tmp_path)).tool_attempts == {"t1": 2} and len(_dispositions(tmp_path)) == 1
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_end_to_end_retry_runs_nothing_itself_then_the_next_resume_executes_attempt_2_and_attempt_1_stays_on_record(tmp_path):

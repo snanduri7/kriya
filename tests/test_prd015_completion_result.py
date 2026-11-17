@@ -376,6 +376,7 @@ def test_milestone_sequence_never_commits_a_truncated_file(calc_workspace, failu
     assert _committed(calc_workspace) == []
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_negative_control_the_same_answer_completed_normally_is_committed(calc_workspace, failures):
     """Proves the scenario reaches the commit seam: only finish_reason
     differs from the truncation test."""

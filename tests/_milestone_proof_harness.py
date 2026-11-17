@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
+from _requirement_truth import resolved_truth
 from _strict_doubles import strict_kernel
 
 from kriya.agents.contracts import MilestoneV2
@@ -114,7 +115,7 @@ class FakeEngine:
             # S6 (C-02): a real engine's result always carries the requirement truth of its own terminal evaluation, and the plan's
             # run-level truth is the integration pass's (milestones.plan_result). The fake engine verifies nothing, so it states the
             # resolved truth a passing real pass reports; without one no milestone run could end SUCCESS.
-            "requirement_truth": {"status": "ALL_VERIFIED", "verified": 1, "accepted": 0, "total": 1, "unresolved": []},
+            "requirement_truth": resolved_truth(),
         }
 
 

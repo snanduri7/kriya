@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from _requirement_truth import with_resolved_truth
 
 from kriya.control.persistence import (
     StaleRunRecordError,
@@ -35,7 +36,8 @@ MP = multiprocessing.get_context("fork")
 
 @coordinated_mutation
 async def _successful_run(workspace_path):
-    return {"status": "success", "quality_gates_passed": True}
+    # S6 (C-02): a result can end SUCCESS only with a resolved requirement truth on the record; this stand-in states one.
+    return with_resolved_truth({"status": "success", "quality_gates_passed": True})
 
 
 @coordinated_mutation

@@ -1137,6 +1137,17 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture
+def requirements_closed():
+    """S6 (C-02): the scripted run's requirements are closed at the one outcome owner, so a test that is about something else can
+    still assert its run ENDS SUCCESS (``tests/_requirement_truth.py``). Opt in by naming the fixture; it is never autouse, and a
+    test about the open run asserts ``applied_requirements_open`` instead."""
+    from _requirement_truth import requirement_outcome_at_the_owner
+
+    with requirement_outcome_at_the_owner():
+        yield
+
+
+@pytest.fixture
 def bound_workspace(tmp_path):
     """W3-3: the test's ``tmp_path`` as a GIT-BACKED real workspace. The result-truth guards of ``kriya.workflow.file_resolution`` decide
     membership from the canonical bound tree (Git), never from a directory name, and a run only reaches them after ``create_git_worktree``

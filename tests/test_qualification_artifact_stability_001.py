@@ -231,7 +231,7 @@ def test_an_aborted_qualification_cannot_satisfy_model_status_authority(tmp_path
         return served()
 
     monkeypatch.setattr(model_runtime, "resolve_configured_model_runtime", resolve)
-    monkeypatch.setattr(llm_module, "LLMClient", lambda config: FakeLLM(_result("READY")))
+    monkeypatch.setattr(llm_module, "LLMClient", lambda config, **_kwargs: FakeLLM(_result("READY")))   # S1: the caller passes a purpose
     out = tmp_path / "diagnostic.json"
     result = CliRunner().invoke(main, ["model", "qualify", "--out", str(out)])
     assert result.exit_code == 1, result.output

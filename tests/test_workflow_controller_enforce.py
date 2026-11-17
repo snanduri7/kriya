@@ -3316,6 +3316,7 @@ async def test_enforce_owner_recovery_wrong_fix_blocks_completion_and_never_resu
     assert (tmp_path / "build.config").read_text() == "entrypoint=DifferentButStillWrongMain"
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_enforce_owner_recovery_correct_fix_via_reference_token_completes_and_resumes_consumer(tmp_path):
     """Recovery Execution Contract Invariant 3 (2026-08-29), ACCEPT path:
@@ -3956,6 +3957,7 @@ async def test_enforce_recovery_plan_all_groups_pass_locally_but_consumer_still_
         assert owner_result.reason_codes == ("PLAN_RECOVERY_OWNER_FAILED",)
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_enforce_recovery_plan_consumer_resumes_exactly_once(tmp_path):
     """spec §14 item 10 - the review's own explicit anti-circularity
@@ -4897,6 +4899,7 @@ async def test_attempt_owner_recovery_self_correction_returns_candidate_on_real_
     assert result == {"status": "success", "quality_gates_passed": True, "files": ["App.java"]}
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_enforce_recovery_plan_self_correction_produces_candidate_and_resumes_consumer(tmp_path):
     """Full-controller integration: self-correction produces a REAL fix for
@@ -6421,6 +6424,7 @@ async def test_enforce_without_resume_flag_never_skips_even_with_prior_state(tmp
     assert len(calls) == 4
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_enforce_resume_skips_every_subtask_when_the_whole_plan_already_completed(tmp_path):
     """Both subtasks genuinely completed on the first run - a resume must
@@ -6530,6 +6534,7 @@ def _workspace_bytes(workspace):
     }
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_enforce_resume_never_skips_sandbox_only_completions_after_a_crash(tmp_path, monkeypatch):
     """Pre-fix reproduction: s1 completed in the sandbox, the process died in
@@ -6564,10 +6569,14 @@ async def test_enforce_resume_never_skips_sandbox_only_completions_after_a_crash
     assert (workspace / "a.py").read_text() == "# s1\n"
     assert (workspace / "b.py").read_text() == "# s2\n"
     decision = result.legacy_result["resume_decision"]
-    assert decision["reason"] == "COMPLETIONS_NOT_IN_WORKSPACE"
+    # S8 (C-07, ruling 9): s1's accepted work is bound to its durable snapshot, so the resume REPLAYS it through the unit's own
+    # invocation and gates (it is invoked again: ``calls`` above) - it is still never skipped, and nothing is reused without that.
+    assert decision["reason"] == "ACCEPTED_CANDIDATE_REPLAY"
+    assert decision["replayable_subtasks"] == ["s1"] and decision["replay_refused"] == {}
     assert decision["reused_subtasks"] == []
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_enforce_resume_after_a_committed_sandbox_plan_reuses_it_and_changes_nothing(tmp_path, monkeypatch):
     """After the terminal commit the sandbox's completions are the
@@ -6718,6 +6727,7 @@ async def test_enforce_resume_reuses_nothing_from_a_legacy_control_state_without
     assert (tmp_path / "a.py").exists(), "no quarantine from a legacy state either"
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_enforce_resume_skips_only_the_subtasks_already_completed(tmp_path):
     """Subtask 2 failed on the first attempt (never got to run) - a resume
@@ -9160,6 +9170,7 @@ async def test_enforce_duplicate_type_shape_resolves_effective_owner_via_executi
     assert resolve_scope_conflict_owners(plan, ["App.java"], plan.subtask_by_id("s3")) == {}
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_enforce_deny_all_runtime_verification_failure_routes_through_owner_recovery_and_resumes(tmp_path):
     """Verification-Only Recovery Routing, WHOLE-CHAIN proof (PRV-06,

@@ -126,9 +126,17 @@ def test_t2_inherited_member_negative_controls(tmp_path):
 def test_t2_the_planner_map_shows_the_declaring_supertype_and_folds_overloads(tmp_path):
     """The measured end state: fifteen overloads of one name must not crowd the declaration out of the Planner's candidate
     map. One entry per qualified name, best first, with the overload count; the inherited declaration is in the top three."""
+    from _strict_doubles import for_project
+
+    from kriya.memory.project_store import claim_project_store
+
+    # C-05 (S3): the configuration of this project, and its index claimed the way the indexer claims it BEFORE it is filled (a store
+    # nobody claimed is ignored by every reader, and an unclaimed existing file is never adopted)
+    (tmp_path / "ws").mkdir()
+    cfg = for_project(SimpleNamespace(paths=SimpleNamespace(memory=str(tmp_path / "memory"))), tmp_path / "ws")
+    claim_project_store(cfg, "dependency_graph.db", str(tmp_path / "ws"))
     root, service = _service(tmp_path)
     service.close()
-    cfg = SimpleNamespace(paths=SimpleNamespace(memory=str(tmp_path / "memory")))
     candidates = asyncio.run(localization_candidates(cfg, str(root), GOAL))
     keys = [c.lookup_key for c in candidates]
     assert len(keys) <= LOCALIZATION_LIMIT and len(keys) == len(set(keys))  # one entry per qualified name

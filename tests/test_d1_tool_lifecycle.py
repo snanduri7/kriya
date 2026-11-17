@@ -55,7 +55,9 @@ class Faults:
                 self.declared = False
 
         def wrapped(path, data, *, mode=None):
-            authoritative = self.declared
+            # S8 (C-08): the run's work ledger is a durable write too, and an enforce run opens it before any unit. It is not one of the
+            # TOOL transitions this numbering means (its own failure is the typed WORK_LEDGER_NOT_PERSISTED stop, tests/test_s8_work_ledger.py).
+            authoritative = self.declared and os.path.basename(str(path)) != "work_ledger.json"
             if authoritative:
                 self.index += 1
                 self.active = self.index == self.write

@@ -175,6 +175,13 @@ def test_end_to_end_the_real_developer_request_carries_the_facts_and_the_delegat
     filler = "".join(f"    int helper{i}(int v) {{\n        int a = v + {i};\n        int b = a * 2;\n        return b - a;\n    }}\n\n"
                      for i in range(500))
     big_node = NODE.replace("    abstract String attr(String key);", filler + "    abstract String attr(String key);")
+    from _strict_doubles import for_project
+
+    from kriya.memory.project_store import claim_project_store
+
+    # C-05 (S3): the index is this project's store, claimed before it is filled (an unclaimed file is ignored by every reader)
+    (tmp_path / "ws").mkdir()
+    claim_project_store(for_project(make_config(tmp_path), tmp_path / "ws"), "dependency_graph.db", str(tmp_path / "ws"))
     root, service = _service(tmp_path, {node_path: big_node, "src/main/java/lib/Strings.java": _strings(40)})
     service.close()
     for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "base"]):

@@ -432,13 +432,15 @@ def test_a_healthy_query_reports_no_degradation(tmp_path):
     (True, "other-model", "FAIL"),  # the index was built under another identity
 ])
 def test_the_doctor_embedding_contract_row(tmp_path, refuses, index_model, status):
+    from _strict_doubles import for_project
+
+    from kriya.memory.project_store import claim_project_store
     from kriya.production_doctor import CheckStatus, _check_embedding
 
-    cfg = AppConfig()
+    cfg = for_project(AppConfig(), tmp_path)   # C-05 (S3): the doctor reads THIS project's index; an unbound configuration opens none
     cfg.paths.memory = str(tmp_path / "memory")
     if index_model:
-        os.makedirs(cfg.paths.memory)
-        store = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+        store = LocalVectorStore(claim_project_store(cfg, "vector_index.db", str(tmp_path)))
         seed_index(store, [("a.py", "x", [1.0, 0.0])], fake_fingerprint(2, index_model))
         store.close()
     server = _Server(max_chars=10**9 if not refuses else 100, dimension=2)

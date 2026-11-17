@@ -59,6 +59,7 @@ def _engine(calls):
     return WorkflowEngine(Kernel(config=config), llm)
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.git_quiescence_product_commit      # Kriya's own greenfield bootstrap commit (product code) leaves detached maintenance; this test lists .git only to EXCLUDE it (line 72) and reads no .git bytes
 def test_planner_fenced_blocks_never_become_repository_files(tmp_path):
     # Reproduced at 2e8b09f: the Developer was never called, config.yaml held

@@ -29,6 +29,7 @@ def _refusal():
     return ContextBudgetUnsatisfiableError(decision)
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_a_primary_budget_refusal_reaches_the_fallback_by_the_full_set_route(tmp_path):
     workspace = git_workspace(tmp_path, FILES)
     eng, llm, cfg = engine()

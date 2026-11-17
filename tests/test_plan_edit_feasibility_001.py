@@ -10,7 +10,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _strict_doubles import strict_config
+from _strict_doubles import for_project, strict_config
 
 from kriya.workflow import edit_feasibility as ef
 from kriya.workflow.context_budget import _reserve_graph_context_budget, build_known_target_context, estimate_tokens
@@ -450,7 +450,7 @@ def test_grounded_paths_covers_every_way_a_retrieval_can_ground_a_file():
 
 @pytest.mark.asyncio
 async def test_collector_without_a_vector_index_grounds_nothing_like_the_unit_run(tmp_path):
-    config = strict_config(paths={"skills": str(tmp_path / "s"), "memory": str(tmp_path / "m")})
+    config = for_project(strict_config(paths={"skills": str(tmp_path / "s"), "memory": str(tmp_path / "m")}), tmp_path)
     grounding = await ef.collect_unit_grounding(config, str(tmp_path), "goal")
     assert grounding == UnitGrounding() and grounding.paths == frozenset()
 
@@ -463,10 +463,12 @@ async def test_collector_is_unknown_under_a_process_profile_retrieval_depth(tmp_
 
 
 def _indexed_config(tmp_path):
-    memory = tmp_path / "m"
-    memory.mkdir(exist_ok=True)
-    (memory / "vector_index.db").write_bytes(b"")
-    return strict_config(paths={"skills": str(tmp_path / "s"), "memory": str(memory)})
+    from kriya.memory.project_store import claim_project_store
+
+    # C-05 (S3): the configuration of this project, and its index claimed the way the indexer claims it (an unstamped file is ignored)
+    config = for_project(strict_config(paths={"skills": str(tmp_path / "s"), "memory": str(tmp_path / "m")}), tmp_path)
+    claim_project_store(config, "vector_index.db", str(tmp_path))
+    return config
 
 
 @pytest.mark.asyncio

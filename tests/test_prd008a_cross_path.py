@@ -64,6 +64,7 @@ def _plan_of(record):
 MODES = ["direct", "milestone"]
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.parametrize("mode", MODES)
 def test_success_is_owned_recorded_attributed_and_terminal(mode, calc_workspace):  # noqa: F811 - pytest fixture
     engine, _ = _engine(CALC_WITH_SUB)

@@ -126,6 +126,7 @@ def _crash_after_plan_checkpoint(git_workspace, cfg, milestones):  # noqa: F811
     return {record.run_id for record in scan_run_records(str(git_workspace)).records}
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.parametrize("workspace_changed", [False, True])
 def test_b_resume_inside_a_milestone_uses_the_prd008_validator(git_workspace, workspace_changed):  # noqa: F811
     cfg = _config()

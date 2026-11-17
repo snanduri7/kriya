@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
+from _requirement_truth import with_resolved_truth
 
 from kriya.context.workspace_identity import ownership_metadata
 from kriya.control.contracts import (
@@ -589,6 +590,7 @@ async def test_a_registry_refusal_is_a_terminal_stop_never_a_retry(tmp_path, arr
     assert (live.read_bytes() if live.exists() else None) == registry_before
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.asyncio
 async def test_a_successful_run_reports_its_contract_registry_transition_field(tmp_path):
     from kriya.config import AppConfig
@@ -708,7 +710,7 @@ async def test_milestone_completion_bookkeeping_preserves_contracts_its_unit_com
                 capability_contracts=kwargs["work_unit"].provided_capabilities,
             )
             save_contract_registry(workspace, ContractRegistry.from_dict(transition.after_payload))
-            return {"quality_gates_passed": True, "design": "d", "files": [OWNER]}
+            return with_resolved_truth({"quality_gates_passed": True, "design": "d", "files": [OWNER]})
         if calls["n"] == 1:
             # The unit's committed cycle, through the real terminal-commit seam (MILESTONE-ZERO-COMMIT-
             # COMPLETION-001: a milestone completes on a committed verified mutation, never on a reported file
@@ -722,7 +724,7 @@ async def test_milestone_completion_bookkeeping_preserves_contracts_its_unit_com
                 capability_contracts=kwargs["work_unit"].provided_capabilities,
             )
             save_contract_registry(workspace, ContractRegistry.from_dict(transition.after_payload))
-        return {"quality_gates_passed": True, "design": "d", "files": [OWNER]}
+        return with_resolved_truth({"quality_gates_passed": True, "design": "d", "files": [OWNER]})
 
     we = strict_engine()
     we.run_generation_workflow = AsyncMock(side_effect=unit_commits_a_contract)
@@ -862,6 +864,10 @@ async def test_a_milestone_units_commit_establishes_its_capabilities(tmp_path):
                return_value={"success": True, "output": "ok"}):
         res = await we.run_generation_workflow(goal="M1: math", workspace_path=str(tmp_path), work_unit=invocation)
 
-    assert res["quality_gates_passed"] is True, res.get("failure_category")
+    # S6 (C-02): a milestone UNIT carries no requirement set (the plan's truth is its integration pass's), and here the unit is the
+    # whole run, so its record holds no requirement truth: the unit's commit is applied and its technical gates passed, and the run's
+    # word is applied_requirements_open, never success. What this test is about - the commit's registry transition - is unchanged.
+    assert res["technical_gates_passed"] is True and res["status"] == "applied_requirements_open", res.get("failure_category")
+    assert res["quality_gates_passed"] is False and res["commit_result"] == "COMMITTED"
     assert res["contract_registry"]["established_capabilities"] == ["M1:MathLib"]
     assert load_contract_registry(str(tmp_path)).get("M1:MathLib").state is ContractState.IMPLEMENTED

@@ -108,6 +108,7 @@ async def test_a_legacy_in_progress_record_of_a_TOOL_subtask_is_classified_needs
     assert TOOL_EXECUTION_UNRESOLVED in _tool_results(result)["t1"]["reason_codes"]
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_crash_after_a_durable_completed_resumes_without_running_the_effect_again_and_revalidates_authority(tmp_path):

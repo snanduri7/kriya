@@ -251,6 +251,7 @@ def _direct(workspace, developer_answer):
     return result, record
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_a_direct_goal_runs_as_one_work_unit_through_the_executor(calc_workspace):
     result, record = _direct(calc_workspace, CALC_WITH_SUB)
     assert result["quality_gates_passed"] is True

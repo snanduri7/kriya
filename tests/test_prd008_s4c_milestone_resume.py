@@ -585,6 +585,7 @@ def test_h_an_explicit_resume_id_is_offered_only_to_its_own_milestone(tmp_path):
     assert ("M1", CHECKPOINT_IDENTITY_MISMATCH) in codes and ("M2", MILESTONE_CHECKPOINT_SELECTED) in codes
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 @pytest.mark.parametrize("workspace_changed", [False, True])
 def test_g_the_selected_checkpoint_still_goes_through_the_prd008_validator(git_workspace, workspace_changed):  # noqa: F811
     cfg = _config()

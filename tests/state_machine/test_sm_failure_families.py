@@ -33,6 +33,7 @@ def _oscillating(n):
             "def mul(a, b):\n    return a * b\n")
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is not about requirement truth; see tests/_requirement_truth.py
 def test_an_oscillating_primary_reaches_the_configured_fallback(tmp_path):
     workspace = git_workspace(tmp_path, {"calc.py": BASE, "test_calc.py": TESTS})
     eng, llm, cfg = engine()
