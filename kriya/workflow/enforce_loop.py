@@ -5218,22 +5218,26 @@ DEPENDENT_REVERIFICATION_CONTEXT = (
 
 
 def advisory_review_refusal(result: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
-    """The unit's ``final_review_refusal`` when that refusal is the ONLY reason its ``quality_gates_passed`` is False;
-    None otherwise (the unit passed outright, or something deterministic failed too).
+    """The unit's ``final_review_refusal`` when its advisory final review was NOT performed and every deterministic term of the unit
+    passed; None otherwise (the review was performed, or something deterministic failed too).
 
     ENFORCE-UNIT-ADVISORY-REVIEW-ACCEPTANCE-001 (audit root R2, owner ruling 2026-11-11): inside an enforce plan a
     unit's Reviewer is advisory evidence - nothing in the loop reads its text, and the plan's authority is the
-    deterministic gates, the unit's declared verification, the plan/recovery invariants and the terminal gates. A
-    unit's ``quality_gates_passed`` is RunState.final_workflow_quality_passed, which also folds in "the final review
-    was performed". The deterministic terms of that fold are read here one by one, from the fields the unit result
-    already reports: the candidate was applied to the plan worktree (``candidate_applied`` = quality_gates_succeeded),
-    its candidate gates passed, its terminal regression passed (the point where a pending API-contract recovery is
-    cleared, development_loop), and the attempt as a whole passed. Any one of them missing, a scope conflict or a
-    commit failure, and the refusal excuses nothing."""
+    deterministic gates, the unit's declared verification, the plan/recovery invariants and the terminal gates. The
+    deterministic terms are read here one by one, from the fields the unit result already reports: the candidate was
+    applied to the plan worktree (``candidate_applied`` = quality_gates_succeeded), its candidate gates passed, its
+    terminal regression passed (the point where a pending API-contract recovery is cleared, development_loop), and the
+    attempt as a whole passed. Any one of them missing, a scope conflict or a commit failure, and the refusal excuses
+    nothing.
+
+    The unit's own ``quality_gates_passed`` is deliberately NOT read (owner ruling 2026-11-17). Since S6 (C-02 truth 5) the
+    final review is no term of RunState.final_workflow_quality_passed, so a unit whose review was not performed may report
+    True; the refusal must still be returned, because this is what the loop records as ``advisory_reviews_not_performed``:
+    accepted work is never shown as reviewed work. Acceptance is unchanged by that: ``enforce_unit_gates_accepted`` already
+    accepts a unit that passed outright."""
     refusal = result.get("final_review_refusal")
     if (
         isinstance(refusal, Mapping)
-        and not result.get("quality_gates_passed")
         and refusal.get("candidate_applied") is True
         and result.get("candidate_gates_passed") is True
         and result.get("terminal_regression_passed") is True

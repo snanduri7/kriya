@@ -79,6 +79,30 @@ def test_a_unit_that_passed_outright_is_accepted_and_has_no_advisory_refusal():
     assert enforce_unit_gates_accepted(passed) is True and advisory_review_refusal(passed) is None
 
 
+# S6 (C-02 truth 5): the final review is no longer a term of a unit's own verdict, so a REAL unit whose review was not performed
+# now reports a pass (MEASURED 2026-11-17: the R2 report went missing for exactly this shape; owner ruling of the same day).
+PASSED_UNREVIEWED = {**REFUSED, "status": "success", "quality_gates_passed": True, "failure_category": None}
+
+
+def test_a_unit_that_passed_with_its_review_not_performed_still_reports_the_refusal():
+    assert enforce_unit_gates_accepted(PASSED_UNREVIEWED) is True
+    assert advisory_review_refusal(PASSED_UNREVIEWED) == REFUSED["final_review_refusal"]
+
+
+@pytest.mark.parametrize("missing", sorted(DETERMINISTIC_FAILURES))
+def test_a_deterministic_term_missing_beside_a_reported_pass_is_never_an_advisory_refusal(missing):
+    assert advisory_review_refusal({**PASSED_UNREVIEWED, **DETERMINISTIC_FAILURES[missing]}) is None
+
+
+def test_the_report_never_widens_acceptance():
+    """Acceptance is quality_gates_passed or the refusal with every deterministic term: reading the refusal on a passed unit adds no
+    accepted shape (a passed unit was accepted already; a failed one needs every term, as before)."""
+    for quality in (True, False):
+        for missing in sorted(DETERMINISTIC_FAILURES):
+            result = {**REFUSED, "quality_gates_passed": quality, **DETERMINISTIC_FAILURES[missing]}
+            assert enforce_unit_gates_accepted(result) is quality, (quality, missing)
+
+
 def test_only_the_missing_review_is_excused():
     assert enforce_unit_gates_accepted(REFUSED) is True
     assert advisory_review_refusal(REFUSED) == REFUSED["final_review_refusal"]
@@ -169,8 +193,8 @@ def test_a_cut_off_review_in_unit_two_keeps_both_units_work_and_is_reported_as_n
     legacy = run.result.legacy_result
     assert ("s2", "length") in log, "the Reviewer answer of unit s2 was never cut off: the scenario does not test R2"
     last = legacy["last_subtask_result"]
-    # the unit's own verdict is what it always was: the fold is NOT redefined
-    assert last["quality_gates_passed"] is False and last["candidate_gates_passed"] is True
+    # S6 (C-02 truth 5) took the final review out of the unit's own verdict: the unit passes on its gates, with the refusal beside it
+    assert last["quality_gates_passed"] is True and last["candidate_gates_passed"] is True
     assert last["final_review_refusal"]["reason_code"] == "OUTPUT_TRUNCATED"
     assert last["final_review_refusal"]["candidate_applied"] is True
     # the enforce plan's decision
@@ -199,9 +223,11 @@ def test_complete_reviews_report_no_unperformed_review(tmp_path, monkeypatch):
     assert {finish for _unit_id, finish in log} == {"stop"}
 
 
-def test_the_direct_path_final_review_stays_authoritative_and_fail_closed(tmp_path):
-    """The same cut-off on the direct path: not a success, the refusal is the run's typed outcome, the applied
-    candidate is kept (its existing contract, unchanged by R2)."""
+@pytest.mark.usefixtures("requirements_closed")
+def test_the_direct_path_records_the_same_cut_off_beside_its_gate_verdict(tmp_path):
+    """The same cut-off on the direct path. S6 (C-02 truth 5, owner ruling 2) made the final review advisory on every executor: the run
+    is judged by its gates, the refusal is recorded on the result, and the applied candidate is kept. The plan-level report
+    (advisory_reviews_not_performed) stays an enforce-plan field."""
     workspace = git_workspace(tmp_path, {"calc.py": CALC, "test_calc.py": TEST_SUB})
 
     def responder(role, request):
@@ -214,8 +240,8 @@ def test_the_direct_path_final_review_stays_authoritative_and_fail_closed(tmp_pa
 
     with RuntimeRegistration(ChaosRuntime(responder)):
         result = run_direct(chaos_engine(chaos_config()), "add sub to calc.py", workspace)
-    assert result["quality_gates_passed"] is False and result["candidate_gates_passed"] is True
-    assert result["failure_category"] == "final_review_refused"
+    assert result["quality_gates_passed"] is True and result["candidate_gates_passed"] is True
+    assert result["failure_category"] is None
     assert result["final_review_refusal"]["reason_code"] == "OUTPUT_TRUNCATED"
     assert result["final_review_refusal"]["candidate_applied"] is True
     assert "advisory_reviews_not_performed" not in result
@@ -430,6 +456,9 @@ def test_the_loop_reads_the_raw_field_only_to_report_it():
     body = source.split("        async def _invoke_bounded_subtask(", 1)[1].split("\nADVISORY_REVIEW_NOT_PERFORMED = ", 1)[0]
     raw_reads = [line.strip() for line in body.splitlines() if re.search(r'\.get\("quality_gates_passed"\)', line)]
     assert raw_reads == [
+        # S8 (C-07, ruling 9): the resume replay of an accepted unit stands only when the replayed unit passes outright; anything else
+        # regenerates the unit (the stricter, fail-safe reading). Classified 2026-11-17, reported to the owner; not a reporting line.
+        'if isinstance(replay_result, Mapping) and replay_result.get("quality_gates_passed") is True:',
         'bool(owner_result.get("quality_gates_passed")), bytes_retained, owner_undeclared,',            # RECOVERY_MAY_CHANGE_* log
         'bool(owner_result.get("quality_gates_passed")), owner_undeclared,',                            # VERIFICATION_OWNER_RECOVERY_* log
         '"owner_quality_gates_passed": bool(owner_result.get("quality_gates_passed")),',                # the reopen's evidence event

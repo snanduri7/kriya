@@ -13,7 +13,7 @@ TESTS = os.path.dirname(os.path.abspath(__file__))
 
 def test_every_listed_file_exists_and_no_s6_or_s7_suite_is_listed():
     for name in sorted(conftest.PRE_S6_S7_SCRIPTED_RUN_FILES):
-        assert os.path.isfile(os.path.join(TESTS, name)), name
+        assert os.path.isfile(os.path.join(TESTS, name)) or os.path.isfile(os.path.join(TESTS, "state_machine", name)), name
         assert not name.startswith(("test_s6", "test_s7")), f"{name}: an S6/S7 suite asserts the open or unapproved run itself"
     assert "test_backend_final_closure_005_partial_no_change.py" not in conftest.PRE_S6_S7_SCRIPTED_RUN_FILES, (
         "its closer tests flip under a closed outcome (measured 2026-11-17): it opts in per test")

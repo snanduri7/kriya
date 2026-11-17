@@ -417,7 +417,8 @@ PRE_S6_S7_SCRIPTED_RUN_FILES = frozenset({
     "test_backend_readiness_v2_contract_feedback.py", "test_d001_workspace_authority.py", "test_d4_runtime_entrypoint_ownership.py", "test_d5_runtime_resource_grounding.py",
     "test_declared_test_verification_runs.py", "test_deterministic_failure_diagnostic.py", "test_development_loop.py",
     "test_e12_enforce_characterization.py", "test_e14_pre_characterization.py", "test_enforce_owner_recovery_verifier_replay_001.py",
-    "test_enforce_recovery_convergence_001.py", "test_enforce_verified_no_change.py", "test_failure_signature_run_noise.py",
+    "test_enforce_recovery_convergence_001.py", "test_enforce_unit_advisory_review_acceptance_001.py",
+    "test_enforce_verified_no_change.py", "test_failure_signature_run_noise.py",
     "test_gate_f_milestone_artifact_registry.py", "test_gate_orchestrator.py", "test_generation_service.py",
     "test_goal_design_dedup_001.py", "test_live_lookup_review_outcomes.py", "test_performance_telemetry.py",
     "test_plan_executability.py", "test_plan_verification_scope.py", "test_planner_test_stage_no_change.py",
@@ -432,6 +433,8 @@ PRE_S6_S7_SCRIPTED_RUN_FILES = frozenset({
     "test_s19e_honest_refusal.py", "test_s2_prompt_trust_boundary.py", "test_skill_verification_deferral.py",
     "test_validation_baseline.py", "test_verification_owner_reopen_review_and_owner_search_001.py",
     "test_w36_terminal_result_truth.py", "test_workflow_recovery_handback.py", "test_worktree_canonical_root.py",
+    # tests/state_machine (MEASURED 2026-11-17 by the focused gate of the advisory-review fix: 6 reds, the S6 root, direct path)
+    "test_sm_attempt_metrics.py", "test_sm_best_of_n.py", "test_sm_reserved_fallback.py",
 })
 COMPLETE_CHANGE_QUESTION = "This is the complete change this run will apply to your project"
 
