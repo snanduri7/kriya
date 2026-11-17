@@ -25,6 +25,7 @@ earlier under the blocking policy).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from kriya.workflow.contract_compilation import (
@@ -55,6 +56,7 @@ from kriya.workflow.requirements import (
     RequirementOutcome,
     RequirementSet,
 )
+from kriya.workflow.requirements import requirement_truth as _requirement_truth
 
 NO_MUTATION_REQUIRED = "NO_MUTATION_REQUIRED"
 # Owner decision D2: an oracle that cannot presently execute under containment
@@ -180,10 +182,18 @@ class NoMutationRequired(Exception):
         self.report = report
         super().__init__(f"{NO_MUTATION_REQUIRED}: the baseline satisfies every mandatory requirement of the goal")
 
+    def requirement_truth(self) -> Dict[str, Any]:
+        """S6 (C-02): the run's typed requirement truth, from the outcomes the baseline authorities established (the one truth
+        function over the contract's own entries). Without it the result contract could not end this run SUCCESS."""
+        outcomes = {rid: RequirementOutcome(value) for rid, value in self.report.outcomes().items()}
+        entries = SimpleNamespace(requirements=tuple(SimpleNamespace(id=entry.requirement_id, text=entry.text) for entry in self.contract.entries))
+        return _requirement_truth(outcomes, entries)
+
     def result(self) -> Dict[str, Any]:
         return {"status": "success", "quality_gates_passed": True, "files": [], "no_mutation_required": True,
                 "reason_codes": [NO_MUTATION_REQUIRED],
                 "requirements": {"digest": self.contract.requirement_set_digest, "outcomes": self.report.outcomes()},
+                "requirement_truth": self.requirement_truth(),
                 "verification_contract": self.contract.report(), "baseline_authority": self.report.to_dict()}
 
 

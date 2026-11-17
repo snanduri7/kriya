@@ -322,7 +322,7 @@
     {
      "attempt": null,
      "kind": "run.closed",
-     "payload": "sha256:da9631b6e6816792",
+     "payload": "sha256:39443c4663a55ecd",
      "payload_keys": [
       "commit_result",
       "lifecycle_state",
@@ -698,14 +698,21 @@
    "goal_hash": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
    "lifecycle_state": "FAILURE",
    "milestone_reuse": null,
+   "model_admission": {
+    "all_qualified": false,
+    "decision_digest": "412efc193c9f6d52ca59c1ef75719c18613b857c9fbe3e1575d1448e7b1a329a",
+    "enforced": false,
+    "policy_digest": null
+   },
    "model_runtime_fingerprint_ids": [],
    "obligation_ledger_hash": null,
    "obligation_ledger_revision": null,
    "recovery": null,
+   "requirement_truth": null,
    "resume_decision": null,
    "retry_counters": {},
    "retry_state_reference": null,
-   "revision": 10,
+   "revision": 11,
    "run_id": "<run:1>",
    "schema_version": 3,
    "terminal_status": "FAILURE",

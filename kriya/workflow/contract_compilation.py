@@ -218,10 +218,12 @@ CLOSER_CONTRACTS: Dict[str, Dict[str, str]] = {
         "fail": "never (an absent test leaves the claim open)", "unknown": "no complete report on either side"},
     CLOSER_FILE_CREATION: {
         "claim": FILE_CREATION_CLAIM, "authority": AUTHORITY_REPOSITORY,
-        "pass": "the bound literal path did not exist before the candidate wrote it (the run's raw capture) and is a "
-                "regular file of the candidate now",
+        "pass": "the bound literal path did not exist before the candidate wrote it (the run's raw capture; at the enforce "
+                "terminal gate the base tree, the start-of-run revision and the declared create of the commit batch) and "
+                "is a regular file of the candidate now",
         "fail": "never (an absent path, a modified existing path or a similarly named file leaves the claim open)",
-        "unknown": "no raw capture for the path, or the enforce terminal gate (no per-attempt capture)"},
+        "unknown": "no raw capture for the path; at the enforce terminal gate no materialized commit batch or no "
+                   "complete mutation record"},
     CLOSER_RUNTIME_STDOUT: {
         "claim": BEHAVIOR, "authority": AUTHORITY_RUNTIME_OBSERVATION,
         "pass": "the whole stdout of the final step of the application run Kriya executed on this exact candidate "
@@ -230,7 +232,8 @@ CLOSER_CONTRACTS: Dict[str, Dict[str, str]] = {
         "fail": "a QUOTED literal and complete stdout of an exit-0 run that differs (an unquoted mismatch only leaves "
                 "the claim open)",
         "unknown": "no application run, an incomplete or lost stdout, a failed or timed-out step, another candidate, "
-                   "a command that does not run a file the candidate wrote, the enforce terminal gate"},
+                   "a command that does not run a file the candidate wrote; at the enforce terminal gate also no "
+                   "single script the sealed statements name or create, or a candidate that is not isolated"},
     CLOSER_EXTERNAL_ACCEPTANCE: {
         "claim": "declared per coverage entry", "authority": AUTHORITY_EXTERNAL_COMMAND,
         "pass": "the sealed operator command exited 0 under Kriya's containment, assets unchanged (operator "
@@ -445,6 +448,23 @@ class VerificationContract:
 
     def required_claims_by_requirement(self) -> Dict[str, Tuple[str, ...]]:
         return {entry.requirement_id: entry.required_claims for entry in self.entries}
+
+    def closing_authorities(self, requirement_ids: Iterable[str]) -> Dict[str, List[str]]:
+        """S6 (C-02): for each named requirement, what the SEALED contract says can close it - the closers already bound to it,
+        and for a claim with no bound authority the acceptable authority types of its residual (the same list admission
+        reports). A diagnostic view for an open requirement of a finished run; it decides nothing."""
+        wanted = set(requirement_ids)
+        view: Dict[str, List[str]] = {}
+        for entry in self.entries:
+            if entry.requirement_id not in wanted:
+                continue
+            if entry.status == STATUS_AMBIGUOUS:
+                view[entry.requirement_id] = ["a clarified goal statement or a sealed operator disposition (the statement is ambiguous)"]
+                continue
+            names = [f"{binding.closer} ({binding.authority_kind})" for binding in entry.bindings]
+            names += [authority for residual in entry.residual for authority in residual.acceptable_authorities]
+            view[entry.requirement_id] = list(dict.fromkeys(names))
+        return view
 
     def residual_requirements(self) -> List[Dict[str, Any]]:
         """Legacy shape (id, text, why): every requirement that cannot be admitted."""

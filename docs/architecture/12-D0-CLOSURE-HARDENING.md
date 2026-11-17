@@ -885,3 +885,102 @@ the shared helper), then the affected files again. It included `tests/architectu
 
 **Not run (by the lightweight slice process).** The full suite, all of `tests/test_workflow.py`, the whole state-machine tier, an owner
 exact-SHA run; the whole focused gate was not rerun after the stub fix (affected files only).
+
+## 18. Slice S6: one result contract; SUCCESS needs a resolved requirement truth on the RunRecord (C-02, C-09 annotation, INT-05; 2026-11-17, implementation branch)
+
+**Invariant.** A mutating run ends SUCCESS only when its own RunRecord carries a requirement truth that permits it: every mandatory
+requirement verified, or accepted through the sealed B3 modality, or an explicitly requirements-free entry shape. A result payload can lose
+a success; it can never create one. Applied never implies verified. The same sealed requirement on an equivalent final candidate has the same
+truth on every executor.
+
+### 18.1 Reproducer and first wrong owner
+
+| Step | Fact | Label |
+|---|---|---|
+| A3 probe P8 at `63c04ba` | A direct run applied `app.py`, its one requirement `unverified`, truth `OPEN_REQUIREMENTS`, and the result said `quality_gates_passed = True` (`~/kriya-evidence/s6-63c04ba/p8_pre_fix_63c04ba.txt`) | `MEASURED` |
+| First wrong owner | `run_coordinator.py`: the terminal transition was taken from the payload's claim (`_claims_success`) limited only by work-unit state; the record had no requirement truth to refuse with | `TRACED` |
+| Closer divergence | `terminal_gate_service.py` handed the `file_creation` and `runtime_stdout` closers `None`: "Create hello.py. It prints hello world when executed." could be ALL_VERIFIED on direct and OPEN on enforce | `TRACED` at `63c04ba`; `MEASURED` after the fix by the real enforce controller ending SUCCESS / ALL_VERIFIED |
+
+Prediction stated before the fix: P8 ends `applied_requirements_open`, exit 5, RunRecord `FAILURE` / `APPLIED_REQUIREMENTS_OPEN` /
+`COMMITTED`, nothing rolled back. Post-fix: `test_p8_inverted_direct_...` and `test_p8_inverted_enforce_...` pass.
+
+### 18.2 What changed
+
+| Owner | Change |
+|---|---|
+| `control/run_record.py` | `requirement_truth` and `model_admission` (annotatable, no schema bump). Closed truth vocabulary; `requirement_truth_gap` is the one reading; the SUCCESS transition refuses a missing, malformed, open or contradicted truth. `REQUIREMENTS_FREE_SHAPES = {direct_tool_execution}` (a closed table; `kriya fix` is not in it). `TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN`: lifecycle FAILURE, needs a settled COMMITTED cycle; no new lifecycle state |
+| `control/run_coordinator.py` | `evaluate_result_contract(record, payload)`: the one terminal decision, from the record's facts. `_record_requirement_truth` writes the run's final truth before the transition (a result cannot declare itself requirements-free). `_reconciled_with_record`: `applied_requirements_open`, `technical_gates_passed`, `open_requirements`, `commit_result`. `record_model_admission` (C-09: a reference to the S1 decision). The run's own history rows are reconciled after the decision; the row writer hands its corrector to the coordinator (`note_run_trace_row(db, row, reconcile)`), so `control/trace.py` depends on the coordinator and never the reverse (the cycle guard caught the first form) |
+| `control/trace.py`, `application/history.py` | `reconcile_run_row` appends ONE `result.reconciled` event (record id, revision, lifecycle, terminal status, commit result, the record's truth) and corrects a row status that claimed success. History prefers the reconciled truth |
+| `cli_output.py`, `cli.py` | One exit table at the four run exit sites: 0 success, 1 failed, 3 needs review, 5 applied with requirements open; the applied-open message names what was applied, what is open and what the sealed contract accepts to close it |
+| `workflow/state.py` | The final review is not a term of `final_workflow_quality_passed` (ruling 2: advisory on every executor) |
+| `workflow/runtime_verification.py` | `_fail_graded_runtime_check`: the one exit of a check that ran and was graded failed. REQUIRED: recorded and raised as before. OPTIONAL (model-inferred): a `runtime_verification.advisory_failure` event with commands, grader and bounded output; the attempt continues (ruling 17) |
+| `workflow/requirements.py`, `contract_compilation.py`, `outcome.py`, `enforce_loop.py`, `milestones.py`, `contract_baseline.py`, `workflow.py` | INT-05: `repair_requirement_truth` (the one requirement of `kriya fix`, closed only by a captured, completed, failing pre-candidate baseline plus a passing terminal regression and gates). `open_requirement_authorities` / `closing_authorities` (diagnostics). The truth travels on every executor's result; a milestone plan's truth is its integration pass's; a no-mutation result carries its truth |
+| `workflow/requirement_closers.py`, `terminal_gate_service.py`, `workflow.py` (forwarder) | **Closer parity (owner ruling 2026-11-17).** `created_paths_from_terminal_batch`: a path is created when it is absent from the base tree of the run's mutation record, its start-of-run revision (`original_plan_revisions`, read before any unit ran) is the revision of no bytes, the commit batch declares it a create and holds it, and the mutation record attributes it to this candidate. `terminal_runtime_stdout_outcomes`: ONE run of `[project interpreter, subject]` on the isolated final candidate through the candidate validator's `verification_session(RUNTIME_VERIFICATION_GATE)` / `run_app_sequence` (the seam every terminal closer that executes candidate code already uses); the subject comes from the sealed bindings (`sealed_runtime_stdout_subject`), the digest is stamped before the run, what the run leaves behind is removed. Both feed the SAME closers and the same observation reader as the direct executor. `CLOSER_CONTRACTS` wording updated (it is part of the sealed binding text: contracts that bind these two closers get a new digest) |
+| `ui/shared` | Display only: `presentation.ts::recordedStatusLabel` words `applied_requirements_open` ("Applied, requirements open", its own card status, tone warn) and the enforce row word `failed` (it was shown as "Status not recorded"); `execution.tsx` words the RunRecord's `APPLIED_REQUIREMENTS_OPEN`; `RunsColumn.tsx` hints both |
+
+### 18.3 Owner rulings applied, and readings taken
+
+| Item | State | Registry |
+|---|---|---|
+| Person acceptance | B3 only (`human_accepted`, RESOLVED_WITH_OPERATOR_ACCEPTANCE: accepted, never verified). No new modality | `GENERAL-REQUIREMENT-PERSON-ACCEPTANCE-CLOSURE-001` closed by ruling; future `REQUIREMENT-PERSON-VERIFIER-MODALITY-001` |
+| `NO_REQUIREMENT_SET` | Only the closed table of requirements-free shapes (direct tool execution), declared by the entry, never by a result | - |
+| Optional graded runtime failure | Advisory, never terminal; a REQUIRED failure still fails | `OPTIONAL-RUNTIME-GRADED-FAILURE-GATE-S6`, `-POLICY-001` closed |
+| Model admission on the record | Annotation holding digests and status | `MODEL-ADMISSION-RUNRECORD-ANNOTATION-001` closed |
+| `file_creation` and `runtime_stdout` at the enforce terminal | Fixed in S6, evidence only: nothing is applied to verify, nothing runs in the real workspace, no new approval or execution authority (the existing validator seam) | `ENFORCE-TERMINAL-CLOSER-PARITY-001` closed |
+| READING: the terminal run and human review | The owner ruled that a sealed `runtime_stdout` requirement authorizes its own verification. Taken literally: the terminal run asks no runtime-command review, also in human-in-the-loop mode (as the terminal's derived-example and acceptance closers execute candidate code today). It does honour `run_verification_enabled` | `ENFORCE-RUNTIME-STDOUT-SUBJECT-AND-REVIEW-LIMITS-001` |
+| READING: the unnamed subject | "It prints ..." names no script. The terminal runs it only when the sealed contract creates exactly one Python file; otherwise it stays open (direct may close it from the run its judge chose). Never a model's choice of command at the terminal | same row |
+| False-premise guard | The baseline no-mutation guard runs on both executors (`TRACED`); the open part is mutation authority | `ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001` retargeted to S7 |
+| Deferred by ruling | C-11 labels, retention, "intact" wording, `validate_plan` convergence: after S8. INT-01 mechanics: S8 | existing rows |
+
+Known limits, recorded as accepted. A fix run with no captured failing baseline always ends open, and no scripted end-to-end positive fix
+run exists (`REPAIR-WITHOUT-REPRODUCED-FAILURE-STAYS-OPEN-001`). Under enforce, `runtime_verification_required` is the validated plan's
+(its verification methods), not a second derivation from the goal. Skills learned in a run that ends applied-open are still persisted
+(`APPLIED-OPEN-RUN-PERSISTS-LEARNED-SKILLS-001`). A file that existed untracked and EMPTY before the run has the same start-of-run revision
+as an absent one: the terminal may record the creation closed, and the commit then refuses the create (`expected_base_exists` False against
+an existing target), so the run cannot end committed or successful on it. The requirement gate (verifier and closers) runs only when
+`spec_compliance_enabled` is set, on both executors, as before.
+
+### 18.4 The golden migration (the one authorized)
+
+40 of 41 kernel scenarios and 28 of 132 runtime goldens changed; each changed leaf was reviewed against a clause before any committed
+golden was touched (`~/kriya-evidence/s6-63c04ba/golden_kernel_leaf_diff.txt`, `golden_runtime_leaf_diff.txt`).
+
+| Changed leaves | Clause |
+|---|---|
+| `run_records[*].model_admission.*`, `revision` | C-09 annotation; more annotations per run |
+| `run_records[*].requirement_truth.*` | C-02: the truth is a fact of the record |
+| `run_events`: one added `result.reconciled` (31 scenarios); no event kind removed | C-02 / C-11 row reconciliation |
+| Result `status`, `reason_codes`, `reported_status`, `technical_gates_passed`, `open_requirements`, `commit_result`, `error`, `run_record_*`, `quality_gates_passed`; record `lifecycle_state` / `terminal_status`; row status | 14 scenarios whose scripted goal leaves one general requirement open and whose change is committed: APPLIED_REQUIREMENTS_OPEN instead of SUCCESS |
+| `open_requirement_authorities` (25) | S6 diagnostics |
+| `failure_category`, `generation_metrics.terminal_status`, the direct work unit's status (2 scenarios) | A refused final review is advisory |
+| `evidence[*].records[*].payload` of `run.closed` | The digest of the changed result |
+| Runtime: 20 attempt cases (`outcome` raised to returned, no gate outcome, one advisory event) | Optional graded failure is advisory; all 20 run with the fixture default `required=False` |
+| Runtime: 8 engine traces (`quality_gates_passed`) | Open truth |
+
+The three milestone scenarios first lost their SUCCESS: the fake engine's results carried no requirement truth (a real engine's always do,
+and the plan's truth is the integration pass's). Fixed at the shared fixture (`tests/_milestone_proof_harness.py::FakeEngine`); they stay
+SUCCESS / ALL_VERIFIED. No direct or enforce kernel scenario ends SUCCESS any more (`KERNEL-GOLDEN-NO-SUCCESS-SCENARIO-001`). The five
+files the earlier delta tests chain through are kept in `tests/golden/kernel_pre_s6_result_contract/`, with their S6 delta pinned.
+
+### 18.5 Proof
+
+`tests/test_s6_result_contract.py` (62 tests: the record and coordinator contract, P8 inverted on the real direct and enforce pipelines,
+the six person controls, the graded runtime check both ways, INT-05 with eight negative controls, the row and history reconciliation, the
+desktop source guard). `tests/test_s6_enforce_closer_parity.py` (28 tests: creation evidence with six negative controls, the runtime
+evidence with eight, a rewritten candidate, a failed run, and the real enforce controller on the hello goal ending SUCCESS / ALL_VERIFIED /
+COMMITTED with its negative control). Mutants: 34 of 35 killed in a scratch copy (`~/kriya-evidence/s6-63c04ba/mutants_s6_run1.txt` and
+`mutants_s6_run2_rerun.txt`; the real worktree status identical before and after). The survivor, M09, removes the coordinator's check that
+applied-open needs a committed cycle: the RunRecord refuses that transition itself (M08 killed), so the coordinator's check is a second
+layer that only avoids a refused transition. Golden gate `golden_gate_run1.txt` (kernel, outcome and runtime suites and every test file
+sharing the fake milestone engine): 986 passed, 50 failed; 28 were the golden suites' own reference tests (the expected-terminal table,
+the delta chain, three key-set comparisons), fixed and rerun green; 22 are one class-C family carried as
+`S6-STALE-SUCCESS-EXPECTATION-TESTS-001` (CERTIFICATION-MECHANICAL-CLEANUP). Focused gate `focused_gate_s6.txt` (`tests/architecture`, the S6
+files, the closer, lifecycle, registry and strict-double owners): 1025 passed, 2 failed, both bookkeeping (the patch-point table counts
+three new `_run_committed_paths` sites; one control asserting success for an open run), fixed; rerun `focused_gate_s6_rerun.txt` 286 passed.
+`ruff` and `pylint` exit 0.
+
+**Not run (by the lightweight slice process).** The full suite, all of `tests/test_workflow.py`, the whole state-machine tier, an owner
+exact-SHA run, the `ui/shared` vitest suite and typecheck (no UI toolchain in the worktree: `DESKTOP-APPLIED-OPEN-EXECUTABLE-COVERAGE-001`),
+any live model. The three `tests/test_b6_optional_runtime_verification.py` reds of the first adjacent run were MEASURED red at `63c04ba`
+for a fixture reason unrelated to S6 (a configuration with no project identity) and are fixed at that fixture.
+

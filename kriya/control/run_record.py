@@ -68,6 +68,65 @@ UNNAMED_TOOL = "<unnamed tool>"
 # Same word an ordinary failed run records (its lifecycle value).
 TERMINAL_STATUS_FAILURE = RunLifecycle.FAILURE.value
 
+# C-02 (S6, owner rulings 3 and 2026-11-16): the run's FINAL requirement truth is a fact of the record, and SUCCESS is refused without it.
+# The four semantic statuses are the closed vocabulary of kriya/workflow/requirements.py::requirement_truth (control never imports
+# workflow; tests/test_s6_result_contract.py pins the two spellings equal). NO_REQUIREMENT_SET is the one status of a run whose PRODUCT
+# CONTRACT has no semantic requirement set: it is valid only together with a ``shape`` of REQUIREMENTS_FREE_SHAPES (a closed table; a
+# shape outside it, or a missing truth anywhere else, is never success).
+REQUIREMENT_TRUTH_ALL_VERIFIED = "ALL_VERIFIED"
+REQUIREMENT_TRUTH_RESOLVED_WITH_ACCEPTANCE = "RESOLVED_WITH_OPERATOR_ACCEPTANCE"
+REQUIREMENT_TRUTH_OPEN = "OPEN_REQUIREMENTS"
+REQUIREMENT_TRUTH_CONTRADICTED = "CONTRADICTED"
+REQUIREMENT_TRUTH_NO_REQUIREMENT_SET = "NO_REQUIREMENT_SET"
+REQUIREMENT_TRUTH_STATUSES = (REQUIREMENT_TRUTH_ALL_VERIFIED, REQUIREMENT_TRUTH_RESOLVED_WITH_ACCEPTANCE, REQUIREMENT_TRUTH_OPEN,
+                              REQUIREMENT_TRUTH_CONTRADICTED, REQUIREMENT_TRUTH_NO_REQUIREMENT_SET)
+REQUIREMENT_TRUTH_RESOLVED = frozenset({REQUIREMENT_TRUTH_ALL_VERIFIED, REQUIREMENT_TRUTH_RESOLVED_WITH_ACCEPTANCE})
+# `kriya tools execute`: an operator names one tool and its arguments; nothing is generated and no goal statement exists to verify. Its
+# success is its own durable tool lifecycle (``tool_execution``). `kriya fix` is NOT here: it has its repair requirement (INT-05).
+SHAPE_DIRECT_TOOL_EXECUTION = "direct_tool_execution"
+REQUIREMENTS_FREE_SHAPES = frozenset({SHAPE_DIRECT_TOOL_EXECUTION})
+NO_REQUIREMENT_SET_TRUTH_OF_TOOL_EXECUTION: Dict[str, Any] = {"status": REQUIREMENT_TRUTH_NO_REQUIREMENT_SET, "shape": SHAPE_DIRECT_TOOL_EXECUTION}
+# The typed terminal word of a run whose change is committed while its requirement truth is not resolved: lifecycle FAILURE (no new
+# lifecycle state: recovery and the commit-state assessment read the lifecycle and are untouched), commit_result COMMITTED.
+TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN = "APPLIED_REQUIREMENTS_OPEN"
+_TRUTH_UNRESOLVED_LIMIT = 8
+
+
+def normalized_requirement_truth(value: Any) -> Optional[Dict[str, Any]]:
+    """``value`` as the record's requirement truth, or None when it is not one (a missing or malformed truth is never guessed, and never
+    resolved): a closed status; for a semantic status the three non-negative counts and the bounded unresolved list (id and outcome only:
+    the record references requirements, it does not copy their text); for NO_REQUIREMENT_SET a shape of the closed table."""
+    if not isinstance(value, dict) or value.get("status") not in REQUIREMENT_TRUTH_STATUSES:
+        return None
+    status = value["status"]
+    if status == REQUIREMENT_TRUTH_NO_REQUIREMENT_SET:
+        shape = value.get("shape")
+        return {"status": status, "shape": shape} if shape in REQUIREMENTS_FREE_SHAPES else None
+    counts = {key: value.get(key) for key in ("verified", "accepted", "total")}
+    if any(isinstance(count, bool) or not isinstance(count, int) or count < 0 for count in counts.values()):
+        return None
+    if status in REQUIREMENT_TRUTH_RESOLVED and (counts["total"] < 1 or counts["verified"] + counts["accepted"] != counts["total"]):
+        return None            # a "resolved" truth whose own counts do not say so is malformed
+    unresolved = [{"id": str(item.get("id")), "outcome": str(item.get("outcome"))}
+                  for item in (value.get("unresolved") or []) if isinstance(item, dict)][:_TRUTH_UNRESOLVED_LIMIT]
+    truth: Dict[str, Any] = {"status": status, **counts, "unresolved": unresolved}
+    for key in ("contract_digest", "requirement_set_digest"):
+        if isinstance(value.get(key), str):
+            truth[key] = value[key]
+    return truth
+
+
+def requirement_truth_gap(truth: Any) -> Optional[str]:
+    """None when ``truth`` permits SUCCESS (every mandatory requirement resolved, or an explicitly requirements-free shape); otherwise
+    WHY it does not. The one reading of the record's requirement truth: the record's own SUCCESS transition and the coordinator's
+    result contract both call it."""
+    normal = normalized_requirement_truth(truth)
+    if normal is None:
+        return "no valid requirement truth is recorded for this run"
+    if normal["status"] in REQUIREMENT_TRUTH_RESOLVED or normal["status"] == REQUIREMENT_TRUTH_NO_REQUIREMENT_SET:
+        return None
+    return f"requirement truth is {normal['status']}"
+
 # Settled results of one commit cycle.
 COMMIT_COMMITTED = "COMMITTED"
 COMMIT_ROLLED_BACK = "ROLLED_BACK"
@@ -107,6 +166,9 @@ _ANNOTATABLE_FIELDS = frozenset({
     "candidate_hash", "verification_evidence_ids", "retry_state_reference",
     "retry_counters", "resume_decision", "milestone_reuse", "active_work_unit",
     "execution_plan", "work_unit_states",
+    # S6 (C-02): the run's final requirement truth (the result contract's input) and, C-09, the model admission the run was
+    # admitted under (a reference to the S1 decision: digests and status, never the qualification record itself).
+    "requirement_truth", "model_admission",
 })
 
 # Requirement 2: every persistent store is authoritative for its own content,
@@ -205,6 +267,11 @@ class RunRecord:
     # "started" is written durably BEFORE the effect and replaced only by a durable terminal state; a record that still says "started" (whatever its lifecycle) is an unresolved
     # execution: the effect may or may not have happened. Optional, like resume_decision (earlier records load unchanged).
     tool_execution: Optional[Dict[str, Any]] = None
+    # S6 (C-02): the run's FINAL requirement truth (``normalized_requirement_truth``), written by the coordinator before the terminal
+    # transition. Optional (earlier records load unchanged); a record without it can never end SUCCESS.
+    requirement_truth: Optional[Dict[str, Any]] = None
+    # C-09 / S6: the model admission decision of this run (``ModelAdmissionDecision.event_details()``); evidence only.
+    model_admission: Optional[Dict[str, Any]] = None
     commits: List[Dict[str, Any]] = field(default_factory=list)
     # The CURRENT commit cycle (reset by each begin_commit); run-level
     # commit_result is the summary over ``commits`` once terminal.
@@ -319,6 +386,11 @@ class RunRecord:
         explicit = updates.pop("commit_result", None)
         terminal_status = updates.pop("terminal_status", None) or state.value
         if state == RunLifecycle.SUCCESS:
+            # C-02 (S6): SUCCESS implies requirement truth resolved - a fact of the record itself, so no caller can end a run SUCCESS
+            # on a payload's word. A missing, malformed, open or contradicted truth refuses the transition.
+            gap = requirement_truth_gap(updates.get("requirement_truth", self.requirement_truth))
+            if gap is not None:
+                raise self._refuse(state, gap)
             # Stage markers may move the record past COMMITTED (a later
             # milestone that changed nothing); what matters is that the LAST
             # cycle committed, which the derived summary already proves.
@@ -332,6 +404,8 @@ class RunRecord:
         elif state == RunLifecycle.FAILURE and self.commit_state_unknown:
             # An unsettled/uncertain commit can never be downgraded to failure.
             raise self._refuse(state, "a commit cycle is unsettled or uncertain")
+        elif state == RunLifecycle.FAILURE and terminal_status == TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN and derived != COMMIT_COMMITTED:
+            raise self._refuse(state, f"{TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN} needs a settled COMMITTED cycle, commit result is {derived}")
         elif state == RunLifecycle.UNCERTAIN:
             result = COMMIT_UNCERTAIN
         else:
@@ -351,6 +425,8 @@ class RunRecord:
         unknown = set(updates) - _ANNOTATABLE_FIELDS
         if unknown:
             raise IllegalRunTransitionError(f"annotate cannot set {sorted(unknown)}")
+        if "requirement_truth" in updates and normalized_requirement_truth(updates["requirement_truth"]) != updates["requirement_truth"]:
+            raise IllegalRunTransitionError("requirement_truth is not a normalized requirement truth")
         return replace(self, revision=self.revision + 1, updated_at=_now(), **updates)
 
     def begin_commit(

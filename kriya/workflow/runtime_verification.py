@@ -459,6 +459,28 @@ def _note_optional_runtime_check_unobserved(deps: RuntimeDeps, state: RunState, 
     ))
 
 
+def _fail_graded_runtime_check(deps: RuntimeDeps, state: RunState, ctx: AttemptCtx, failure: Any, failure_outcome: Dict[str, Any]) -> None:
+    """The ONE exit of an application check that RAN and was GRADED failed (owner ruling 17, 2026-11-15; S6, C-02). The authority is the
+    run's own ``ctx.runtime_verification_required`` (the goal's declared verification contract, never the check's text or the judge's
+    opinion of it):
+
+    - REQUIRED: a mandatory gate. The failed outcome is recorded and the typed ``QualityGateFailure`` is raised, exactly as before.
+    - OPTIONAL (the judge merely inferred the check): it may give diagnostic evidence and it may NOT make the run fail, drive a retry,
+      or open or close a requirement. It is recorded as a ``runtime_verification.advisory_failure`` event (commands, grader, bounded
+      output) and the attempt continues to its other gates; it is not a gate outcome, so it is neither a pass nor a failure of the
+      candidate, and no run recipe or observed output is derived from it."""
+    if ctx.runtime_verification_required:
+        state.record_gate_outcome(failure_outcome)
+        raise QualityGateFailure(failure)
+    deps.logger.warning("Optional runtime verification was graded failed; recorded as advisory evidence, the attempt continues (it is not a required gate).")
+    state.record_event(RunEvent(
+        kind="runtime_verification.advisory_failure", attempt=state.attempt_number, source="runtime_verification", authority=EventAuthority.ADVISORY,
+        message="optional runtime verification was graded failed (advisory: not a required gate)",
+        details={"required": False, "graded_by": failure_outcome.get("graded_by"), "commands": failure_outcome.get("commands"),
+                 "output": str(failure_outcome.get("output") or "")[-4000:], "type": failure_outcome.get("type")},
+    ))
+
+
 def _assert_effective_argv(state: RunState, ctx: AttemptCtx, commands: List[List[str]]) -> None:
     """Pre-flight of every finite runtime execution (RUNTIME-APPROVED-ARGV-VS-EXECUTED-INTERPRETER-001): the argv about to run IS its effective argv - what ``_resolve_run_command`` returned, what a
     human approved and what was fingerprinted - so no interpreter is chosen after the approval. A command that is not (a stack that changed between the approval and the run, a launcher spelling that
@@ -1423,8 +1445,8 @@ async def _execute_managed_service_verification(
             "graded_by": "managed_service_probe", "commands": [spec.service_command],
             "managed_service_outcome": result.outcome.value,
         })
-        state.record_gate_outcome(failure_outcome)
-        raise QualityGateFailure(failure)
+        _fail_graded_runtime_check(deps, state, ctx, failure, failure_outcome)
+        return
 
     # PROBE_PASSED - successful runtime evidence, deterministic (the probe's
     # own status/body match IS the verdict, no LLM grade() call needed -
@@ -1868,8 +1890,8 @@ async def _execute_runtime_verification_directly(
             "deterministic_result": deps._deterministic_result_provenance_field(verification_authority, grade["passed"]),
             **deps.runtime_evidence_outcome_fields(grade),
         })
-        state.record_gate_outcome(failure_outcome)
-        raise QualityGateFailure(failure)
+        _fail_graded_runtime_check(deps, state, ctx, failure, failure_outcome)
+        return
 
     state.record_gate_outcome({
         "attempt": state.attempt_number, "type": gate_type, "success": True,
@@ -2354,8 +2376,8 @@ async def _approve_and_execute_runtime_verification(
                 "deterministic_result": deps._deterministic_result_provenance_field(verification_authority, grade["passed"]),
                 **deps.runtime_evidence_outcome_fields(grade),
             })
-            state.record_gate_outcome(failure_outcome)
-            raise QualityGateFailure(failure)
+            _fail_graded_runtime_check(deps, state, ctx, failure, failure_outcome)
+            return
         run_verification_outcome = {
             "attempt": state.attempt_number,
             "type": gate_type,

@@ -12,7 +12,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ExecutionHostPort, NotifyKind } from '../../host/HostAdapter';
-import { requirementTruthOf } from './presentation';
+import { APPLIED_REQUIREMENTS_OPEN_TERMINAL_STATUS, requirementTruthOf } from './presentation';
 import type { ApproveConfigurationResult, InitializeProjectResult, DecideApprovalResult, DecideRuntimeCommandResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
 import type { ProviderError, UIProvider } from './provider';
 import { useWorkspace } from './workspace';
@@ -287,7 +287,8 @@ function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: Exe
     }
     if (record.found && record.terminal_status) {
       const kind: OutcomeKind = record.terminal_status === 'SUCCESS' ? 'success' : record.terminal_status === 'FAILURE' ? 'failure' : 'needs_review';
-      const word = kind === 'success' ? 'Run succeeded' : kind === 'failure' ? 'Run failed' : `Run ended: ${record.terminal_status}`;
+      // S6 (C-02): APPLIED_REQUIREMENTS_OPEN is the RunRecord's own terminal status (the change is applied, a requirement is open); it is worded, never shown as a raw code or as success.
+      const word = kind === 'success' ? 'Run succeeded' : kind === 'failure' ? 'Run failed' : record.terminal_status === APPLIED_REQUIREMENTS_OPEN_TERMINAL_STATUS ? 'Change applied, requirements still open' : `Run ended: ${record.terminal_status}`;
       const extras = [review?.status === 'APPROVED' ? 'the change was approved by you' : null, ended?.failure_category ? `failure category ${ended.failure_category}` : null, record.commit_result ? `commit ${record.commit_result}` : null, ended && ended.exit_code !== 0 ? `process exit code ${ended.exit_code}` : null].filter(Boolean);
       return { kind, label: word, detail: extras.length ? extras.join(' · ') : 'Recorded by Kriya.', source: 'Kriya RunRecord (the run\'s own lifecycle authority)', traceRunId, workflowStatus };
     }

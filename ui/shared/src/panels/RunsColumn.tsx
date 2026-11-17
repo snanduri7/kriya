@@ -21,8 +21,10 @@ export interface RunsColumnProps {
 export const STATUS_HINTS: Readonly<Record<string, 'st-success' | 'st-failed' | 'st-review'>> = Object.freeze({
   success: 'st-success', // the run completed and its changes were applied
   failure: 'st-failed', // a terminal failure (failure_category names the class)
+  failed: 'st-failed', // the enforce controller's own row word for the same terminal failure
   needs_review: 'st-review', // Kriya stopped for a human decision
   approval_required: 'st-review', // human approval was required and not available (changes not applied)
+  applied_requirements_open: 'st-review', // S6 (C-02): the change is applied and a requirement is still open (never success)
 });
 export function statusClass(status: string | null): string {
   return (status !== null && Object.prototype.hasOwnProperty.call(STATUS_HINTS, status) ? STATUS_HINTS[status] : null) ?? 'st-unknown';

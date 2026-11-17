@@ -210,6 +210,14 @@ def _truth_of_events(events: Any) -> Optional[Dict[str, Any]]:
     for event in events if isinstance(events, list) else []:
         if isinstance(event, dict) and event.get("kind") == "requirement.truth":
             details = event.get("details")
+    # S6 (C-02, INT-04): the run's RECONCILED truth - the RunRecord's own requirement truth, written onto the row after the
+    # coordinator's terminal decision - is the value every surface shows. The last per-attempt event is only the fallback for a row
+    # written before reconciliation existed (or for a unit's row, which has no record of its own).
+    for event in events if isinstance(events, list) else []:
+        if isinstance(event, dict) and event.get("kind") == "result.reconciled" and isinstance(event.get("details"), dict):
+            reconciled = event["details"].get("requirement_truth")
+            if isinstance(reconciled, dict) and reconciled.get("status") in _TRUTH_STATUSES:
+                details = reconciled
     if not isinstance(details, dict) or details.get("status") not in _TRUTH_STATUSES:
         return None
     counts = {key: details.get(key) for key in ("verified", "accepted", "total")}

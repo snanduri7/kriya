@@ -25,7 +25,9 @@ from kriya.core.state_paths import trace_db_path
 # model.admission: C-09 (S1, ruling 7) - the run's own admission decision, recorded on every run
 OPENING_EVENTS = ["egress.authority", "evidence.attempt_store", "model.runtime", "model.role_independence", "model.admission", "requirement.derived",
                  "verification_contract.compiled"]
-# the row drains the PRD-018 role metrics last (run_lifecycle.trace_run_events)
+# the row drains the PRD-018 role metrics last (run_lifecycle.trace_run_events); S6 (C-02): the coordinator then appends the one
+# event that stamps the row with the RunRecord it was reconciled with (control/trace.py::reconcile_run_row)
+RECONCILED = ["result.reconciled"]
 SHORT_ROW_KWARGS = ["run_id", "goal", "duration_sec", "attempts", "status", "files_modified", "failure_category",
                     "milestone_group_id", "milestone_index", "milestone_total", "enforce_run_id", "run_events"]
 
@@ -83,7 +85,7 @@ async def test_the_admission_refusal_writes_the_short_failure_row(tmp_path):
     shape = _row_shape(row)
     assert shape["gate_outcomes"] in (None, "[]") and shape["model_hops"] in (None, "[]")
     assert shape["run_event_kinds"] == OPENING_EVENTS + ["requirement.authority_required",
-                                                         "verification_contract.authority_requested", "model.role_metrics"]
+                                                         "verification_contract.authority_requested", "model.role_metrics"] + RECONCILED
     assert engine.developer.run_generation.await_count == 0 and calls["planner"] == []
 
 
@@ -103,7 +105,7 @@ async def test_an_unexecutable_baseline_authority_writes_the_short_failure_row(t
     _common(row, res["run_id"], EXACT_GOAL, "failure", "verification_authority_unavailable")
     assert kwargs == [SHORT_ROW_KWARGS]
     assert _row_shape(row)["run_event_kinds"] == OPENING_EVENTS + [
-        "verification_contract.sealed", "verification_contract.baseline", "verification_contract.refused", "model.role_metrics"]
+        "verification_contract.sealed", "verification_contract.baseline", "verification_contract.refused", "model.role_metrics"] + RECONCILED
     assert engine.developer.run_generation.await_count == 0 and calls["planner"] == []
 
 
@@ -121,7 +123,7 @@ async def test_no_mutation_required_writes_the_short_success_row_without_a_failu
     assert kwargs == [[k for k in SHORT_ROW_KWARGS if k != "failure_category"]]
     assert _row_shape(row)["run_event_kinds"] == OPENING_EVENTS + [
         "verification_contract.sealed", "verification_contract.baseline", "verification_contract.no_mutation_required",
-        "model.role_metrics"]
+        "model.role_metrics"] + RECONCILED
     assert engine.developer.run_generation.await_count == 0 and calls["planner"] == []
 
 

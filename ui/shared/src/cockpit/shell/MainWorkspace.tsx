@@ -1,4 +1,4 @@
-import { AvailabilityView, Badge, PROJECT_PAGE, goalTitle, requirementTruthWords, TabBar, useDispatch, useNavigate, useRunContext, useShellSelection, type Resolved } from '../core';
+import { AvailabilityView, Badge, PROJECT_PAGE, goalTitle, recordedStatusLabel, requirementTruthWords, TabBar, useDispatch, useNavigate, useRunContext, useShellSelection, type Resolved } from '../core';
 import { ModuleHost } from './ModuleHost';
 
 /** The tab that holds the second-level documents (Plan, Attempts, Context, Evidence, ...). It is a label in this layout, never a module. */
@@ -32,7 +32,7 @@ export function MainWorkspace({ header, tabs }: { header: readonly Resolved[]; t
             {(ctx) => (
               <header>
                 <h2 style={{ margin: 0, fontSize: 16 }} data-testid="run-title">{goalTitle(ctx.displayGoal)}</h2>
-                <div className="muted"><Badge>{ctx.status === 'in_progress' ? 'Unfinished' : ctx.status === 'success' ? requirementTruthWords(ctx.requirementTruth).heading : ctx.status === 'failure' ? 'Failed' : 'Status not recorded'}</Badge>{' '}
+                <div className="muted"><Badge>{ctx.status === 'success' ? requirementTruthWords(ctx.requirementTruth).heading : recordedStatusLabel(ctx.status)}</Badge>{' '}
                   {ctx.milestone.groupId ? <Badge>{`milestone ${(ctx.milestone.index ?? 0) + 1}/${ctx.milestone.total ?? '?'}`}</Badge> : null}</div>
               </header>
             )}

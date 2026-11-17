@@ -967,7 +967,7 @@
     {
      "attempt": null,
      "kind": "run.closed",
-     "payload": "sha256:6d9959ff8cb6aa6a",
+     "payload": "sha256:f6144141a6cc478e",
      "payload_keys": [
       "commit_result",
       "lifecycle_state",
@@ -1042,7 +1042,7 @@
     "attempts": 0,
     "failure_category": null,
     "files_modified": "calc.py",
-    "status": "success"
+    "status": "applied_requirements_open"
    }
   ]
  },
@@ -1149,11 +1149,13 @@
     "accepted_risks",
     "active_skill_manifest",
     "candidate_gates_passed",
+    "commit_result",
     "completion_kind",
     "contract_registry",
     "design",
     "deterministic_gate_evidence",
     "environment_failure",
+    "error",
     "failure_category",
     "failure_report",
     "files",
@@ -1161,18 +1163,26 @@
     "last_failure",
     "lsp_warning",
     "no_progress_reason",
+    "open_requirement_authorities",
+    "open_requirements",
     "overall_attempt_passed",
     "plan",
     "plan_scope_conflict",
     "quality_gates_passed",
+    "reason_codes",
+    "reported_status",
     "requirement_truth",
     "requirements",
     "retry_progress",
     "review",
     "review_included_in_approval",
     "run_id",
+    "run_record_id",
+    "run_record_state",
     "skill_staleness_warnings",
     "static_analysis",
+    "status",
+    "technical_gates_passed",
     "terminal_regression_passed",
     "toolchain_warning",
     "unchanged_files",
@@ -1185,6 +1195,7 @@
     "accepted_risks": [],
     "active_skill_manifest": [],
     "candidate_gates_passed": true,
+    "commit_result": "COMMITTED",
     "completion_kind": null,
     "contract_registry": null,
     "design": {
@@ -1206,6 +1217,10 @@
      }
     ],
     "environment_failure": null,
+    "error": {
+     "chars": 165,
+     "text": "sha256:c2f5a5215478ab11"
+    },
     "failure_category": null,
     "failure_report": [
      {
@@ -1268,13 +1283,51 @@
     "last_failure": null,
     "lsp_warning": null,
     "no_progress_reason": null,
+    "open_requirement_authorities": {
+     "REQ-1": [
+      {
+       "chars": 58,
+       "text": "sha256:07b574873ed88a99"
+      },
+      {
+       "chars": 63,
+       "text": "sha256:43254b7cb29cf0f6"
+      },
+      {
+       "chars": 64,
+       "text": "sha256:79a2721bd6162ef0"
+      }
+     ],
+     "REQ-2": [
+      {
+       "chars": 58,
+       "text": "sha256:07b574873ed88a99"
+      },
+      {
+       "chars": 63,
+       "text": "sha256:43254b7cb29cf0f6"
+      },
+      {
+       "chars": 64,
+       "text": "sha256:79a2721bd6162ef0"
+      }
+     ]
+    },
+    "open_requirements": [
+     "REQ-1",
+     "REQ-2"
+    ],
     "overall_attempt_passed": true,
     "plan": {
      "chars": 15,
      "text": "sha256:fc080ea7506657a2"
     },
     "plan_scope_conflict": null,
-    "quality_gates_passed": true,
+    "quality_gates_passed": false,
+    "reason_codes": [
+     "APPLIED_REQUIREMENTS_OPEN"
+    ],
+    "reported_status": null,
     "requirement_truth": {
      "accepted": 0,
      "status": "OPEN_REQUIREMENTS",
@@ -1370,6 +1423,8 @@
     },
     "review_included_in_approval": true,
     "run_id": "<run:2>",
+    "run_record_id": "<run:1>",
+    "run_record_state": "FAILURE",
     "skill_staleness_warnings": null,
     "static_analysis": {
      "accepted_risk": false,
@@ -1390,6 +1445,8 @@
      "summary": null,
      "waiver_ids": []
     },
+    "status": "applied_requirements_open",
+    "technical_gates_passed": true,
     "terminal_regression_passed": true,
     "toolchain_warning": null,
     "unchanged_files": [],
@@ -1646,10 +1703,17 @@
      "details": "sha256:e86388d76eaa0db7",
      "kind": "model.role_metrics",
      "source": "workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:ebd6ba525fcc35dd",
+     "kind": "result.reconciled",
+     "source": "control.run_coordinator"
     }
    ],
    "run": "<trace:1>",
-   "status": "success"
+   "status": "applied_requirements_open"
   }
  ],
  "run_records": [
@@ -1704,22 +1768,44 @@
     ]
    },
    "goal_hash": "7fe7982621f9a367aef5c7e4a462530c491bb33df5708c4b23ce782f058c1e59",
-   "lifecycle_state": "SUCCESS",
+   "lifecycle_state": "FAILURE",
    "milestone_reuse": null,
+   "model_admission": {
+    "all_qualified": false,
+    "decision_digest": "412efc193c9f6d52ca59c1ef75719c18613b857c9fbe3e1575d1448e7b1a329a",
+    "enforced": false,
+    "policy_digest": null
+   },
    "model_runtime_fingerprint_ids": [],
    "obligation_ledger_hash": null,
    "obligation_ledger_revision": null,
    "recovery": null,
+   "requirement_truth": {
+    "accepted": 0,
+    "status": "OPEN_REQUIREMENTS",
+    "total": 2,
+    "unresolved": [
+     {
+      "id": "REQ-1",
+      "outcome": "pending"
+     },
+     {
+      "id": "REQ-2",
+      "outcome": "pending"
+     }
+    ],
+    "verified": 0
+   },
    "resume_decision": null,
    "retry_counters": {
     "retry_count": 0,
     "targeted_retry_count": 0
    },
    "retry_state_reference": "checkpoint:<run:2>",
-   "revision": 13,
+   "revision": 15,
    "run_id": "<run:1>",
    "schema_version": 3,
-   "terminal_status": "SUCCESS",
+   "terminal_status": "APPLIED_REQUIREMENTS_OPEN",
    "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [

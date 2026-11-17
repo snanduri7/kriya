@@ -129,8 +129,29 @@ def test_every_persistent_store_is_classified():
 
 # ---------------------------------------------------------------- invariants
 
+# S6 (C-02): a run ends SUCCESS only with a requirement truth that permits it. These are lifecycle and commit-cycle tests, not
+# requirement tests (tests/test_s6_result_contract.py holds those), so each supplies a resolved truth explicitly: on the record, on a
+# scripted payload, or at the one outcome owner for a real pipeline run.
+VERIFIED_TRUTH = {"status": "ALL_VERIFIED", "verified": 1, "accepted": 0, "total": 1, "unresolved": []}
+
+
 def _running():
-    return RunRecord.new("r", "w", None, None).transition(RunLifecycle.RUNNING)
+    return RunRecord.new("r", "w", None, None).transition(RunLifecycle.RUNNING).annotate(requirement_truth=dict(VERIFIED_TRUTH))
+
+
+def _every_requirement_closed(*owners):
+    """Patches of the requirement outcome reader at ``owners`` (module paths that bound the name): every requirement of the run is
+    CLOSED_BY_EVIDENCE."""
+    from contextlib import ExitStack
+
+    from kriya.workflow.requirements import RequirementOutcome
+
+    def outcomes(_ledger, requirement_set, **_reader_inputs):
+        return {requirement.id: RequirementOutcome.CLOSED_BY_EVIDENCE for requirement in requirement_set.requirements}
+    stack = ExitStack()
+    for owner in owners:
+        stack.enter_context(patch(f"{owner}.requirement_outcomes", outcomes))
+    return stack
 
 
 def test_commit_states_are_reachable_only_through_begin_and_settle():
@@ -310,7 +331,7 @@ def test_nested_real_workspace_commits_are_each_recorded_candidate_commits_are_n
         # pass) moves the record off COMMITTED; the run still succeeded.
         mark_run_stage(workspace_path, RunLifecycle.CANDIDATE)
         assert current_run_context()._lease.record.lifecycle_state == RunLifecycle.CANDIDATE
-        return {"status": "success", "quality_gates_passed": True}
+        return {"status": "success", "quality_gates_passed": True, "requirement_truth": dict(VERIFIED_TRUTH)}
 
     asyncio.run(sequence(workspace_path=str(workspace)))
     [record] = list_run_records(str(workspace))
@@ -527,7 +548,8 @@ async def test_enforce_controller_run_records_real_stages_and_evidence(tmp_path)
             patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
                   return_value=plan), \
             patch("kriya.workflow.workflow_controller.validate_plan",
-                  new=AsyncMock(return_value=PlanValidationResult(valid=True))):
+                  new=AsyncMock(return_value=PlanValidationResult(valid=True))), \
+            _every_requirement_closed("kriya.workflow.requirements", "kriya.workflow.workflow_controller"):
         result = await WorkflowController(engine).execute("goal", str(repo), migration_mode="enforce")
 
     assert result.legacy_result["status"] == "success", result.legacy_result
@@ -581,7 +603,8 @@ async def test_generation_workflow_terminal_apply_goes_through_the_recorded_seam
         return real_commit(writes, **kwargs)
 
     states, spy = _record_states()
-    with spy, patch.object(workflow_module, "commit_terminal_candidate", side_effect=spy_commit):
+    with spy, patch.object(workflow_module, "commit_terminal_candidate", side_effect=spy_commit), \
+            _every_requirement_closed("kriya.workflow.requirements", "kriya.workflow.outcome", "kriya.workflow.development_loop"):
         result = await engine.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
 
     assert result["quality_gates_passed"] is True

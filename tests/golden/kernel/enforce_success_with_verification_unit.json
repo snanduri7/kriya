@@ -1529,7 +1529,7 @@
     {
      "attempt": null,
      "kind": "run.closed",
-     "payload": "sha256:0f50e461b2149b91",
+     "payload": "sha256:f76f3f6c0079820b",
      "payload_keys": [
       "commit_result",
       "lifecycle_state",
@@ -1788,18 +1788,27 @@
     "accepted_risk",
     "accepted_risks",
     "commit_evidence",
+    "commit_result",
     "contract_registry",
+    "error",
     "files",
     "last_subtask_result",
+    "open_requirement_authorities",
+    "open_requirements",
     "plan_repair_attempts",
     "quality_gates_passed",
+    "reason_codes",
+    "reported_status",
     "requirement_truth",
     "requirements",
     "run_id",
+    "run_record_id",
+    "run_record_state",
     "static_analysis",
     "status",
     "subtask_results",
     "subtask_retry_locality",
+    "technical_gates_passed",
     "verification_contract"
    ],
    "values": {
@@ -1840,7 +1849,12 @@
      "transaction_id": "<run:1>-<txn:1>",
      "updated_at_unix": "<clock>"
     },
+    "commit_result": "COMMITTED",
     "contract_registry": null,
+    "error": {
+     "chars": 158,
+     "text": "sha256:4f9e4a0f24f5d2c0"
+    },
     "files": [
      "shop/service.py"
     ],
@@ -1977,8 +1991,31 @@
      ],
      "workspace_commit_failure": null
     },
+    "open_requirement_authorities": {
+     "REQ-1": [
+      {
+       "chars": 58,
+       "text": "sha256:07b574873ed88a99"
+      },
+      {
+       "chars": 63,
+       "text": "sha256:43254b7cb29cf0f6"
+      },
+      {
+       "chars": 64,
+       "text": "sha256:79a2721bd6162ef0"
+      }
+     ]
+    },
+    "open_requirements": [
+     "REQ-1"
+    ],
     "plan_repair_attempts": 0,
-    "quality_gates_passed": true,
+    "quality_gates_passed": false,
+    "reason_codes": [
+     "APPLIED_REQUIREMENTS_OPEN"
+    ],
+    "reported_status": "success",
     "requirement_truth": {
      "accepted": 0,
      "status": "OPEN_REQUIREMENTS",
@@ -2031,6 +2068,8 @@
      "version": 1
     },
     "run_id": "<run:1>",
+    "run_record_id": "<run:1>",
+    "run_record_state": "FAILURE",
     "static_analysis": {
      "accepted_risk": false,
      "banner": {
@@ -2050,7 +2089,7 @@
      "summary": null,
      "waiver_ids": []
     },
-    "status": "success",
+    "status": "applied_requirements_open",
     "subtask_results": [
      {
       "error": null,
@@ -2085,6 +2124,7 @@
       "subtask_id": "sv"
      }
     ],
+    "technical_gates_passed": true,
     "verification_contract": {
      "admission": "VERIFICATION_AUTHORITY_REQUIRED",
      "authorities": [],
@@ -2521,10 +2561,17 @@
      "details": "sha256:952deadc01d024fe",
      "kind": "evidence.attempt_store",
      "source": "workflow_controller.enforce"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:f708c8279c48c79e",
+     "kind": "result.reconciled",
+     "source": "control.run_coordinator"
     }
    ],
    "run": "<trace:3>",
-   "status": "success"
+   "status": "applied_requirements_open"
   }
  ],
  "run_records": [
@@ -2549,19 +2596,37 @@
    "effective_config_fingerprint": "<vdigest>",
    "execution_plan": null,
    "goal_hash": "f4791ae625dcc414ffb22c371a51e7705688559d65ba91df483700c9f4c8bc75",
-   "lifecycle_state": "SUCCESS",
+   "lifecycle_state": "FAILURE",
    "milestone_reuse": null,
+   "model_admission": {
+    "all_qualified": false,
+    "decision_digest": "ea8721429b235b2b09e8e7ec1c1b32fa8619e74914125650cfe00f62024d4869",
+    "enforced": false,
+    "policy_digest": null
+   },
    "model_runtime_fingerprint_ids": [],
    "obligation_ledger_hash": "8ed083e4c19eabbf7da0f8ba0491a2e37d998e8c703742f8fa8aaa1ea7a99322",
    "obligation_ledger_revision": 8,
    "recovery": null,
+   "requirement_truth": {
+    "accepted": 0,
+    "status": "OPEN_REQUIREMENTS",
+    "total": 1,
+    "unresolved": [
+     {
+      "id": "REQ-1",
+      "outcome": "pending"
+     }
+    ],
+    "verified": 0
+   },
    "resume_decision": null,
    "retry_counters": {},
    "retry_state_reference": null,
-   "revision": 9,
+   "revision": 11,
    "run_id": "<run:1>",
    "schema_version": 3,
-   "terminal_status": "SUCCESS",
+   "terminal_status": "APPLIED_REQUIREMENTS_OPEN",
    "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [

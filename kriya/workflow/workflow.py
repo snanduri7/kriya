@@ -281,6 +281,7 @@ from kriya.workflow.requirement_contract import bound_requirement_contract, requ
 from kriya.workflow.requirements import (
     VerificationAuthorityRequired,
     cited_requirement_ids,
+    repair_requirement_truth,
     requirement_lineage,
     statement_origins,
 )
@@ -1258,6 +1259,16 @@ def seal_run_contract(config: Any, contract: Any) -> Optional[str]:
     except Exception as exc:  # the contract still governs the run; the store is evidence
         logger.warning(f"Verification contract could not be stored: {type(exc).__name__}: {exc}")
         return None
+
+
+def created_paths_from_terminal_batch(
+    contract: Any, candidate_root: str, workspace_path: str, *, writes: Optional[Iterable[Any]], candidate_paths: Iterable[str],
+) -> Optional[List[str]]:
+    """The body is ``kriya/workflow/requirement_closers.py::created_paths_from_terminal_batch`` (S6); its collaborators
+    are resolved here, at call time."""
+    return closers.created_paths_from_terminal_batch(
+        _closer_deps(), contract, candidate_root, workspace_path, writes=writes, candidate_paths=candidate_paths
+    )
 
 
 def close_requirements_by_file_immutability(
@@ -3229,4 +3240,9 @@ class WorkflowEngine:
             unresolved_skill_gap_names=unresolved_skill_gap_names, skill_staleness_warnings=skill_staleness_warnings,
             active_skill_manifest=active_skill_manifest, requirement_set=requirement_set,
             resolved_obligation_ledger=resolved_obligation_ledger, verification_contract=verification_contract,
+            # INT-05 (S6): a repair run (`kriya fix`: requirements_from_goal=False) has its one requirement, closed by the gate
+            # that reproduced the failure - the pre-candidate baseline and the candidate's terminal regression.
+            repair_requirement=(repair_requirement_truth(
+                state.validation_baseline_full_regression, terminal_regression_passed=state.terminal_regression_succeeded,
+                gates_passed=quality_passed) if not requirements_from_goal and requirement_set is None else None),
         )

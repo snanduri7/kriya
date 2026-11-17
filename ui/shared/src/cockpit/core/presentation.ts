@@ -31,7 +31,22 @@ export function formatDuration(seconds: number | null | undefined): string | nul
 
 // ------------------------------------------------------------------ history card
 
-export type CardStatus = 'success' | 'failure' | 'unfinished' | 'unknown';
+/** S6 (C-02): the backend's status of a run whose change IS applied while a requirement is still open (kriya/control/run_coordinator.py RESULT_STATUS_APPLIED_REQUIREMENTS_OPEN on the history row; the RunRecord's
+ * terminal status is APPLIED_REQUIREMENTS_OPEN). The desktop only words it: it is never success, and it is not "not recorded" - the record says exactly this. */
+export const APPLIED_REQUIREMENTS_OPEN_STATUS = 'applied_requirements_open';
+export const APPLIED_REQUIREMENTS_OPEN_TERMINAL_STATUS = 'APPLIED_REQUIREMENTS_OPEN';
+export const APPLIED_REQUIREMENTS_OPEN_LABEL = 'Applied, requirements open';
+/** The two words the backend's row writers record for a run that failed: the direct pipeline writes 'failure', the enforce controller's own row writes 'failed' (kriya/control/run_coordinator.py
+ * _reconcile_trace_rows keeps each writer's word). Both are the recorded failure; neither is "not recorded". */
+export function isRecordedFailure(status: string | null | undefined): boolean {
+  return status === 'failure' || status === 'failed';
+}
+/** The words of a recorded run status that is not success (success is worded by the requirement truth). A display mapping of the recorded value, nothing is decided here. */
+export function recordedStatusLabel(status: string | null | undefined): string {
+  return isRecordedFailure(status) ? 'Failed' : status === 'in_progress' ? 'Unfinished' : status === APPLIED_REQUIREMENTS_OPEN_STATUS ? APPLIED_REQUIREMENTS_OPEN_LABEL : 'Status not recorded';
+}
+
+export type CardStatus = 'success' | 'failure' | 'unfinished' | 'applied_open' | 'unknown';
 export interface RunCard {
   title: string;
   /** How a completed run's card is marked: ok (ordinary), warn (applied, verification incomplete) or bad (a requirement is contradicted). Always ok for a run that did not succeed (the status words carry that). */
@@ -48,14 +63,14 @@ export interface RunCard {
 }
 
 export function runCard(run: Pick<RunSummary, 'display_goal' | 'status' | 'duration_sec' | 'files_modified' | 'timestamp' | 'requirement_truth'>): RunCard {
-  const status: CardStatus = run.status === 'success' ? 'success' : run.status === 'failure' ? 'failure' : run.status === 'in_progress' ? 'unfinished' : 'unknown';
+  const status: CardStatus = run.status === 'success' ? 'success' : isRecordedFailure(run.status) ? 'failure' : run.status === 'in_progress' ? 'unfinished' : run.status === APPLIED_REQUIREMENTS_OPEN_STATUS ? 'applied_open' : 'unknown';
   const files = typeof run.files_modified === 'string' ? run.files_modified.split(',').map((f) => f.trim()).filter(Boolean) : [];
   const title = goalTitle(run.display_goal);
   // A completed run is worded by the backend's requirement truth projected on the list (kriya/application/history.py); a run that recorded none is neutral 'Completed', never 'verified'.
   const completed = requirementTruthWords(parseRequirementTruth(run.requirement_truth));
   return {
-    title, titleIsRequest: title !== NEUTRAL_TITLE, status, tone: status === 'success' ? completed.tone : 'ok',
-    statusLabel: status === 'success' ? completed.heading : status === 'failure' ? 'Failed' : status === 'unfinished' ? 'Unfinished' : 'Status not recorded',
+    title, titleIsRequest: title !== NEUTRAL_TITLE, status, tone: status === 'success' ? completed.tone : status === 'applied_open' ? 'warn' : 'ok',
+    statusLabel: status === 'success' ? completed.heading : recordedStatusLabel(run.status),
     duration: formatDuration(run.duration_sec), filesChanged: files.length === 0 ? null : files.length,
     when: typeof run.timestamp === 'string' && run.timestamp.trim() !== '' ? run.timestamp.slice(0, 16).replace('T', ' ') : null,
   };

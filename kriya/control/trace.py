@@ -1,8 +1,9 @@
 import datetime
 import json
 import os
+import time
 from contextlib import closing
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from kriya.core.db import get_connection
 from kriya.foundation.redaction import redact_text, redact_value
@@ -16,6 +17,39 @@ def _active_run_workspace_identity() -> Optional[str]:
 
     context = current_run_context()
     return workspace_identity(context.workspace_path) if context is not None else None
+
+
+RESULT_RECONCILED_EVENT = "result.reconciled"
+# The row words a run that claimed success may be corrected FROM (the executors' own "my gates passed" words).
+_ROW_SUCCESS_STATUSES = frozenset({"success"})
+
+
+def reconcile_run_row(db_path: str, run_id: str, *, status: Optional[str], details: Dict[str, Any]) -> bool:
+    """C-02 / C-11 (S6): bring ONE run-level history row in line with the run's reconciled result, after the coordinator's terminal
+    decision. Appends one ``result.reconciled`` event (the RunRecord id, revision, lifecycle, terminal status, commit result and the
+    record's requirement truth: what every reader of the row projects) and, when ``status`` is given, replaces a row status that claimed
+    success with it. A row that does not exist, or one whose stored events do not parse, is left untouched (False): the row is display
+    history, the RunRecord stays the authority."""
+    with closing(get_connection(db_path)) as conn:
+        row = conn.execute("SELECT status, run_events FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if row is None:
+            return False
+        try:
+            events = json.loads(row[1]) if row[1] else []
+        except ValueError:
+            return False
+        if not isinstance(events, list):
+            return False
+        events = [event for event in events if not (isinstance(event, dict) and event.get("kind") == RESULT_RECONCILED_EVENT)]
+        events.append(redact_value({
+            "kind": RESULT_RECONCILED_EVENT, "attempt": 0, "source": "control.run_coordinator", "authority": "authoritative",
+            "message": f"run record {details.get('lifecycle_state')} / {details.get('terminal_status')}", "failure_type": None,
+            "operation": None, "details": details, "created_at": time.time(),
+        }))
+        new_status = status if (status is not None and row[0] in _ROW_SUCCESS_STATUSES) else row[0]
+        conn.execute("UPDATE runs SET status = ?, run_events = ? WHERE run_id = ?", (new_status, json.dumps(events), run_id))
+        conn.commit()
+    return True
 
 
 class TraceLogger:
@@ -199,6 +233,12 @@ class TraceLogger:
             conn.commit()
         from kriya.control.launch import note_trace_row  # a desktop launch links its own row; a no-op otherwise
         note_trace_row(run_id, run_events)
+        # S6: the run's own row is reconciled with its record at the end. A row of a unit of a larger plan (it names an enforce
+        # parent other than itself, or a milestone group) is that unit's own truth and is never rewritten as the run's.
+        if milestone_group_id is None and enforce_run_id in (None, run_id):
+            from kriya.control.run_coordinator import note_run_trace_row
+
+            note_run_trace_row(self.db_path, run_id, reconcile_run_row)
 
     def log_milestone_plan(
         self,

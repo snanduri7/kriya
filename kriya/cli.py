@@ -57,13 +57,13 @@ from kriya.cli_commands.static_analysis import static_analysis_scan as static_an
 from kriya.cli_commands.static_analysis import static_analysis_status as static_analysis_status
 from kriya.cli_commands.static_analysis import static_analysis_waive as static_analysis_waive
 from kriya.cli_commands.static_analysis import static_analysis_waivers as static_analysis_waivers
-from kriya.cli_output import GenerateOutput, no_progress_stop_message
+from kriya.cli_output import GenerateOutput, applied_requirements_open_lines, no_progress_stop_message, result_exit_code
 from kriya.config import AppConfig, load_config
 from kriya.config.environment import child_environment
 from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.control.run_coordinator import DurableWriteError, begin_mutating_run, transition_mutating_run
 from kriya.control.run_ownership import WorkspaceLockHeldError
-from kriya.control.run_record import RunLifecycle
+from kriya.control.run_record import NO_REQUIREMENT_SET_TRUTH_OF_TOOL_EXECUTION, RunLifecycle
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.core.logging_setup import LogDirectoryError, configure_logging
@@ -871,6 +871,8 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                                     transition_mutating_run(
                                         run_context, RunLifecycle.SUCCESS, durable=True,
                                         commit_result="DIRECT_TOOL_EXECUTION",
+                                        # S6 (C-02): the one explicitly requirements-free shape (run_record.REQUIREMENTS_FREE_SHAPES).
+                                        requirement_truth=dict(NO_REQUIREMENT_SET_TRUTH_OF_TOOL_EXECUTION),
                                         tool_execution={"tool": tool_name, "state": "completed"},
                                     )
                                 except DurableWriteError as error:
@@ -3471,7 +3473,10 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     note += f" {failed_unit} failed before its changes were applied."
                 click.secho(note + " The plan is not successful.", fg="yellow")
             click.echo(json.dumps(milestone_result, indent=2, default=str))
-        sys.exit(0 if milestone_result.get("status") == "success" else 1)
+        if milestone_result.get("status") == "applied_requirements_open" and not json_output:
+            for line in applied_requirements_open_lines(milestone_result):
+                click.secho(line, fg="yellow")
+        sys.exit(result_exit_code(milestone_result))  # S6: the one exit table (cli_output.result_exit_code)
 
     async def run_workflow():
         # AUTH-GOAL-CONTAMINATION-001: `goal` stays the user's exact words;
@@ -3641,6 +3646,10 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 click.secho(f"[SKILL STALENESS] {warning}", fg="yellow")
         if res.get("status") == "needs_review":
             _echo_needs_review(res)
+        elif res.get("status") == "applied_requirements_open":
+            # S6 (C-02): the change is applied and its requirement truth is not resolved - never "PASSED", never "not applied".
+            for line in applied_requirements_open_lines(res):
+                click.secho(line, bold=line.startswith("Result:"), fg="red" if line.startswith("Result:") else "yellow")
         elif res.get("files") and res.get("final_review_refusal"):
             _echo_final_review_refusal(res)
         elif res.get("files"):
@@ -3939,7 +3948,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
     # Click otherwise returns zero merely because the command function reached
     # its end. Workflow outcome is the process contract for both human and JSON
     # presentation modes: only terminally verified generation is success.
-    sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
+    sys.exit(result_exit_code(final_res))  # S6: the one exit table (cli_output.result_exit_code)
 
 @main.command(name="plan-milestones")
 @click.argument('goal', required=False)
@@ -4482,7 +4491,7 @@ def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
         )
         sys.exit(3)
     click.echo(json.dumps(res, indent=2, default=str))
-    sys.exit(0 if res.get("quality_gates_passed") else 1)
+    sys.exit(result_exit_code(res))  # S6: the one exit table (cli_output.result_exit_code)
 
 @main.command(name="ask")
 @click.argument('question')
@@ -4992,7 +5001,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         sys.exit(1)
     # W3-6 (KRIYA-FIX-EXIT-CODE-ZERO-ON-FAILURE-001): the exit status follows the terminal result exactly as `generate` and the proposal executor do - a repair that
     # did not pass its quality gates (or a result that carries no verdict) is never exit 0.
-    sys.exit(0 if fix_result and fix_result.get("quality_gates_passed") else 1)
+    sys.exit(result_exit_code(fix_result))  # S6: the one exit table (cli_output.result_exit_code)
 
 @main.command(name="traces")
 @click.option("-n", "--limit", type=int, default=None, show_default="20",

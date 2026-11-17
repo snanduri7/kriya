@@ -998,7 +998,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:9b445550ba4f53ca",
+     "payload": "sha256:74438a13a6ef42c3",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -1013,7 +1013,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:9b445550ba4f53ca",
+     "payload": "sha256:74438a13a6ef42c3",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -1028,7 +1028,7 @@
     {
      "attempt": null,
      "kind": "run.closed",
-     "payload": "sha256:98fe237966e212e8",
+     "payload": "sha256:f6144141a6cc478e",
      "payload_keys": [
       "commit_result",
       "lifecycle_state",
@@ -1166,13 +1166,13 @@
   "trace_rows": [
    {
     "attempts": 0,
-    "failure_category": "final_review_refused",
+    "failure_category": null,
     "failure_report": {
      "chars": 167,
      "text": "sha256:501e75a25e8474af"
     },
     "files_modified": "calc.py",
-    "status": "failure"
+    "status": "applied_requirements_open"
    }
   ],
   "workspace_files": {
@@ -1283,11 +1283,13 @@
     "accepted_risks",
     "active_skill_manifest",
     "candidate_gates_passed",
+    "commit_result",
     "completion_kind",
     "contract_registry",
     "design",
     "deterministic_gate_evidence",
     "environment_failure",
+    "error",
     "failure_category",
     "failure_report",
     "files",
@@ -1296,18 +1298,26 @@
     "last_failure",
     "lsp_warning",
     "no_progress_reason",
+    "open_requirement_authorities",
+    "open_requirements",
     "overall_attempt_passed",
     "plan",
     "plan_scope_conflict",
     "quality_gates_passed",
+    "reason_codes",
+    "reported_status",
     "requirement_truth",
     "requirements",
     "retry_progress",
     "review",
     "review_included_in_approval",
     "run_id",
+    "run_record_id",
+    "run_record_state",
     "skill_staleness_warnings",
     "static_analysis",
+    "status",
+    "technical_gates_passed",
     "terminal_regression_passed",
     "toolchain_warning",
     "unchanged_files",
@@ -1320,6 +1330,7 @@
     "accepted_risks": [],
     "active_skill_manifest": [],
     "candidate_gates_passed": true,
+    "commit_result": "COMMITTED",
     "completion_kind": null,
     "contract_registry": null,
     "design": {
@@ -1341,7 +1352,11 @@
      }
     ],
     "environment_failure": null,
-    "failure_category": "final_review_refused",
+    "error": {
+     "chars": 158,
+     "text": "sha256:4f9e4a0f24f5d2c0"
+    },
+    "failure_category": null,
     "failure_report": [
      {
       "attribution_tier": null,
@@ -1402,7 +1417,7 @@
       "unrecoverable_scope_denials": 0
      },
      "successful_calls": 1,
-     "terminal_status": "failed",
+     "terminal_status": "success",
      "total_wall_seconds": "<clock>",
      "validated_files": 1,
      "validation_invalidations": 0,
@@ -1417,6 +1432,25 @@
     "last_failure": null,
     "lsp_warning": null,
     "no_progress_reason": null,
+    "open_requirement_authorities": {
+     "REQ-1": [
+      {
+       "chars": 58,
+       "text": "sha256:07b574873ed88a99"
+      },
+      {
+       "chars": 63,
+       "text": "sha256:43254b7cb29cf0f6"
+      },
+      {
+       "chars": 64,
+       "text": "sha256:79a2721bd6162ef0"
+      }
+     ]
+    },
+    "open_requirements": [
+     "REQ-1"
+    ],
     "overall_attempt_passed": true,
     "plan": {
      "chars": 15,
@@ -1424,6 +1458,10 @@
     },
     "plan_scope_conflict": null,
     "quality_gates_passed": false,
+    "reason_codes": [
+     "APPLIED_REQUIREMENTS_OPEN"
+    ],
+    "reported_status": null,
     "requirement_truth": {
      "accepted": 0,
      "status": "OPEN_REQUIREMENTS",
@@ -1489,6 +1527,8 @@
     },
     "review_included_in_approval": false,
     "run_id": "<run:2>",
+    "run_record_id": "<run:1>",
+    "run_record_state": "FAILURE",
     "skill_staleness_warnings": null,
     "static_analysis": {
      "accepted_risk": false,
@@ -1509,6 +1549,8 @@
      "summary": null,
      "waiver_ids": []
     },
+    "status": "applied_requirements_open",
+    "technical_gates_passed": true,
     "terminal_regression_passed": true,
     "toolchain_warning": null,
     "unchanged_files": [],
@@ -1777,10 +1819,17 @@
      "details": "sha256:6027337f2b551c5e",
      "kind": "review.refused",
      "source": "workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:7ef07bbe01d5cd0a",
+     "kind": "result.reconciled",
+     "source": "control.run_coordinator"
     }
    ],
    "run": "<trace:1>",
-   "status": "failure"
+   "status": "applied_requirements_open"
   }
  ],
  "run_records": [
@@ -1837,20 +1886,38 @@
    "goal_hash": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
    "lifecycle_state": "FAILURE",
    "milestone_reuse": null,
+   "model_admission": {
+    "all_qualified": false,
+    "decision_digest": "412efc193c9f6d52ca59c1ef75719c18613b857c9fbe3e1575d1448e7b1a329a",
+    "enforced": false,
+    "policy_digest": null
+   },
    "model_runtime_fingerprint_ids": [],
    "obligation_ledger_hash": null,
    "obligation_ledger_revision": null,
    "recovery": null,
+   "requirement_truth": {
+    "accepted": 0,
+    "status": "OPEN_REQUIREMENTS",
+    "total": 1,
+    "unresolved": [
+     {
+      "id": "REQ-1",
+      "outcome": "pending"
+     }
+    ],
+    "verified": 0
+   },
    "resume_decision": null,
    "retry_counters": {
     "retry_count": 0,
     "targeted_retry_count": 0
    },
    "retry_state_reference": "checkpoint:<run:2>",
-   "revision": 14,
+   "revision": 15,
    "run_id": "<run:1>",
    "schema_version": 3,
-   "terminal_status": "FAILURE",
+   "terminal_status": "APPLIED_REQUIREMENTS_OPEN",
    "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [
@@ -1860,11 +1927,8 @@
    "work_unit_states": {
     "direct": {
      "blocked_by": [],
-     "reason_codes": [
-      "WORK_UNIT_FAILED",
-      "STATUS:failed"
-     ],
-     "status": "FAILED",
+     "reason_codes": [],
+     "status": "VERIFIED",
      "work_unit_id": "direct"
     }
    },

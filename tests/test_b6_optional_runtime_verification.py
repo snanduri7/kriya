@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_gate_orchestrator as tg  # noqa: E402
 import test_runtime_verification as trv  # noqa: E402
 
+from kriya.config.resolution import bind_project_identity  # noqa: E402
 from kriya.workflow import attempt, gate_orchestrator  # noqa: E402
 from kriya.workflow.verification_authority import (  # noqa: E402
     deterministic_sequence_kind,
@@ -95,6 +96,9 @@ def _gates(tmp_path, *, required, judge=JUDGE_PYTEST, candidate=None):
         ctx.run_verifier.judge = AsyncMock(return_value=judge)
         await tg._executing(state, ctx, script)
     cfg = tg._config(run_verification_enabled=True)
+    # the judged pytest command reaches the process-boundary check, which opens the project's dependency-graph store: a configuration
+    # with no project identity is refused there (MEASURED red at 63c04ba for exactly this reason, before any S6 edit)
+    bind_project_identity(cfg, str(tmp_path))
     return tg.run_gates(tmp_path, case, script=tg._Script(), cfg=cfg, candidate=candidate, ctx_overrides=dict(runtime_verification_required=required))
 
 
@@ -142,10 +146,15 @@ def test_control_a_required_check_that_could_not_run_still_stops_the_run_fail_cl
     assert run.state.run_verification_declined is False
 
 
-def test_control_an_optional_check_that_RAN_and_failed_is_still_a_failure(tmp_path):
-    run = trv._AttemptRun(tmp_path, required=False, scripted={"app": (trv._app, [trv._crash()])}, grades=({"passed": False, "verdict": "FAIL", "reasoning": "NameError", "likely_files": ["calc.py"]},))
+@pytest.mark.parametrize("required, outcome", [(False, "returned"), (True, "raised")], ids=["optional_is_advisory", "required_still_fails"])
+def test_control_a_check_that_RAN_and_was_graded_failed_fails_the_attempt_only_when_it_is_required(tmp_path, required, outcome):
+    """Owner ruling 17 (2026-11-15; S6, OPTIONAL-RUNTIME-GRADED-FAILURE-GATE-S6): this control used to pin "an optional check that ran and
+    failed is still a failure". Ruled: a model-inferred optional check may not independently fail a run; a REQUIRED one still does
+    (tests/test_s6_result_contract.py holds the full controls)."""
+    run = trv._AttemptRun(tmp_path, required=required, scripted={"app": (trv._app, [trv._crash()])}, grades=({"passed": False, "verdict": "FAIL", "reasoning": "NameError", "likely_files": ["calc.py"]},))
     run.call(trv._approve_and_execute)
-    assert run.outcome == "raised" and run.failure.type == "run_verification"
+    assert run.outcome == outcome
+    assert (run.failure.type == "run_verification") if required else (run.failure is None)
 
 
 # ---- the typed environment stop (PYTHON_ENVIRONMENT_UNAVAILABLE: the project interpreter could not be prepared, nothing ran)

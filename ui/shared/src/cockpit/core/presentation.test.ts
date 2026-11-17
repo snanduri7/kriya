@@ -34,7 +34,9 @@ describe('runCard / formatDuration', () => {
     expect(card).toEqual({ title: 'Fix soft-delete bug in DefaultDriverService', titleIsRequest: true, status: 'success', tone: 'ok', statusLabel: 'Completed', duration: '4m 35s', filesChanged: 1, when: '2026-10-14 22:32' });
   });
   it('maps statuses honestly: an unknown status is "not recorded", never success', () => {
-    for (const [status, label] of [['failure', 'Failed'], ['in_progress', 'Unfinished'], ['weird', 'Status not recorded'], [null, 'Status not recorded']] as const) expect(runCard({ status } as RunSummary).statusLabel).toBe(label);
+    for (const [status, label] of [['failure', 'Failed'], ['failed', 'Failed'], ['in_progress', 'Unfinished'], ['applied_requirements_open', 'Applied, requirements open'], ['weird', 'Status not recorded'], [null, 'Status not recorded']] as const) expect(runCard({ status } as RunSummary).statusLabel).toBe(label);
+    // S6 (C-02): applied with a requirement open is its own card status, marked warn, and never success
+    expect(runCard({ status: 'applied_requirements_open' } as RunSummary)).toMatchObject({ status: 'applied_open', tone: 'warn' });
   });
   it('counts files only from what the row lists', () => {
     expect(runCard({ files_modified: 'a.py, b.py,' } as RunSummary).filesChanged).toBe(2);

@@ -1777,6 +1777,10 @@ class _MilestonePlanDriver(PlanDriver):
             "status": "success",
             "group_id": self.run_state.group_id,
             "milestone_total": self.total,
+            # S6 (C-02): the run-level requirement truth of a milestone plan is the integration pass's - the one unit that carries
+            # the plan's ORIGINAL requirements (PRD-020). No milestone manufactures it: without it the run cannot end SUCCESS.
+            **({key: last_result[key] for key in ("requirement_truth", "open_requirement_authorities")
+                if isinstance(last_result, dict) and last_result.get(key)}),
             "integration_result": last_result,
             "milestone_reuse": self.reuse_assessment.to_dict(),
             # D2 S6: what the replay really did (executed / nothing to replay, which milestones had no verdict) - never implied by the absence of failures

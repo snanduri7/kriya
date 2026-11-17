@@ -80,7 +80,9 @@ def _history(cfg, tmp_path, enforce_id):
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome, truth_status, run_status, counts", [
-    (None, "OPEN_REQUIREMENTS", "success", (0, 0, 1)),                                   # the sealed R1 scenario: REQ-1 pending
+    # the sealed R1 scenario: REQ-1 pending. S6 (C-02): an open truth is never SUCCESS; this harness records no commit cycle (its
+    # sandbox is the workspace), so the reconciled word is "failed" (committed, it is applied_requirements_open: test_s6_result_contract.py)
+    (None, "OPEN_REQUIREMENTS", "failed", (0, 0, 1)),
     (RequirementOutcome.CLOSED_BY_EVIDENCE, "ALL_VERIFIED", "success", (1, 0, 1)),
     (RequirementOutcome.HUMAN_ACCEPTED, "RESOLVED_WITH_OPERATOR_ACCEPTANCE", "success", (0, 1, 1)),
     (RequirementOutcome.VIOLATED, "CONTRADICTED", "failed", (0, 0, 1)),                  # blocking_requirements: VIOLATED always blocks
@@ -126,18 +128,20 @@ async def test_the_enforce_truth_is_one_value_on_the_result_the_launch_record_th
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_an_open_requirement_never_reads_as_a_verified_or_truthless_success(tmp_path):
-    """The sealed R1 symptom, inverted: status ``success`` (default ``record`` policy) AND the truth OPEN_REQUIREMENTS
-    with the unresolved requirement named - on the result and on every reader, never absent (absent is worded as a
-    plain "Completed" by the desktop, ui/shared/src/cockpit/core/presentation.ts::requirementTruthWords)."""
+    """The sealed R1 symptom, inverted: the truth OPEN_REQUIREMENTS with the unresolved requirement named - on the result and on
+    every reader, never absent (absent is worded as a plain "Completed" by the desktop,
+    ui/shared/src/cockpit/core/presentation.ts::requirementTruthWords). S6 (C-02): the executor's own word was ``success`` (default
+    ``record`` policy; kept as ``reported_status``), and the reconciled result and the row are NOT success."""
     cfg, legacy = await _run(tmp_path)
-    assert legacy["status"] == "success" and legacy["requirements"]["outcomes"] == {"REQ-1": "pending"}
+    assert (legacy["status"], legacy["reported_status"], legacy["quality_gates_passed"]) == ("failed", "success", False)
+    assert legacy["requirements"]["outcomes"] == {"REQ-1": "pending"}
     assert legacy["requirement_truth"]["status"] == "OPEN_REQUIREMENTS"
     assert [row["id"] for row in legacy["requirement_truth"]["unresolved"]] == ["REQ-1"]
     assert _requirement_truth_field(legacy)["requirement_truth"]["unresolved"][0]["outcome"] == "pending"
     enforce_id, _status, _events_list = _enforce_row(cfg)
     unscoped, _scoped, detail = _history(cfg, tmp_path, enforce_id)
     for projected in ({run["run_id"]: run for run in unscoped["runs"]}[enforce_id], detail["run"]):
-        assert projected["status"] == "success" and projected["requirement_truth"]["status"] == "OPEN_REQUIREMENTS"
+        assert projected["status"] == "failed" and projected["requirement_truth"]["status"] == "OPEN_REQUIREMENTS"
 
 
 @pytest.mark.usefixtures("bound_workspace")

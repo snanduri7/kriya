@@ -463,6 +463,15 @@ class TerminalGateService:
             return f"STACK CONTRACT FINAL-STATE CHECK INDETERMINATE: {type(error).__name__}: {error}"
 
     @staticmethod
+    def _terminal_batch(request: TerminalGateRequest) -> Optional[List[StagedFileWrite]]:
+        """The batch the commit will write, as evidence for a closer; None when it cannot be materialized (no evidence: the closer
+        closes nothing, and the commit refuses the candidate)."""
+        try:
+            return request.commit_batch()
+        except CandidateMaterializationError:
+            return None
+
+    @staticmethod
     def _semantic_safety_gap(request: TerminalGateRequest) -> Optional[str]:
         """The exception-masking rule on the FINAL state: every Java file of the batch the commit will write, against
         the real workspace file it replaces (a new file has no baseline). Route-independent by construction: it reads
@@ -554,6 +563,7 @@ class TerminalGateService:
                 close_requirements_with_authority_bundle_evidence,
                 close_requirements_with_derived_examples,
                 close_requirements_with_named_tests,
+                created_paths_from_terminal_batch,
             )
             contract = request.verification_contract
 
@@ -568,6 +578,7 @@ class TerminalGateService:
                 closer_call,
                 no_closures,
                 run_requirement_closers,
+                terminal_runtime_stdout_outcomes,
             )
             from kriya.workflow.worktree import repository_content_paths
 
@@ -645,17 +656,27 @@ class TerminalGateService:
                     close_requirements_by_test_addition, ledger, requirement_set, contract,
                     request.candidate_root, request.workspace_path, revision="terminal",
                 )),
-                # REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001: the terminal gate has neither a per-attempt raw
-                # capture of writes nor the units' runtime gate outcomes: both closers get None and close nothing here
-                # (fail closed; the units' own pre-apply boundary is where these two are decided).
+                # REQUIREMENT-BEHAVIOR-CLAIM-NO-DETERMINISTIC-CLOSER-001 / S6 (owner ruling 2026-11-17): the SAME two closers the
+                # direct executor runs, on the same sealed requirement, with the terminal's own authoritative evidence for the
+                # final candidate - the creation facts of the batch the commit will write (base tree, start-of-run revision,
+                # declared create), and one run of the sealed statement's script on the isolated final candidate through the
+                # existing runtime-verification seam. No evidence (None) still closes nothing.
                 "file_creation": contract_group(lambda: closer_call(
                     close_requirements_by_file_creation, ledger, requirement_set, contract,
-                    request.candidate_root, created_paths=None, revision="terminal",
+                    request.candidate_root, revision="terminal",
+                    created_paths=created_paths_from_terminal_batch(
+                        contract, request.candidate_root, request.workspace_path, writes=self._terminal_batch(request),
+                        candidate_paths=_terminal_candidate_paths(request.plan)),
                 )),
                 "runtime_stdout": contract_group(lambda: closer_call(
                     close_requirements_by_runtime_stdout, ledger, requirement_set, contract,
-                    request.candidate_root, gate_outcomes=None, attempt="terminal", written_files=(),
+                    request.candidate_root, attempt="terminal", written_files=_terminal_candidate_paths(request.plan),
                     revision="terminal",
+                    gate_outcomes=terminal_runtime_stdout_outcomes(
+                        autonomy, contract, request.candidate_root, request.workspace_path,
+                        written_files=_terminal_candidate_paths(request.plan),
+                        toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
+                        tree_binding=tree_binding()),
                 )),
                 "documentation": contract_group(lambda: closer_call(
                     close_requirements_by_documentation, ledger, requirement_set, contract,

@@ -20,7 +20,11 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence
 
-from kriya.control.run_coordinator import claim_run_generation_clock, follow_run_generation_clock
+from kriya.control.run_coordinator import (
+    claim_run_generation_clock,
+    follow_run_generation_clock,
+    record_model_admission,
+)
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.state_paths import trace_db_path
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -138,6 +142,7 @@ async def open_run_state(
                      + ("" if admission["enforced"] else " (recorded; enforced only under runtime_profile: production)")),
             details=admission,
         ))
+        record_model_admission(admission)   # S6: the same decision, referenced on the RunRecord (digest, status, policy)
     except Exception as exc:
         deps.logger.warning(f"Could not record the run's model admission: {exc}")
     # PRD-019: the routes the workflow command applied (candidates,

@@ -789,7 +789,7 @@
     {
      "attempt": null,
      "kind": "run.closed",
-     "payload": "sha256:39443c4663a55ecd",
+     "payload": "sha256:d7e33d638732c45a",
      "payload_keys": [
       "commit_result",
       "lifecycle_state",
@@ -1184,6 +1184,13 @@
      "details": "sha256:32c64e7b48ef90d8",
      "kind": "model.role_metrics",
      "source": "workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:792af56190842ae7",
+     "kind": "result.reconciled",
+     "source": "control.run_coordinator"
     }
    ],
    "run": "<trace:1>",
@@ -1230,14 +1237,21 @@
    "goal_hash": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
    "lifecycle_state": "FAILURE",
    "milestone_reuse": null,
+   "model_admission": {
+    "all_qualified": false,
+    "decision_digest": "097886c02238c7f8eddcc78f800cec39bf9ad0813d505940d11ea2b9661e7078",
+    "enforced": false,
+    "policy_digest": null
+   },
    "model_runtime_fingerprint_ids": [],
    "obligation_ledger_hash": null,
    "obligation_ledger_revision": null,
    "recovery": null,
+   "requirement_truth": null,
    "resume_decision": null,
    "retry_counters": {},
    "retry_state_reference": null,
-   "revision": 11,
+   "revision": 12,
    "run_id": "<run:1>",
    "schema_version": 3,
    "terminal_status": "FAILURE",

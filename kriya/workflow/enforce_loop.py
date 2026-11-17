@@ -59,6 +59,7 @@ from kriya.workflow.recovery_plan import (
     RECOVERY_MAY_CHANGE_ALL_UNCHANGED,
     RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED,
 )
+from kriya.workflow.requirements import open_requirement_authorities
 from kriya.workflow.resume_support import (
     TOOL_ATTEMPT_ABANDONED,
     TOOL_ATTEMPT_FAILED_TERMINAL,
@@ -4797,6 +4798,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # `.enforce` trace row copy this value; no reader computes it again. It never changes the lifecycle status: an
             # open requirement blocks only where the requirement policy says so (blocking_requirements, the terminal gates).
             aggregated["requirement_truth"] = deps.requirement_truth(final_requirement_outcomes, requirement_set)
+            # S6 (C-02): what the sealed contract accepts to close each open requirement (the direct result's field).
+            open_authorities = open_requirement_authorities(aggregated["requirement_truth"], verification_contract)
+            if open_authorities:
+                aggregated["open_requirement_authorities"] = open_authorities
         except Exception as error:
             deps.logger.warning(f"Original requirement outcomes unavailable for the result: {error}")
         if gate_report.artifact_error:

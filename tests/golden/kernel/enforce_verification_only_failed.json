@@ -2415,7 +2415,7 @@
     {
      "attempt": null,
      "kind": "run.closed",
-     "payload": "sha256:72f560c588fb3272",
+     "payload": "sha256:ffa57b8e94e5e5ff",
      "payload_keys": [
       "commit_result",
       "lifecycle_state",
@@ -2713,6 +2713,7 @@
     "failure_category",
     "files",
     "last_subtask_result",
+    "open_requirement_authorities",
     "plan_recovery_events",
     "plan_repair_attempts",
     "quality_gates_passed",
@@ -2854,6 +2855,22 @@
       }
      ],
      "workspace_commit_failure": null
+    },
+    "open_requirement_authorities": {
+     "REQ-1": [
+      {
+       "chars": 58,
+       "text": "sha256:07b574873ed88a99"
+      },
+      {
+       "chars": 63,
+       "text": "sha256:43254b7cb29cf0f6"
+      },
+      {
+       "chars": 64,
+       "text": "sha256:79a2721bd6162ef0"
+      }
+     ]
     },
     "plan_recovery_events": [
      {
@@ -3582,6 +3599,13 @@
      "details": "sha256:fc8ccf1a5ca62fe2",
      "kind": "evidence.attempt_store",
      "source": "workflow_controller.enforce"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:ec270cf1681f389c",
+     "kind": "result.reconciled",
+     "source": "control.run_coordinator"
     }
    ],
    "run": "<trace:4>",
@@ -3605,14 +3629,32 @@
    "goal_hash": "0e75280817c0907d17cc4e848dd38743e0c7274f47d979fd66702bb0b10dc2ed",
    "lifecycle_state": "FAILURE",
    "milestone_reuse": null,
+   "model_admission": {
+    "all_qualified": false,
+    "decision_digest": "ea8721429b235b2b09e8e7ec1c1b32fa8619e74914125650cfe00f62024d4869",
+    "enforced": false,
+    "policy_digest": null
+   },
    "model_runtime_fingerprint_ids": [],
    "obligation_ledger_hash": null,
    "obligation_ledger_revision": null,
    "recovery": null,
+   "requirement_truth": {
+    "accepted": 0,
+    "status": "OPEN_REQUIREMENTS",
+    "total": 1,
+    "unresolved": [
+     {
+      "id": "REQ-1",
+      "outcome": "pending"
+     }
+    ],
+    "verified": 0
+   },
    "resume_decision": null,
    "retry_counters": {},
    "retry_state_reference": null,
-   "revision": 6,
+   "revision": 8,
    "run_id": "<run:1>",
    "schema_version": 3,
    "terminal_status": "FAILURE",

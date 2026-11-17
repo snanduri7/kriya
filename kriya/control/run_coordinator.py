@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import logging
 import os
 import subprocess
@@ -26,6 +27,8 @@ from kriya.config.environment import child_environment
 from kriya.config.resolution import ProjectStateError, require_run_project
 from kriya.context.workspace_identity import authority_root, workspace_identity
 from kriya.control.commit_state import (
+    REASON_APPLIED_REQUIREMENTS_OPEN,
+    REASON_REQUIREMENT_TRUTH_UNRESOLVED,
     REASON_RESULT_CONTRADICTS_RUN_RECORD,
     REASON_UNCERTAIN_RUN_RECORD,
     RECOVERY_COMMAND,
@@ -34,7 +37,17 @@ from kriya.control.commit_state import (
 )
 from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
-from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
+from kriya.control.run_record import (
+    COMMIT_COMMITTED,
+    REQUIREMENT_TRUTH_NO_REQUIREMENT_SET,
+    TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN,
+    IllegalRunTransitionError,
+    RunLifecycle,
+    RunRecord,
+    normalized_requirement_truth,
+    requirement_truth_gap,
+    summarize_commit_result,
+)
 from kriya.control.source_identity import SourceIdentity, run_source_identity
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
@@ -71,6 +84,10 @@ class _RunLease:
     human_wait_depth: int = 0
     # W3-7: the states that copied the run clock at their start (``follow_run_generation_clock``); a resume sets each to the lease's credited value, so the lease stays the one truth.
     clock_followers: list = field(default_factory=list)
+    # S6 (C-02, C-11): the run's OWN history rows (rows that belong to no larger plan: the direct pipeline's row, the enforce
+    # controller's ``.enforce`` row): (db path, row id, the row writer's corrector), in first-write order. Each is reconciled with the record after the terminal
+    # decision (``_reconcile_trace_rows``).
+    trace_rows: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -211,6 +228,26 @@ def record_model_runtime_use(fingerprint_id: str) -> None:
         ))
     except Exception as error:
         logger.warning("Run %s: model runtime fingerprint not persisted: %s", context.run_id, error)
+
+
+def record_model_admission(details: Any) -> None:
+    """C-09 / S6 (MODEL-ADMISSION-RUNRECORD-ANNOTATION-001): reference the run's model admission decision on its RunRecord - whether it
+    was enforced, whether every dispatchable binding was QUALIFIED, the qualification policy digest, and the digest of the exact decision
+    the ``model.admission`` run event carries (the record references evidence, it does not copy it). The FIRST decision of a run is the
+    run's (a nested unit re-records the same one). Best effort, like every annotation: it never fails a run."""
+    context = current_run_context()
+    if context is None or not isinstance(details, dict):
+        return
+    record = context._lease.record
+    if record is None or record.terminal or record.model_admission is not None:
+        return
+    try:
+        decision_digest = hashlib.sha256(json.dumps(details, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        reference = {"enforced": details.get("enforced"), "all_qualified": details.get("all_qualified"),
+                     "policy_digest": details.get("policy_digest"), "decision_digest": decision_digest}
+        _persist(context, lambda current: current.annotate(model_admission=reference))
+    except Exception as error:
+        logger.warning("Run %s: model admission reference not persisted: %s", context.run_id, error)
 
 
 def _now() -> float:
@@ -355,27 +392,94 @@ def _unverified_work_units(record: Optional[RunRecord]) -> List[str]:
     )
 
 
-def _complete_successful_run(context: RunContext) -> None:
-    """Terminal SUCCESS from what the record itself proves.
+# The words of a reconciled result (C-02, S6). ``applied_requirements_open`` is the one status of a committed change whose requirement
+# truth is not resolved; every surface (CLI exit table, history row, desktop) reads it from the reconciled result or the RunRecord.
+RESULT_STATUS_APPLIED_REQUIREMENTS_OPEN = "applied_requirements_open"
+RESULT_SUCCESS, RESULT_APPLIED_REQUIREMENTS_OPEN, RESULT_FAILURE, RESULT_UNDECIDED = "SUCCESS", "APPLIED_REQUIREMENTS_OPEN", "FAILURE", "UNDECIDED"
 
-    Never walks stages or reads the result payload: the record reaches
-    SUCCESS only after a settled COMMITTED cycle, or with no commit cycle at
-    all (NO_COMMIT), and - PRD-008A - only when every work unit of the plan
-    it executed is VERIFIED (partial completion is never SUCCESS, whichever
-    mode produced it). Anything else is contradictory and fails closed."""
-    unverified = _unverified_work_units(context._lease.record)
+
+@dataclass(frozen=True)
+class ResultDecision:
+    """What the result contract decided for one run: the terminal word and, for a non-success, why."""
+
+    outcome: str
+    reason: Optional[str] = None
+
+
+def _claims_success(payload: Dict[str, Any]) -> bool:
+    return payload.get("quality_gates_passed") is True or str(payload.get("status", "")).lower() == "success"
+
+
+def _reports_failure(payload: Dict[str, Any]) -> bool:
+    return payload.get("quality_gates_passed") is False or str(payload.get("status", "")).lower() in {
+        "failed", "failure", "needs_review", RESULT_STATUS_APPLIED_REQUIREMENTS_OPEN}
+
+
+def evaluate_result_contract(record: RunRecord, payload: Dict[str, Any]) -> ResultDecision:
+    """C-02 (S6; owner rulings 2026-11-15 and 2026-11-16): the ONE decision of a mutating run's terminal result, from the record's own
+    facts. The payload is not result authority: its claim is the executor's statement that its mandatory technical gates passed, and it
+    can only LOSE a success (a payload that reports failure, or says nothing, never ends SUCCESS); it can never create one. SUCCESS
+    needs, all from the record: every work unit of the executed plan VERIFIED, a settled commit (or none), and a requirement truth that
+    permits it (``requirement_truth_gap``: every mandatory requirement resolved - verified, or accepted through the sealed B3 modality -
+    or an explicitly requirements-free shape). A committed change with any other truth is APPLIED_REQUIREMENTS_OPEN: an explicit
+    non-success that keeps the application fact. Requirement policies (record / block) decide only whether a run stops early; they never
+    change this word."""
+    if not _claims_success(payload):
+        return ResultDecision(RESULT_FAILURE if _reports_failure(payload) else RESULT_UNDECIDED, "the run did not report passing gates")
+    unverified = _unverified_work_units(record)
     if unverified:
-        logger.error(
-            "Run %s: reported success but work units %s are not VERIFIED - failing closed.",
-            context.run_id, unverified,
-        )
-        _fail_active_run(context)
+        return ResultDecision(RESULT_FAILURE, f"work units {unverified} are not VERIFIED")
+    gap = requirement_truth_gap(record.requirement_truth)
+    if gap is None:
+        return ResultDecision(RESULT_SUCCESS)
+    if not record.unsettled_commits and summarize_commit_result(record.commits) == COMMIT_COMMITTED:
+        return ResultDecision(RESULT_APPLIED_REQUIREMENTS_OPEN, gap)
+    return ResultDecision(RESULT_FAILURE, gap)
+
+
+def _record_requirement_truth(context: RunContext, payload: Dict[str, Any]) -> None:
+    """The run's FINAL requirement truth, from the outermost entry's terminal evaluation (the requirement owner's own value,
+    ``requirements.requirement_truth``, which the result transports), written on the record BEFORE the terminal transition. A truth that
+    is missing or malformed writes nothing, so the record keeps none and cannot end SUCCESS. A persistence failure is the same: no
+    recorded truth, no success."""
+    truth = normalized_requirement_truth(payload.get("requirement_truth"))
+    record = context._lease.record
+    if truth is None or record is None or record.terminal or record.requirement_truth == truth:
+        return
+    if truth["status"] == REQUIREMENT_TRUTH_NO_REQUIREMENT_SET:
+        # A requirements-free shape is declared by its own entry (the direct tool lifecycle), never by a result: a workflow result that
+        # says it has no requirement set is missing its semantic truth, and that is never success.
+        logger.error("Run %s: a result declared itself requirements-free; that is not a requirement truth.", context.run_id)
         return
     try:
-        transition_mutating_run(context, RunLifecycle.SUCCESS)
-    except IllegalRunTransitionError as error:
-        logger.error("Run %s: reported success contradicts its record: %s", context.run_id, error)
-        _fail_active_run(context)
+        _persist(context, lambda current: current.annotate(requirement_truth=truth))
+    except Exception as error:
+        logger.error("Run %s: requirement truth not persisted (the run cannot end SUCCESS): %s", context.run_id, error)
+
+
+def _terminate_from_result(context: RunContext, payload: Dict[str, Any]) -> None:
+    """The coordinator's terminal transition for a run that returned ``payload`` (the only caller of the result contract)."""
+    _record_requirement_truth(context, payload)
+    record = context._lease.record
+    decision = evaluate_result_contract(record, payload)
+    if decision.outcome == RESULT_UNDECIDED:
+        return                      # no claim either way: the run's exit fails the record closed, as before
+    if decision.outcome == RESULT_SUCCESS:
+        try:
+            transition_mutating_run(context, RunLifecycle.SUCCESS)
+            return
+        except IllegalRunTransitionError as error:
+            logger.error("Run %s: reported success contradicts its record: %s", context.run_id, error)
+    elif decision.outcome == RESULT_APPLIED_REQUIREMENTS_OPEN:
+        logger.error("Run %s: the change is committed but %s - ending %s.", context.run_id, decision.reason, TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN)
+        try:
+            transition_mutating_run(context, RunLifecycle.FAILURE, terminal_status=TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN)
+            return
+        except IllegalRunTransitionError as error:
+            logger.error("Run %s: %s refused by its record: %s", context.run_id, TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN, error)
+    elif _claims_success(payload):
+        logger.error("Run %s: reported success but %s - failing closed.", context.run_id, decision.reason)
+    _fail_active_run(context)
 
 
 def _fail_active_run(context: RunContext, error: Optional[BaseException] = None) -> None:
@@ -390,21 +494,28 @@ def _fail_active_run(context: RunContext, error: Optional[BaseException] = None)
     )
 
 
-def _claims_success(payload: Dict[str, Any]) -> bool:
-    return payload.get("quality_gates_passed") is True or str(payload.get("status", "")).lower() == "success"
+def _open_requirement_ids(record: RunRecord) -> List[str]:
+    return [str(item.get("id")) for item in ((record.requirement_truth or {}).get("unresolved") or [])]
 
 
 def _reconciled_with_record(payload: Dict[str, Any], record: RunRecord, run_id: str) -> Dict[str, Any]:
-    """RDCG-B-001 (owner decision 2026-10-23): the ONE result-truth owner for a mutating run. A result that claims success while the run's authoritative RunRecord did not end
-    SUCCESS is not terminal success: UNCERTAIN -> ``needs_review`` (with the recovery command), any other terminal state -> ``failed``. ``quality_gates_passed`` is the aggregate
-    terminal truth (``RunState.final_workflow_quality_passed``; the CLI exit code and every consumer read it as success), so it becomes False; the factual sub-results the workflow
-    produced (candidate_gates_passed, terminal_regression_passed, overall_attempt_passed, files, commit_evidence, post_commit_persistence_errors, ...) are kept as they are."""
+    """RDCG-B-001 (owner decision 2026-10-23) and C-02 (S6): the ONE result-truth owner for a mutating run. A result that claims success
+    while the run's authoritative RunRecord did not end SUCCESS is not terminal success: UNCERTAIN -> ``needs_review`` (with the recovery
+    command); terminal status APPLIED_REQUIREMENTS_OPEN -> ``applied_requirements_open`` (the change IS applied and stays applied; the
+    requirement truth and the open requirement ids travel with it); any other terminal state -> ``failed``. ``quality_gates_passed`` is the
+    aggregate terminal truth (the CLI exit code and every consumer read it as success), so it becomes False; what the executor reported is
+    kept beside it as ``technical_gates_passed``, and the factual sub-results the workflow produced (candidate_gates_passed,
+    terminal_regression_passed, overall_attempt_passed, files, commit_evidence, post_commit_persistence_errors, ...) are kept as they are."""
     uncertain = record.lifecycle_state == RunLifecycle.UNCERTAIN
+    applied_open = not uncertain and record.terminal_status == TERMINAL_STATUS_APPLIED_REQUIREMENTS_OPEN
+    gap = None if uncertain else requirement_truth_gap(record.requirement_truth)
     reconciled = {
         **payload,
-        "status": "needs_review" if uncertain else "failed",
+        "status": "needs_review" if uncertain else RESULT_STATUS_APPLIED_REQUIREMENTS_OPEN if applied_open else "failed",
         "quality_gates_passed": False,
-        "reason_codes": [REASON_UNCERTAIN_RUN_RECORD if uncertain else REASON_RESULT_CONTRADICTS_RUN_RECORD],
+        "reason_codes": [REASON_UNCERTAIN_RUN_RECORD if uncertain else REASON_APPLIED_REQUIREMENTS_OPEN if applied_open
+                         else REASON_REQUIREMENT_TRUTH_UNRESOLVED if gap is not None and not _unverified_work_units(record)
+                         else REASON_RESULT_CONTRADICTS_RUN_RECORD],
         "run_record_state": record.lifecycle_state.value,
         "reported_status": payload.get("status"),
         "run_id": payload.get("run_id") or run_id,
@@ -413,9 +524,60 @@ def _reconciled_with_record(payload: Dict[str, Any], record: RunRecord, run_id: 
     if uncertain:
         reconciled["recovery_command"] = RECOVERY_COMMAND
         reconciled.setdefault("error", f"The run's commit could not be confirmed in its run record. Run `{RECOVERY_COMMAND}` to settle it from the durable evidence.")
+        return reconciled
+    if applied_open or gap is not None:
+        reconciled["technical_gates_passed"] = True          # the executor's gates passed (its claim); the requirements did not close
+        reconciled["commit_result"] = record.commit_result
+        reconciled["open_requirements"] = _open_requirement_ids(record)
+        if record.requirement_truth is not None and normalized_requirement_truth(payload.get("requirement_truth")) != record.requirement_truth:
+            # the result's own truth is not the record's (or is malformed): the record's is the one reported. When they are the same
+            # truth the result keeps the requirement owner's full form (it carries each open requirement's text for display).
+            reconciled["requirement_truth"] = dict(record.requirement_truth)
+    if applied_open:
+        reconciled.setdefault("error", (
+            f"The change was applied and its technical gates passed, but {gap}"
+            + (f" ({', '.join(reconciled['open_requirements'])})" if reconciled["open_requirements"] else "")
+            + ". The run is not successful; nothing was rolled back."))
+    elif gap is not None and not _unverified_work_units(record):
+        reconciled.setdefault("error", f"The run reported passing gates but {gap}; it is not successful.")
     else:
         reconciled.setdefault("error", f"The run reported success but its run record ended {record.lifecycle_state.value}.")
     return reconciled
+
+
+def note_run_trace_row(db_path: str, row_id: str, reconcile: Callable[..., Any]) -> None:
+    """Called by the one history-row writer (``TraceLogger.log_run``) for a row that belongs to no larger plan. Remembers it as the
+    active run's own row, with the writer's own corrector for it (``trace.reconcile_run_row``: the row store depends on the coordinator,
+    never the reverse - tests/architecture/test_cycles.py). A no-op outside a run."""
+    context = current_run_context()
+    if context is None:
+        return
+    key = (db_path, row_id, reconcile)
+    if key[:2] not in [row[:2] for row in context._lease.trace_rows]:
+        context._lease.trace_rows.append(key)
+
+
+_ROW_STATUS_BY_RESULT = {"needs_review": "needs_review", RESULT_STATUS_APPLIED_REQUIREMENTS_OPEN: RESULT_STATUS_APPLIED_REQUIREMENTS_OPEN, "failed": "failure"}
+
+
+def _reconcile_trace_rows(context: RunContext, result: Any) -> None:
+    """The history row is written, or corrected, AFTER reconciliation, with the reconciled status and the RunRecord revision (C-02
+    'persisted identity and state'). Observational: a failure is logged and never changes the result."""
+    record = context._lease.record
+    if record is None or not record.terminal or not context._lease.trace_rows:
+        return
+    payload = result.legacy_result if hasattr(result, "legacy_result") else result
+    reconciled_status = _ROW_STATUS_BY_RESULT.get(str(payload.get("status"))) if isinstance(payload, dict) and "run_record_state" in payload else None
+    details = {"run_record_id": context.run_id, "run_record_revision": record.revision, "lifecycle_state": record.lifecycle_state.value,
+               "terminal_status": record.terminal_status, "commit_result": record.commit_result,
+               "requirement_truth": record.requirement_truth, "row_status_corrected": reconciled_status is not None}
+    for db_path, row_id, reconcile_run_row in context._lease.trace_rows:
+        try:
+            # the two row writers' own words for a non-success: the enforce controller's row says "failed", the direct pipeline's "failure"
+            row_status = "failed" if reconciled_status == "failure" and row_id.endswith(".enforce") else reconciled_status
+            reconcile_run_row(db_path, row_id, status=row_status, details=details)
+        except Exception as error:
+            logger.warning("Run %s: history row %s not reconciled with the run record: %s", context.run_id, row_id, error)
 
 
 def current_run_context() -> Optional[RunContext]:
@@ -712,14 +874,10 @@ def coordinated_mutation(function: F) -> F:
                 if outermost and lease.record is not None and not lease.record.terminal:
                     payload = result.legacy_result if hasattr(result, "legacy_result") else result
                     if isinstance(payload, dict):
-                        status = str(payload.get("status", "")).lower()
-                        quality = payload.get("quality_gates_passed")
-                        if quality is True or status == "success":
-                            _complete_successful_run(context)
-                        elif quality is False or status in {"failed", "failure", "needs_review"}:
-                            _fail_active_run(context)
+                        _terminate_from_result(context, payload)
                 if outermost and lease.record is not None:
                     result = _reconcile_result(result, lease.record, context.run_id)
+                    _reconcile_trace_rows(context, result)
                 return result
             except BaseException as error:
                 if outermost:

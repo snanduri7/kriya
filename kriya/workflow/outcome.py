@@ -23,6 +23,7 @@ from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.file_integrity import DETERMINISTIC_FILE_INTEGRITY_STOPS, VERIFICATION_TREE_STOP_CODES
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
+    open_requirement_authorities,
     requirement_evidence,
     requirement_outcomes,
     requirement_truth,
@@ -275,10 +276,15 @@ def completed_result(
     failure_report_dicts: List[Dict[str, Any]], plan: Any, design: Any, review: Any, workspace_path: str,
     run_id: str, required_verification: Optional[List[Dict[str, Any]]], unresolved_skill_gap_names: List[str],
     skill_staleness_warnings: List[str], active_skill_manifest: Any, requirement_set: Any,
-    resolved_obligation_ledger: Any, verification_contract: Any = None,
+    resolved_obligation_ledger: Any, verification_contract: Any = None, repair_requirement: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """The result dict of a run that reached its terminal stage, every field in the order the run has always
-    built it (``generation_metrics`` is sampled here, after the terminal trace row sampled its own)."""
+    built it (``generation_metrics`` is sampled here, after the terminal trace row sampled its own).
+    ``repair_requirement`` (INT-05): the requirement section and truth of a repair run, which compiles no goal contract
+    (``requirements.repair_requirement_truth``); never given together with a requirement set."""
+    truth = (requirement_truth(requirement_outcomes(resolved_obligation_ledger, requirement_set, contract=verification_contract),
+                               requirement_set) if requirement_set is not None else None)
+    authorities = open_requirement_authorities(truth, verification_contract) if truth is not None else {}
     return {
         "plan": plan,
         "design": design,
@@ -361,10 +367,10 @@ def completed_result(
             # MODEL-EVIDENCE-HARDENING-001: each verdict with its reason
             # code, evidence, verifier identity and judged candidate.
             "verdicts": requirement_verdict_details(resolved_obligation_ledger, requirement_set),
-        }, "requirement_truth": requirement_truth(
-            requirement_outcomes(resolved_obligation_ledger, requirement_set, contract=verification_contract),
-            requirement_set,
-        )} if requirement_set is not None else {}),
+        }, "requirement_truth": truth,
+            # S6 (C-02): what the sealed contract accepts to close each open requirement (diagnostics for a non-success).
+            **({"open_requirement_authorities": authorities} if authorities else {}),
+        } if requirement_set is not None else (repair_requirement or {})),
     }
 
 

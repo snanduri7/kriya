@@ -81,7 +81,9 @@ def _failure_report(result) -> list:
 
 def test_control_a_run_whose_closers_all_succeed_is_unchanged(tmp_path):
     result = _run(_scripted_engine(lambda n: GOOD)[0], _workspace(tmp_path))
-    assert result["quality_gates_passed"] is True
+    # S6 (C-02): the scripted goal has one requirement nothing here closes, so the run is applied with requirements open; the
+    # control is that the executor's own gates passed and no closer failure was reported
+    assert result["technical_gates_passed"] is True and result["status"] == "applied_requirements_open"
     assert not result.get("environment_failure") and not result.get("failure_category")
     assert ("internal_framework_error", "internal") not in _failure_report(result)
 

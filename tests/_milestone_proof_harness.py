@@ -111,6 +111,10 @@ class FakeEngine:
         return {
             "quality_gates_passed": True, "design": "d",
             "files": sorted(path for path, spec in changes.items() if spec is not None),
+            # S6 (C-02): a real engine's result always carries the requirement truth of its own terminal evaluation, and the plan's
+            # run-level truth is the integration pass's (milestones.plan_result). The fake engine verifies nothing, so it states the
+            # resolved truth a passing real pass reports; without one no milestone run could end SUCCESS.
+            "requirement_truth": {"status": "ALL_VERIFIED", "verified": 1, "accepted": 0, "total": 1, "unresolved": []},
         }
 
 

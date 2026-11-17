@@ -35,6 +35,10 @@ REASON_RUN_RECORD_UNREADABLE = "RUN_RECORD_UNREADABLE"
 REASON_UNCERTAIN_COMMIT = "UNCERTAIN_COMMIT_STATE"
 # RDCG-B-001: a run's own result claimed success but the RunRecord that is the authority for that run ended in a different terminal state (not UNCERTAIN: that is the code above).
 REASON_RESULT_CONTRADICTS_RUN_RECORD = "RESULT_CONTRADICTS_RUN_RECORD"
+# C-02 (S6): the change is committed and the run's requirement truth is not resolved (terminal status APPLIED_REQUIREMENTS_OPEN), and the
+# same truth without a commit (nothing applied; the run failed).
+REASON_APPLIED_REQUIREMENTS_OPEN = "APPLIED_REQUIREMENTS_OPEN"
+REASON_REQUIREMENT_TRUTH_UNRESOLVED = "REQUIREMENT_TRUTH_UNRESOLVED"
 # D-001: unsettled control state exists under a sub-directory of the repository (written when that directory was its own workspace).
 REASON_NESTED_WORKSPACE_STATE = "NESTED_WORKSPACE_CONTROL_STATE"
 # D1: the persisted ControlState exists but cannot be read - never treated as absent (it may hold an unresolved TOOL STARTED record).

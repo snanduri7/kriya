@@ -54,6 +54,18 @@ def _golden(name: str) -> dict:
     return json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
 
 
+# S6 (C-02): what the run coordinator adds when it reconciles a result with a record that did not end SUCCESS (the goldens of the
+# committed scenarios are now APPLIED_REQUIREMENTS_OPEN results), and what only a run that evaluated a requirement set carries.
+RECONCILIATION_KEYS = frozenset({"commit_result", "error", "open_requirements", "reason_codes", "reported_status", "run_record_id",
+                                 "run_record_state", "status", "technical_gates_passed"})
+REQUIREMENT_KEYS = frozenset({"requirements", "requirement_truth", "open_requirement_authorities"})
+
+
+def _builder_keys(name: str, *, without=frozenset()) -> list:
+    """The keys the result BUILDER produces for the golden scenario name (the coordinator's reconciliation keys aside)."""
+    return sorted(set(_golden(name)["result"]["legacy_result"]["keys"]) - RECONCILIATION_KEYS - without)
+
+
 @pytest.mark.parametrize("name", ENGINE_SCENARIOS)
 def test_the_terminal_result_of_every_engine_path_equals_its_golden_field_by_field(name, tmp_path):
     captured = kg.capture(kg.SCENARIOS[name](tmp_path), tmp_path, name)
@@ -118,7 +130,7 @@ def test_every_environment_stop_reaches_the_result_and_the_trace_row_as_its_cate
     assert result["completion_kind"] is None and result["no_progress_reason"] is None
     assert result["last_failure"]["type"] == "time_budget_exhausted" and result["last_failure"]["message"] == stop
     assert "final_review_refusal" not in result
-    assert sorted(result) == _golden("direct_success")["result"]["legacy_result"]["keys"]
+    assert sorted(set(result) - {"open_requirement_authorities"}) == _builder_keys("direct_success", without={"open_requirement_authorities"})
     row = _final_row(outcome.cfg)
     assert (row["status"], row["failure_category"]) == ("failure", category)
     assert [entry["category"] for entry in json.loads(row["failure_report"] or "[]")] == [
@@ -250,8 +262,7 @@ def test_the_completed_result_of_a_refused_final_review_carries_the_refusal():
     state = _state(final_review_refusal=refusal, quality_gates_succeeded=True)
     with patch("kriya.control.run_coordinator.owning_run_committed_work_units", return_value=None):
         result = _completed(state, _deps(), failure_category="final_review_refused")
-    golden_keys = _golden("legacy_final_review_refused")["result"]["legacy_result"]["keys"]
-    assert sorted(result) == sorted(set(golden_keys) - {"requirements", "requirement_truth"})   # no requirement set in this unit
+    assert sorted(result) == _builder_keys("legacy_final_review_refused", without=REQUIREMENT_KEYS)   # no requirement set in this unit
     assert result["final_review_refusal"] == {**refusal, "candidate_applied": True, "committed_work_units": None,
                                               "rolled_back": False}
     assert (result["failure_category"], result["quality_gates_passed"]) == ("final_review_refused", False)
@@ -266,8 +277,7 @@ def test_the_completed_result_fields_on_a_failed_and_a_passed_run():
                     all_files_written=["a.py"])
     result = _completed(failed, _deps(), failure_category="environment_failure",
                         failure_report_dicts=[{"failure_type": "compile"}], unresolved_skill_gap_names=["y", "x", "y"])
-    golden_keys = _golden("legacy_gates_exhausted")["result"]["legacy_result"]["keys"]
-    assert sorted(result) == sorted(set(golden_keys) - {"requirements", "requirement_truth"})
+    assert sorted(result) == _builder_keys("legacy_gates_exhausted", without=REQUIREMENT_KEYS)
     assert "final_review_refusal" not in result and "ownership_findings" not in result
     assert result["environment_failure"] == "TOOLCHAIN_MISSING: x" and result["no_progress_reason"] == "R"
     assert result["completion_kind"] is None and result["unchanged_files"] == []

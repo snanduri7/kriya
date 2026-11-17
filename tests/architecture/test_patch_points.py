@@ -171,7 +171,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E4: 2 -> 1 lookup: both loads (_oracle_base_revision, mutation_scope_evidence) moved to requirement_closers and
     # bind CloserDeps.run_committed_paths, built by _closer_deps from this name at call time (the two patch sites are
     # the dynamic proof: they patch it on this module and drive the moved closers).
-    (W, '_run_committed_paths'): P(3, W, ((W, 1),), ()),
+    (W, '_run_committed_paths'): P(6, W, ((W, 1),), ()),   # S6: +3 sites, tests/test_s6_enforce_closer_parity.py (the run base of the terminal creation evidence)
     (W, '_run_contract_acceptance'): P(1, W, ((W, 1),), ()),
     (W, '_run_static_analysis_gate'): P(2, W, ((W, 1),), ()),
     # E5: 3 -> 1 lookup: the three loads moved with the Developer loop to development_loop, which binds
@@ -475,7 +475,8 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # and the checkpoint save observed to prove the repair writes none): W 104 -> 106.
     # VERIFIER-SEMANTIC-AUTHORITY-001 (WS3-C slice 2): W 106 -> 109, three run_generation_workflow sites in tests/test_verifier_semantic_loop_001.py.
     # C-05 (S3): A 110 -> 111, one new row (AttemptContext.__init__: the one harness stand-in in tests/conftest.py for hand-built contexts).
-    assert totals == {A: 111, W: 109, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    # S6 closer parity (tests/test_s6_enforce_closer_parity.py: the run base of the terminal creation evidence, no new row): W 109 -> 112, three _run_committed_paths sites.
+    assert totals == {A: 111, W: 112, C: 405}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
     assert len(PATCH_POINTS) == 135  # S3: +1 row (A.AttemptContext.__init__, the conftest stand-in); W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 

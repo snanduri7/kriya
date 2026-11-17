@@ -1,68 +1,15 @@
 {
- "events": [],
- "gate_outcomes": [
+ "events": [
   {
-   "attempt": 1,
-   "attempted_edits": [],
-   "attribution_confidence": null,
-   "attribution_kind": "TEST_DEFECT",
-   "attribution_reasoning": null,
-   "attribution_tier": null,
-   "authoritative_files": [],
-   "commands": [
-    [
-     "<python:1>",
-     "-m",
-     "pytest"
-    ]
-   ],
-   "deterministic_result": "FAIL",
-   "failed_content": {},
-   "file_locations": [],
-   "graded_by": "process_exit",
-   "likely_files": [],
-   "milestone_id": null,
-   "mode": null,
-   "output": "=== Step 1/1: <python:1> -m pytest ===\n\n1 failed\n\n\n[Grader reasoning]: One or more deterministic test verification commands returned a non-zero process status.",
-   "plan_id": null,
-   "planned_files": [],
-   "runtime_disposition": {
-    "authority": "process_exit",
-    "deterministic": "FAIL",
-    "deterministic_reason": "DETERMINISTIC_PROCESS_EXIT",
-    "final": "FAIL",
-    "semantic": "FAIL",
-    "semantic_reason": null
-   },
-   "self_correction_attempt": null,
-   "steps": [
-    {
-     "command": [
-      "<python:1>",
-      "-m",
-      "pytest"
-     ],
-     "exit_code": 1,
-     "stderr": "1 failed\n",
-     "stdout": "",
-     "timed_out": false
-    }
-   ],
-   "subtask_id": null,
-   "success": false,
-   "type": "test",
-   "verification_target": null
+   "failure_type": null,
+   "kind": "runtime_verification.advisory_failure",
+   "message": "optional runtime verification was graded failed (advisory: not a required gate)",
+   "operation": null,
+   "source": "runtime_verification"
   }
  ],
- "outcome": {
-  "diagnostics": null,
-  "likely_files": [],
-  "message": "RUNTIME VERIFICATION FAILURE (verification-only subtask): One or more deterministic test verification commands returned a non-zero process status.\n\nCaptured output:\n=== Step 1/1: <python:1> -m pytest ===\n\n1 failed\n",
-  "raised": "QualityGateFailure",
-  "raw_output": "=== Step 1/1: <python:1> -m pytest ===\n\n1 failed\n\n\n[Grader reasoning]: One or more deterministic test verification commands returned a non-zero process status.",
-  "self_correction_attempt": null,
-  "type": "test"
- },
+ "gate_outcomes": [],
+ "outcome": "returned",
  "state": {
   "approved_fingerprint": false,
   "cached_basis": true,
@@ -133,63 +80,6 @@
    "gate": "runtime_verification",
    "stage": "validator",
    "success": false
-  },
-  {
-   "evidence": "mirror.gate_outcome",
-   "outcome": {
-    "attempt": 1,
-    "attempted_edits": [],
-    "attribution_confidence": null,
-    "attribution_kind": "TEST_DEFECT",
-    "attribution_reasoning": null,
-    "attribution_tier": null,
-    "authoritative_files": [],
-    "commands": [
-     [
-      "<python:1>",
-      "-m",
-      "pytest"
-     ]
-    ],
-    "deterministic_result": "FAIL",
-    "failed_content": {},
-    "file_locations": [],
-    "graded_by": "process_exit",
-    "likely_files": [],
-    "milestone_id": null,
-    "mode": null,
-    "output": "=== Step 1/1: <python:1> -m pytest ===\n\n1 failed\n\n\n[Grader reasoning]: One or more deterministic test verification commands returned a non-zero process status.",
-    "plan_id": null,
-    "planned_files": [],
-    "runtime_disposition": {
-     "authority": "process_exit",
-     "deterministic": "FAIL",
-     "deterministic_reason": "DETERMINISTIC_PROCESS_EXIT",
-     "final": "FAIL",
-     "semantic": "FAIL",
-     "semantic_reason": null
-    },
-    "self_correction_attempt": null,
-    "steps": [
-     {
-      "command": [
-       "<python:1>",
-       "-m",
-       "pytest"
-      ],
-      "exit_code": 1,
-      "stderr": "1 failed\n",
-      "stdout": "",
-      "timed_out": false
-     }
-    ],
-    "subtask_id": null,
-    "success": false,
-    "type": "test",
-    "verification_target": null
-   },
-   "success": false,
-   "type": "test"
   }
  ],
  "worktree_changes": {

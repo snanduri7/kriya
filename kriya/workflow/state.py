@@ -878,7 +878,8 @@ class GenerationState:
             and self.overall_attempt_succeeded
             and self.quality_gates_succeeded
             and self.api_contract_recovery is None
-            and self.final_review_refusal is None
+            # S6 (C-02 truth 5, owner ruling 2): the final review is ADVISORY on every executor. A refused or failed review is
+            # recorded and shown (``final_review_refusal``); it is not a term of the terminal quality verdict.
         )
 
     def retry_progress_summary(self) -> Dict[str, Any]:

@@ -61,17 +61,17 @@ def test_the_kernel_scenario_matches_its_pre_decomposition_golden(name, tmp_path
 # failure_category, status, RunRecord lifecycles in order, whether an attempt was opened)
 # W3-6: the ten stage-stop / enforce rows below now carry the category their trace row records (was None; KERNEL-RESULT-NO-CATEGORY-MORE-PATHS-001).
 EXPECTED = {
-    "direct_success": ("dict", True, None, None, ["SUCCESS"], True),
-    "legacy_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
-    "legacy_fallback_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "direct_success": ("dict", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
+    "legacy_success": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
+    "legacy_fallback_success": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
     "legacy_gates_exhausted": ("WorkflowResult", False, "quality_gates_exhausted", None, ["FAILURE"], True),
     "legacy_repeated_failure_exhausted": ("WorkflowResult", False, "quality_gates_exhausted", None, ["FAILURE"], True),
     "legacy_no_progress": ("WorkflowResult", False, "no_progress", None, ["FAILURE"], True),
     "legacy_budget_stop": ("WorkflowResult", False, "generation_budget_exhausted", None, ["FAILURE"], True),
-    "legacy_final_review_refused": ("WorkflowResult", False, "final_review_refused", None, ["FAILURE"], True),
+    "legacy_final_review_refused": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
     "legacy_approval_refused": ("WorkflowResult", False, "human_rejected", None, ["FAILURE"], True),
-    "legacy_resume_after_failure": ("WorkflowResult", True, None, None, ["FAILURE", "SUCCESS"], True),
-    "enforce_success_with_verification_unit": ("WorkflowResult", True, None, "success", ["SUCCESS"], True),
+    "legacy_resume_after_failure": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE", "FAILURE"], True),   # S6: committed, the scripted goal's requirement open
+    "enforce_success_with_verification_unit": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
     "enforce_approval_refused": ("WorkflowResult", False, "failed", "failed", ["FAILURE"], True),
     "enforce_plan_invalid": ("WorkflowResult", False, "PLANNING_ERROR", "needs_review", ["FAILURE"], False),
     "enforce_verification_only_failed": ("WorkflowResult", False, "failed", "failed", ["FAILURE"], True),
@@ -81,8 +81,8 @@ EXPECTED = {
     # E3 characterization of stages 0-3 (written from bd3c6d8, before the stages moved): the early exits return the
     # engine's dict as legacy_result (no failure_category in it; the traces.db row carries it, see the golden's extra)
     "legacy_knowledge_gap": ("WorkflowResult", None, "knowledge_gap", "knowledge_gap", ["FAILURE"], False),
-    "legacy_knowledge_gap_confirmed": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
-    "legacy_stage_context_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_knowledge_gap_confirmed": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
+    "legacy_stage_context_success": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
     "legacy_planner_output_incomplete": ("WorkflowResult", None, "planner_output_incomplete", "planner_output_incomplete", ["FAILURE"], False),
     "legacy_planner_unauthorized_path": ("WorkflowResult", None, "planner_output_unauthorized_path", "planner_output_unauthorized_path", ["FAILURE"], False),
     "legacy_planner_schema_invalid": ("WorkflowResult", None, "planner_output_schema_invalid", "planner_output_schema_invalid", ["FAILURE"], False),
@@ -93,15 +93,15 @@ EXPECTED = {
     "legacy_static_analysis_blocked": ("WorkflowResult", False, "static_analysis_blocked", None, ["FAILURE"], True),
     "legacy_static_analysis_unknown": ("WorkflowResult", False, "static_analysis_unknown", None, ["FAILURE"], True),
     "legacy_static_analysis_unavailable": ("WorkflowResult", False, "static_analysis_unavailable", None, ["FAILURE"], True),
-    "legacy_static_analysis_passed": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_static_analysis_passed": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
     "legacy_approval_required_no_callback": ("WorkflowResult", False, "approval_required", None, ["FAILURE"], True),
-    "legacy_autonomous_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
-    "legacy_approval_diff_size_trigger": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_autonomous_success": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
+    "legacy_approval_diff_size_trigger": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
     "legacy_commit_revision_conflict": ("WorkflowResult", False, "workspace_commit_failed", None, ["FAILURE"], True),
-    "legacy_final_review_deadline_refused": ("WorkflowResult", False, "final_review_refused", None, ["FAILURE"], True),
+    "legacy_final_review_deadline_refused": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
     "legacy_rejected_candidate_review": ("WorkflowResult", False, "quality_gates_exhausted", None, ["FAILURE"], True),
-    "legacy_lessons_staged": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
-    "legacy_dependency_skill_accrued": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_lessons_staged": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
+    "legacy_dependency_skill_accrued": ("WorkflowResult", False, None, "applied_requirements_open", ["FAILURE"], True),   # S6: committed, the scripted goal's requirement open
     "legacy_workspace_refused": ("WorkflowResult", False, None, "needs_review", [], False),
     "direct_workspace_refused": ("dict", False, None, "needs_review", ["COMMIT_ELIGIBLE"], False),
     # E5 characterization of the stage-4 prelude (written from aad9ab1, before that code moved; OI-39): both stops
@@ -480,10 +480,44 @@ S1_KEPT = ("enforce_approval_refused", "enforce_success_with_verification_unit",
            "legacy_budget_stop")
 
 
-def _before_s1(name: str) -> Path:
-    """The golden as it stood before S1: the kept file, or the current one for a scenario whose reference was not kept."""
-    kept = PRE_S1_DIR / f"{name}.json"
+# S6 (C-02, C-09 annotation; the ONE authorized migration, 2026-11-17): 40 of the 41 goldens were re-recorded - the RunRecord's
+# requirement truth and model admission, one ``result.reconciled`` event per run row, and APPLIED_REQUIREMENTS_OPEN for every scenario
+# whose change is committed while its scripted goal's requirement stays open (the leaf-by-leaf map is section 18.4 of
+# docs/architecture/12-D0-CLOSURE-HARDENING.md). The files the earlier delta tests chain through are kept in PRE_S6_DIR.
+PRE_S6_DIR = kg.GOLDEN_DIR.parent / "kernel_pre_s6_result_contract"
+S6_KEPT = S1_KEPT + ("enforce_plan_invalid",)
+
+
+def _before_s6(name: str) -> Path:
+    """The golden as it stood before S6: the kept file, or the current one for a scenario whose reference was not kept."""
+    kept = PRE_S6_DIR / f"{name}.json"
     return kept if kept.is_file() else kg.GOLDEN_DIR / f"{name}.json"
+
+
+def _before_s1(name: str) -> Path:
+    """The golden as it stood before S1: the kept file, or the pre-S6 one for a scenario whose S1 reference was not kept."""
+    kept = PRE_S1_DIR / f"{name}.json"
+    return kept if kept.is_file() else _before_s6(name)
+
+
+@pytest.mark.parametrize("name", S6_KEPT)
+def test_a_kept_pre_s6_golden_differs_from_the_current_one_only_where_s6_writes(name):
+    """S6's delta on the kept references, pinned: the scenario identity is unchanged; every run row keeps its events in order and gains
+    exactly one ``result.reconciled``; every RunRecord gains the model admission reference (and its truth when one was evaluated)."""
+    assert sorted(path.stem for path in PRE_S6_DIR.glob("*.json")) == sorted(S6_KEPT)
+    before = json.loads((PRE_S6_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    after = json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    assert before != after and set(before) == set(after)
+    for key in set(before) - {"evidence", "run_events", "result", "run_records", "extra"}:
+        assert before[key] == after[key], key
+    for row_before, row_after in zip(before["run_events"], after["run_events"], strict=True):
+        kinds_before, kinds_after = [e["kind"] for e in row_before["events"]], [e["kind"] for e in row_after["events"]]
+        assert _extras(kinds_before, kinds_after) in ([], ["result.reconciled"]), name
+    assert sum(e["kind"] == "result.reconciled" for row in after["run_events"] for e in row["events"]) >= 1, name
+    for record_before, record_after in zip(before["run_records"], after["run_records"], strict=True):
+        assert set(record_after) - set(record_before) <= {"requirement_truth", "model_admission"}
+        assert record_after.get("model_admission") is not None or name == "enforce_plan_invalid" or record_after.get("model_admission") is None
+        assert (record_before["lifecycle_state"] == "SUCCESS") <= (record_after["terminal_status"] in ("SUCCESS", "APPLIED_REQUIREMENTS_OPEN"))
 
 
 def _extras(before: list, after: list) -> list:
@@ -587,7 +621,7 @@ def test_a_golden_is_its_pre_s1_golden_plus_exactly_the_model_admission_event(na
     counts the added records."""
     assert sorted(path.stem for path in PRE_S1_DIR.glob("*.json")) == sorted(S1_KEPT)
     before = json.loads((PRE_S1_DIR / f"{name}.json").read_text(encoding="utf-8"))
-    after = json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    after = json.loads(_before_s6(name).read_text(encoding="utf-8"))          # ... -> S1 -> S6 -> current
     assert before != after and set(before) == set(after)
     for key in set(before) - {"evidence", "run_events", "extra"}:
         assert before[key] == after[key], key                       # identity, every RunRecord and the result: unchanged

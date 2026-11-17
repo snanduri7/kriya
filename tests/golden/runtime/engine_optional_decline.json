@@ -3,7 +3,7 @@
   "candidate_gates_passed": true,
   "failure_category": null,
   "overall_attempt_passed": true,
-  "quality_gates_passed": true,
+  "quality_gates_passed": false,
   "terminal_regression_passed": true
  },
  "terminal_path": "optional runtime check declined: nothing executed, run_verification_declined, success",

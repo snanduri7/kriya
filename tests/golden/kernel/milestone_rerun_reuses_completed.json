@@ -22,6 +22,7 @@
     "milestone_reuse",
     "milestone_total",
     "replay",
+    "requirement_truth",
     "status",
     "work_unit_states"
    ],
@@ -33,7 +34,14 @@
     "integration_result": {
      "design": "d",
      "files": [],
-     "quality_gates_passed": true
+     "quality_gates_passed": true,
+     "requirement_truth": {
+      "accepted": 0,
+      "status": "ALL_VERIFIED",
+      "total": 1,
+      "unresolved": [],
+      "verified": 1
+     }
     },
     "milestone_reuse": {
      "assessed_at": "<time>",
@@ -63,6 +71,13 @@
      "passed": [],
      "regressed": [],
      "state": "nothing_to_replay"
+    },
+    "requirement_truth": {
+     "accepted": 0,
+     "status": "ALL_VERIFIED",
+     "total": 1,
+     "unresolved": [],
+     "verified": 1
     },
     "status": "success",
     "work_unit_states": {
@@ -228,14 +243,22 @@
    "goal_hash": null,
    "lifecycle_state": "SUCCESS",
    "milestone_reuse": null,
+   "model_admission": null,
    "model_runtime_fingerprint_ids": [],
    "obligation_ledger_hash": null,
    "obligation_ledger_revision": null,
    "recovery": null,
+   "requirement_truth": {
+    "accepted": 0,
+    "status": "ALL_VERIFIED",
+    "total": 1,
+    "unresolved": [],
+    "verified": 1
+   },
    "resume_decision": null,
    "retry_counters": {},
    "retry_state_reference": null,
-   "revision": 21,
+   "revision": 22,
    "run_id": "<run:2>",
    "schema_version": 3,
    "terminal_status": "SUCCESS",
@@ -391,14 +414,22 @@
     "run_id": "<run:1>",
     "schema_version": 1
    },
+   "model_admission": null,
    "model_runtime_fingerprint_ids": [],
    "obligation_ledger_hash": null,
    "obligation_ledger_revision": null,
    "recovery": null,
+   "requirement_truth": {
+    "accepted": 0,
+    "status": "ALL_VERIFIED",
+    "total": 1,
+    "unresolved": [],
+    "verified": 1
+   },
    "resume_decision": null,
    "retry_counters": {},
    "retry_state_reference": null,
-   "revision": 10,
+   "revision": 11,
    "run_id": "<run:1>",
    "schema_version": 3,
    "terminal_status": "SUCCESS",

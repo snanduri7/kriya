@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from test_e12_enforce_characterization import C, _enforce, _enforce_engine, _plan_of, _unit
+from test_enforce_terminal_requirement_truth_001 import _outcome_patches
 
 from kriya.control import commit_state
 from kriya.control.persistence import load_control_state
@@ -18,6 +19,7 @@ from kriya.control.state import SUBTASK_STATE_TOOL_STARTED
 from kriya.repository import atomic_write
 from kriya.repository import commit as commit_module
 from kriya.workflow.plan_schema import ExecutionMethod, Subtask
+from kriya.workflow.requirements import RequirementOutcome
 from kriya.workflow.resume_support import (
     TOOL_COMPLETED_NOT_DURABLE,
     TOOL_STARTED_NOT_DURABLE,
@@ -103,7 +105,10 @@ async def test_a_tool_subtask_is_durably_started_before_the_effect_and_durably_c
         seen_at_effect["state"] = _state(tmp_path).subtask_states.get("t1")   # read from DISK at the moment the effect runs
         return DONE
 
-    with patch(f"{C}.subtask_executor.execute", new=AsyncMock(side_effect=effect)):
+    # S6 (C-02): the run's word is "success" only with a resolved requirement truth; this test is about the tool unit's durable
+    # state, so the run's one requirement is closed at the outcome owner (the same seam tests/test_enforce_terminal_requirement_truth_001.py uses).
+    closed = _outcome_patches(RequirementOutcome.CLOSED_BY_EVIDENCE)
+    with patch(f"{C}.subtask_executor.execute", new=AsyncMock(side_effect=effect)), closed[0], closed[1]:
         result, _ = await _enforce(_enforce_engine(tmp_path), tmp_path, _plan())
     assert seen_at_effect["state"] == SUBTASK_STATE_TOOL_STARTED, "STARTED was not on disk when the effect ran"
     assert _state(tmp_path).subtask_states["t1"] == "completed" and result.legacy_result["status"] == "success"

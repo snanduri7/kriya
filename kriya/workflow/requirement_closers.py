@@ -480,6 +480,119 @@ def created_paths_from_capture(written: Iterable[str], original_raw: Mapping[str
     return sorted(path for path in set(written) if path in original_raw and original_raw[path] is None)
 
 
+def created_paths_from_terminal_batch(
+    deps: CloserDeps, contract: Any, candidate_root: str, workspace_path: str, *,
+    writes: Optional[Iterable[Any]], candidate_paths: Iterable[str],
+) -> Optional[List[str]]:
+    """S6 (owner ruling 2026-11-17): the enforce terminal gate's evidence for the FILE_CREATION closer - the same closer and the same
+    question the direct executor answers from its raw capture ("did this path not exist before the candidate wrote it"), answered from
+    the plan candidate's own authoritative facts, never from what happens to exist in a folder:
+
+    - the BASE: the path is not in the tree of the run's base revision (the run's mutation record, ``mutation_scope_evidence``), AND
+      the plan's start-of-run revision of it (read before any unit ran, the revision the commit is grounded on) is the revision of no
+      bytes, AND the batch the commit will write declares it a create (``expected_base_exists`` False: the commit refuses a target
+      that exists);
+    - the CANDIDATE: the path is a non-delete member of that batch (the exact final candidate the commit writes) and one the mutation
+      record attributes to this run's candidate.
+
+    None (no evidence, the closer closes nothing) when the contract binds no creation, the batch cannot be materialized or the
+    mutation record is unavailable. ``present`` (a regular file inside the candidate) stays the closer's own check."""
+    from kriya.repository.commit import content_revision
+    from kriya.workflow.contract_compilation import CLOSER_FILE_CREATION
+
+    if contract is None or not contract.binding_closers(CLOSER_FILE_CREATION) or writes is None:
+        return None
+    tracked, evidence = mutation_scope_evidence(deps, candidate_root, workspace_path, candidate_paths=candidate_paths)
+    if "unavailable" in evidence:
+        return None
+    at_base, by_this_candidate, no_bytes = set(tracked), set(evidence.get("actual_paths") or ()), content_revision("")
+    created: List[str] = []
+    for write in writes:
+        if write.delete or write.expected_base_exists is not False or write.expected_base_revision != no_bytes:
+            continue
+        path = os.path.relpath(write.target_path, workspace_path).replace(os.sep, "/")
+        if path not in at_base and path in by_this_candidate:
+            created.append(path)
+    return sorted(created)
+
+
+def sealed_runtime_stdout_subject(contract: Any) -> Optional[str]:
+    """The ONE script a sealed contract's ``runtime_stdout`` statements are about, decided from the sealed bindings alone (the user's
+    own words, never a model's choice of command): the path the statements name; when none names one ("It prints hello world when
+    executed."), the single file the same contract's creation statements create. Anything else - two named subjects, no named subject
+    and not exactly one created file, a file that is not a Python script - has no deterministic subject: None, nothing is run."""
+    from kriya.workflow.contract_compilation import CLOSER_FILE_CREATION, CLOSER_RUNTIME_STDOUT
+
+    def literals(closer: str, key: str) -> set:
+        return {binding.detail.get(key) for _rid, binding in contract.binding_closers(closer)
+                if isinstance(binding.detail.get(key), str)}
+
+    named = literals(CLOSER_RUNTIME_STDOUT, "subject_path")
+    subjects = named or literals(CLOSER_FILE_CREATION, "path")
+    if len(subjects) != 1:
+        return None
+    subject = next(iter(subjects))
+    return subject if subject.endswith(".py") else None
+
+
+def terminal_runtime_stdout_outcomes(
+    autonomy_cfg: Any, contract: Any, candidate_root: str, workspace_path: str, *,
+    written_files: Iterable[str], toolchain_declaration_mutable: bool, tree_binding: Any = None, attempt: Any = "terminal",
+) -> Optional[List[Dict[str, Any]]]:
+    """S6 (owner ruling 2026-11-17): the enforce terminal gate's evidence for the RUNTIME_STDOUT closer. The direct executor closes the
+    statement from the application run of its attempt; the terminal gate had none, so the same sealed requirement on an equivalent
+    final candidate stayed open only because nothing ran. This runs the sealed statement's own script ONCE on the FINAL plan candidate
+    through the existing runtime-verification seam (the candidate validator's ``verification_session`` / ``run_app_sequence``: the
+    project interpreter, ExecutionPolicy, the sandbox and containment all apply, as for every terminal closer that executes candidate
+    code) and returns the ``run_verification`` gate outcome the shared reader (``runtime_observation.application_run_observation``)
+    and the shared closer judge - the same evidence shape as the direct run's.
+
+    Nothing new is authorized: the command is ``<project interpreter> <subject>`` from the sealed binding (no model chooses it), it
+    runs only when runtime verification is enabled, only on an isolated candidate (never the real workspace: an in-place candidate
+    runs nothing), the candidate is neither applied nor changed (files the run leaves are removed; the digest of the candidate's files
+    is taken BEFORE the run, so a run that rewrote them is CANDIDATE_CHANGED at the closer).
+
+    None: nothing was run (no binding, verification disabled, no deterministic subject, not a Python project, an in-place candidate).
+    A list: what ran - empty when the run did not pass (the closer then records NO_APPLICATION_RUN: open, never contradicted)."""
+    from kriya.tools.validate import RUNTIME_VERIFICATION_GATE, effective_command, execution_evidence
+    from kriya.workflow.contract_compilation import CLOSER_RUNTIME_STDOUT
+    from kriya.workflow.runtime_observation import candidate_files_digest
+    from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
+
+    if contract is None or not contract.binding_closers(CLOSER_RUNTIME_STDOUT):
+        return None
+    if getattr(autonomy_cfg, "run_verification_enabled", False) is not True:
+        return None
+    if os.path.realpath(candidate_root) == os.path.realpath(workspace_path):
+        return None
+    written = sorted(set(written_files))
+    subject = sealed_runtime_stdout_subject(contract)
+    if subject is None or subject not in written:
+        return None
+    validator = PolymorphicValidator(
+        candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+        toolchain_declaration_mutable=toolchain_declaration_mutable,
+    )
+    validator.tree_binding = tree_binding
+    if getattr(validator, "stack", None) != "python":
+        return None
+    command = effective_command(["python3", subject], candidate_root)
+    stamped = candidate_files_digest(candidate_root, written)
+    untracked_before = snapshot_untracked_files(candidate_root)
+    try:
+        with validator.verification_session(RUNTIME_VERIFICATION_GATE):
+            result = validator.run_app_sequence([command], timeout=autonomy_cfg.run_verification_timeout_seconds) or {}
+    finally:
+        clean_untracked_files_since(candidate_root, untracked_before)
+    if result.get("success") is not True or result.get("timed_out"):
+        return []
+    return [{
+        "attempt": attempt, "type": "run_verification", "success": True, "graded_by": "process_exit",
+        "output": result.get("output", ""), "commands": [command], "steps": result.get("steps", []),
+        **execution_evidence(result), "candidate_digest": stamped,
+    }]
+
+
 def close_requirements_by_file_creation(
     ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, *,
     created_paths: Optional[Iterable[str]], revision: Any,

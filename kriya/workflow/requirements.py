@@ -1166,6 +1166,56 @@ def requirement_truth(outcomes: Mapping[str, RequirementOutcome], requirements: 
     return {"status": status, "verified": verified, "accepted": accepted, "total": len(mandatory), "unresolved": unresolved}
 
 
+# INT-05 (S6, C-02; owner ruling 2026-11-16): a REPAIR run (`kriya fix`) is not requirements-free. Its goal text is Kriya's own
+# placeholder and its error log is operator-pasted text, so neither is compiled into a contract; its ONE requirement is fixed here and is
+# closed only by the gate that reproduced the failure - Kriya's own pre-candidate baseline of the untouched workspace (failed) and the
+# same regression gate on the applied candidate (passed). Nothing a model wrote, and no text of the error log, is an input.
+REPAIR_REQUIREMENT_ID = "REPAIR-1"
+REPAIR_REQUIREMENT_TEXT = "The reported failure no longer reproduces under the gate that reproduced it."
+REPAIR_NOT_REPRODUCED = "not_reproduced"       # Kriya's own gate did not fail on the untouched workspace (or no baseline exists)
+REPAIR_STILL_FAILING = "still_failing"         # the gate that reproduced the failure did not pass on the candidate
+
+
+def repair_requirement_truth(baseline: Any, *, terminal_regression_passed: Any, gates_passed: Any) -> Dict[str, Any]:
+    """The requirement section and typed truth of a repair run, in the vocabulary of ``requirement_truth``: ALL_VERIFIED (1 of 1) when
+    the pre-candidate baseline is a CAPTURED, COMPLETED run that FAILED and the candidate's terminal regression and gates passed;
+    OPEN_REQUIREMENTS otherwise, with why (``not_reproduced``: an absent, indeterminate or passing baseline reproduces nothing, so
+    nothing shows the reported failure is gone; ``still_failing``). Returns ``{"requirements": ..., "requirement_truth": ...}``."""
+    outcome = getattr(baseline, "outcome", None)
+    reproduced = (baseline is not None and getattr(baseline, "status", None) == "captured" and outcome is not None
+                  and getattr(outcome, "execution_status", None) == "completed" and getattr(outcome, "success", None) is False)
+    passed = terminal_regression_passed is True and gates_passed is True
+    verdict = (RequirementOutcome.CLOSED_BY_EVIDENCE.value if reproduced and passed
+               else REPAIR_NOT_REPRODUCED if not reproduced else REPAIR_STILL_FAILING)
+    closed = verdict == RequirementOutcome.CLOSED_BY_EVIDENCE.value
+    return {
+        "requirements": {
+            "requirements": [{"id": REPAIR_REQUIREMENT_ID, "text": REPAIR_REQUIREMENT_TEXT, "source": "repair"}],
+            "outcomes": {REPAIR_REQUIREMENT_ID: verdict},
+            "evidence": {REPAIR_REQUIREMENT_ID: {
+                "closer": "reproducing_gate", "baseline_reproduced_failure": reproduced,
+                "baseline_failure_fingerprint": getattr(outcome, "failure_fingerprint", None) if reproduced else None,
+                "candidate_regression_passed": terminal_regression_passed is True}},
+        },
+        "requirement_truth": {
+            "status": REQUIREMENT_TRUTH_ALL_VERIFIED if closed else REQUIREMENT_TRUTH_OPEN,
+            "verified": 1 if closed else 0, "accepted": 0, "total": 1,
+            "unresolved": [] if closed else [{"id": REPAIR_REQUIREMENT_ID, "text": REPAIR_REQUIREMENT_TEXT, "outcome": verdict}]},
+        **({} if closed else {"open_requirement_authorities": {REPAIR_REQUIREMENT_ID: [
+            "the gate that reproduces the reported failure: it must fail on the untouched workspace (a captured brownfield "
+            "baseline) and pass on the candidate"]}}),
+    }
+
+
+def open_requirement_authorities(truth: Mapping[str, Any], contract: Any) -> Dict[str, List[str]]:
+    """S6 diagnostics: what the sealed contract accepts to close each requirement ``truth`` lists as unresolved
+    (``VerificationContract.closing_authorities``); empty when nothing is open or no contract was compiled."""
+    open_ids = [str(item.get("id")) for item in truth.get("unresolved") or [] if isinstance(item, dict)]
+    if not open_ids or contract is None:
+        return {}
+    return contract.closing_authorities(open_ids)
+
+
 def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, Dict[str, Any]]:
     """The deterministic evidence behind each requirement's current outcome
     (counter-evidence first, then closure evidence), bound to the candidate
