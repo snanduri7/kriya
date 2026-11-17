@@ -41,6 +41,7 @@ def test_persistent_trace_logger(tmp_path):
     assert row[4] == "success"
     assert row[5] == "FileA.java,FileB.java"
 
+@pytest.mark.usefixtures("requirements_closed")  # S6: the scripted goal's general requirement is closed at the outcome owner (this test is about something else)
 @pytest.mark.asyncio
 async def test_staged_skill_accrual(tmp_path):
     from kriya.config import FallbackModelConfig

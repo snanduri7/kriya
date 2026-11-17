@@ -47,6 +47,7 @@ async def test_autonomy_sensitive_paths_escalation(tmp_path):
     assert res["quality_gates_passed"] is False
     assert not os.path.exists(os.path.join(tmp_path, "database.env"))
 
+@pytest.mark.usefixtures("requirements_closed")  # S6: the scripted goal's general requirement is closed at the outcome owner (this test is about something else)
 @pytest.mark.asyncio
 async def test_autonomy_risk_threshold_escalation(tmp_path):
     cfg = AppConfig()

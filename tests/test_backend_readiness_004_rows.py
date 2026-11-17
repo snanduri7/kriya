@@ -320,7 +320,8 @@ class _ReviewerEndpointDown(Transport):
         return await super().__call__(client, model, system_prompt, user_prompt, *args, **kwargs)
 
 
-def test_a_reviewer_endpoint_failure_after_the_commit_is_a_typed_non_success(tmp_path, monkeypatch):
+def test_a_reviewer_endpoint_failure_after_the_commit_is_recorded_and_does_not_fail_the_run(tmp_path, monkeypatch):
+    """S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a review that was not performed is recorded and shown, and the run is judged by its gates."""
     workspace = _workspace(tmp_path)
     monkeypatch.setattr(model_runtime, "probe_model_runtime", _probe)
     model_runtime.clear_model_runtime_cache()
@@ -340,9 +341,9 @@ def test_a_reviewer_endpoint_failure_after_the_commit_is_a_typed_non_success(tmp
         cli = CliRunner().invoke(main, ["generate", "build M1: create m1.py", "-y"])
 
     assert cli.exception is None or isinstance(cli.exception, SystemExit), cli.output  # never a raw exception
-    assert cli.exit_code != 0 and transport.failed == 1  # not retried
+    assert cli.exit_code == 0 and transport.failed == 1  # not retried
     result = results[-1]
-    assert result["quality_gates_passed"] is False and result["failure_category"] == "final_review_refused"
+    assert result["quality_gates_passed"] is True and result["failure_category"] is None
     assert result["candidate_gates_passed"] and result["terminal_regression_passed"]
     refusal = result["final_review_refusal"]
     assert refusal["reason_code"] == FINAL_REVIEW_BACKEND_ERROR and refusal["exception_type"] == "ConnectError"
@@ -350,10 +351,10 @@ def test_a_reviewer_endpoint_failure_after_the_commit_is_a_typed_non_success(tmp
     assert refusal["candidate_applied"] is True and refusal["rolled_back"] is False
     record = _run_record(workspace)
     assert refusal["committed_work_units"] == record.committed_work_units() == ["direct"]
-    assert record.terminal_status != "SUCCESS"
+    assert record.terminal_status == "SUCCESS"
     assert (workspace / "m1.py").read_text().strip() == "VALUE = 'm1.py'"  # applied and committed, not rolled back
     status, category, events = _trace_rows(cfg)[-1]
-    assert (status, category) == ("failure", "final_review_refused")
+    assert (status, category) == ("success", None)
     [refused] = [e["details"] for e in json.loads(events) if e["kind"] == "review.refused"]
     assert refused["reason_code"] == FINAL_REVIEW_BACKEND_ERROR
     assert "Files applied to workspace and committed (direct), not rolled back: m1.py" in cli.output
@@ -577,11 +578,11 @@ def test_f3_a_non_backend_exception_in_the_final_review_is_attributed_as_interna
          patch.object(WorkflowEngine, "run_generation_workflow", new=capturing):
         cli = CliRunner().invoke(main, ["generate", "build M1: create m1.py", "-y"])
     assert cli.exception is None or isinstance(cli.exception, SystemExit), cli.output
-    assert cli.exit_code != 0 and transport.failed == 1
+    assert cli.exit_code == 0 and transport.failed == 1  # S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a review that was not performed is recorded and shown, and the run is judged by its gates
     refusal = results[-1]["final_review_refusal"]
     assert refusal["reason_code"] == FINAL_REVIEW_INTERNAL_ERROR and refusal["exception_type"] == "RuntimeError"
     status, category, events = _trace_rows(cfg)[-1]
-    assert (status, category) == ("failure", "final_review_refused")
+    assert (status, category) == ("success", None)
     [refused] = [e for e in json.loads(events) if e["kind"] == "review.refused"]
     assert "internal error" in refused["message"] and "model backend" not in refused["message"]
     assert (workspace / "m1.py").read_text().strip() == "VALUE = 'm1.py'"  # still applied and committed

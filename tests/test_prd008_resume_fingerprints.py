@@ -6,6 +6,7 @@ import subprocess
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _work_ledger_seed import earlier_run, seed_work_ledger
 
 from kriya.config import AppConfig
 from kriya.config.config import LLMConfig
@@ -445,13 +446,20 @@ def _seed(tmp_path, cfg, run_id, stage, fingerprint_inputs=None, goal=GOAL, **ex
     # VERIFICATION-CONTRACT-003: a checkpoint carries the digest of the verification contract the run compiled
     # (no acceptance, approval or authority bound: the same contract the workflow compiles for this goal).
     contract = compile_run_contract(SimpleNamespace(), goal, goal, str(tmp_path), derive_requirements(goal))
-    save_checkpoint(str(tmp_path), run_id, {
+    checkpoint = {
         "stage": stage,
         RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
             cfg, str(tmp_path), goal=goal, verification_contract_digest=contract.digest, **(fingerprint_inputs or {}),
         )),
         **extra,
-    })
+    }
+    # S8 (C-08): hand-written earlier-run state also needs the ledger that run would have left
+    if "_run_record" in extra:   # the test names the earlier run's record itself (a record that is gone): only its ledger is left
+        seed_work_ledger(tmp_path, extra["_run_record"]["run_id"])
+        save_checkpoint(str(tmp_path), run_id, checkpoint)
+        return
+    with earlier_run(tmp_path):
+        save_checkpoint(str(tmp_path), run_id, checkpoint)
 
 
 def _fresh_run_llm(cfg):
@@ -507,7 +515,8 @@ async def test_workflow_resumes_a_plan_checkpoint_when_every_applicable_fingerpr
 @pytest.mark.asyncio
 async def test_workflow_does_not_resume_a_legacy_checkpoint_without_fingerprints(git_repo):
     cfg = _config()
-    save_checkpoint(str(git_repo), "legacy", {"stage": "plan", "plan": "Stale plan"})
+    with earlier_run(git_repo):  # S8 (C-08): hand-written earlier-run state also needs the ledger that run would have left
+        save_checkpoint(str(git_repo), "legacy", {"stage": "plan", "plan": "Stale plan"})
     llm = _fresh_run_llm(cfg)
     result = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(
         goal=GOAL, workspace_path=str(git_repo), resume=True,
@@ -811,11 +820,12 @@ async def test_a_checkpoint_sealed_under_another_verification_contract_is_not_re
     """VERIFICATION-CONTRACT-003: the sealed contract's digest is part of the goal-side resume identity, so a
     checkpoint recorded under another contract (here: a different digest) never hands its plan to this run."""
     cfg = _config()
-    save_checkpoint(str(git_repo), "ckpt-plan", {
-        "stage": "plan", "plan": "Stale plan",
-        RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
-            cfg, str(git_repo), goal=GOAL, verification_contract_digest="0" * 64)),
-    })
+    with earlier_run(git_repo):  # S8 (C-08): hand-written earlier-run state also needs the ledger that run would have left
+        save_checkpoint(str(git_repo), "ckpt-plan", {
+            "stage": "plan", "plan": "Stale plan",
+            RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
+                cfg, str(git_repo), goal=GOAL, verification_contract_digest="0" * 64)),
+        })
     llm = _fresh_run_llm(cfg)
     result = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(
         goal=GOAL, workspace_path=str(git_repo), resume=True,

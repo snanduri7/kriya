@@ -19,6 +19,7 @@ import pytest
 from _provider_usage import plausible_prompt_tokens
 from click.testing import CliRunner
 
+from kriya.cli_output import EXIT_APPLIED_REQUIREMENTS_OPEN
 from kriya.config import AppConfig
 from kriya.workflow.obligations import ObligationLedger
 from kriya.workflow.plan_schema import ChangeKind, EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
@@ -311,7 +312,8 @@ async def test_direct_run_decides_the_scope_requirement_from_what_the_candidate_
         assert outcome == "closed_by_evidence" and evidence["actual_paths"] == ["greeting.py"]
         # REQ-1 has only the verifier's "satisfied" - a model claim, UNVERIFIED (FS-1B), recorded under this policy.
         assert res["requirements"]["outcomes"]["REQ-1"] == "unverified"
-        assert res["quality_gates_passed"] is True
+        # S6 (C-02): a model claim closes nothing, so under the record policy the change is applied and the run says its requirements are open
+        assert res["technical_gates_passed"] is True and res["status"] == "applied_requirements_open"
         assert (workspace / "greeting.py").read_text() == "GREETING = 'Hello'\n"
     else:
         assert res["quality_gates_passed"] is False and outcome == "violated"
@@ -470,10 +472,11 @@ def test_milestone_final_check_uses_the_runs_exact_committed_path_history(tmp_pa
          patch.object(LLMClient, "_request_once", new=transport):
         result = CliRunner().invoke(main, ["generate", "--from-milestones", str(plan), "-y"])
 
-    payload = json.loads(result.output[result.output.index("{", result.output.index("=== Milestone sequence")):])
+    payload, _end = json.JSONDecoder().raw_decode(result.output[result.output.index("{", result.output.index("=== Milestone sequence")):])
     if outcome == "closed_by_evidence":
-        assert result.exit_code == 0, result.output
-        assert payload["status"] != "integration_failed"
+        # S6 (C-02): the scope requirement closes by evidence; REQ-1 has only a model claim, so the applied run says its requirements are open
+        assert result.exit_code == EXIT_APPLIED_REQUIREMENTS_OPEN, result.output
+        assert payload["status"] == "applied_requirements_open"
     else:
         assert result.exit_code != 0
         assert payload["status"] == "integration_failed"

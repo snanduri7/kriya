@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _strict_doubles import developer_double, strict_engine
+from _work_ledger_seed import earlier_run
 from click.testing import CliRunner
 
 from kriya.analyzer.java_members import extract_java_members
@@ -177,17 +178,18 @@ def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, fingerprint_inputs=None
     inputs = dict(fingerprint_inputs or {})
     inputs.setdefault("verification_contract_digest",
                       _compile(_NS(), goal, goal, str(tmp_path), _derive(goal)).digest)
-    save_checkpoint(str(tmp_path), run_id, {
-        "stage": stage,
-        RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
-            cfg, str(tmp_path), goal=goal, **inputs,
-        )),
-        "workspace_fingerprint": compute_workspace_fingerprint(str(tmp_path)),
-        "workspace_content_hash": compute_workspace_content_hash(str(tmp_path)),
-        "config_fingerprint": compute_config_fingerprint(cfg.model_dump()),
-        "goal_fingerprint": hashlib.sha256(f"{goal}\x00".encode("utf-8")).hexdigest(),
-        **extra,
-    })
+    with earlier_run(tmp_path):  # S8 (C-08): hand-written earlier-run state also needs the ledger that run would have left
+        save_checkpoint(str(tmp_path), run_id, {
+            "stage": stage,
+            RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
+                cfg, str(tmp_path), goal=goal, **inputs,
+            )),
+            "workspace_fingerprint": compute_workspace_fingerprint(str(tmp_path)),
+            "workspace_content_hash": compute_workspace_content_hash(str(tmp_path)),
+            "config_fingerprint": compute_config_fingerprint(cfg.model_dump()),
+            "goal_fingerprint": hashlib.sha256(f"{goal}\x00".encode("utf-8")).hexdigest(),
+            **extra,
+        })
 
 
 def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:

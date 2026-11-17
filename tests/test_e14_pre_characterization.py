@@ -294,8 +294,8 @@ PATH_TABLE: Dict[str, tuple] = {
                                        [("failure", "static_analysis_blocked")]),
     "legacy_commit_revision_conflict": ("checkpoint", "workspace_commit_failed", False, MISSING, "result", "run_record",
                                         [("failure", "workspace_commit_failed")]),
-    "legacy_final_review_refused": ("engine", "final_review_refused", False, MISSING, "result", "run_record",
-                                    [("failure", "final_review_refused")]),
+    # S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a review that was not performed is recorded and shown, and the run is judged by its gates
+    "legacy_final_review_refused": ("engine", None, True, MISSING, "result", "run_record", [("success", None)]),
     "enforce_verification_only_failed": ("run_record", "failed", False, "failed", None, "run_record",
                                          [("success", None), ("failure", "no_progress"), ("failure", "no_progress"),
                                           ("failed", "failed")]),

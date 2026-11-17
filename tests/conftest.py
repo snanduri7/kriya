@@ -401,6 +401,72 @@ def _stand_in_for_the_project_binding(request, monkeypatch):
     yield
 
 
+# S6 (C-02) / S7 (C-03): test files written BEFORE those slices whose scripted runs must END SUCCESS although the test is about something
+# else (recovery routing, gate order, resume, prompt fitting, telemetry). MEASURED (pre-certification boundary run of 89db06e, 2026-11-17):
+# 242 reds in 65 such files, two roots, both the tests' side of a contract the product changed on purpose:
+#   - S6: a scripted goal carries a general requirement nothing in the script can close, so the run ends `applied_requirements_open`;
+#   - S7: an enforce run under the default human-in-the-loop mode puts the complete change to a person, and the test gave it no channel,
+#     so the run ends `approval_required / APPROVAL_REQUIRED_NOT_GRANTED`.
+# Rather than a per-test edit, the harness gives exactly these files what such a test must now state: the run's requirements are closed
+# at the one outcome owner (`requirements_closed`), and a person approves the complete change through the product's own approval channel
+# (`complete_change_approved`: the real `approval_callback`, asked and resolved by the real commit service; nothing of the approval
+# decision is replaced). A file not listed gets neither. NOT listed, deliberately: every S6/S7 suite and every file whose subject IS the
+# requirement outcome or the approval (they assert `applied_requirements_open` / `approval_required` themselves or opt in per test).
+PRE_S6_S7_SCRIPTED_RUN_FILES = frozenset({
+    "test_artifact_registry_strict_read.py", "test_backend_final_closure_005_verification_owner_reopen.py", "test_backend_readiness_004_rows.py",
+    "test_backend_readiness_v2_contract_feedback.py", "test_d001_workspace_authority.py", "test_d4_runtime_entrypoint_ownership.py", "test_d5_runtime_resource_grounding.py",
+    "test_declared_test_verification_runs.py", "test_deterministic_failure_diagnostic.py", "test_development_loop.py",
+    "test_e12_enforce_characterization.py", "test_e14_pre_characterization.py", "test_enforce_owner_recovery_verifier_replay_001.py",
+    "test_enforce_recovery_convergence_001.py", "test_enforce_verified_no_change.py", "test_failure_signature_run_noise.py",
+    "test_gate_f_milestone_artifact_registry.py", "test_gate_orchestrator.py", "test_generation_service.py",
+    "test_goal_design_dedup_001.py", "test_live_lookup_review_outcomes.py", "test_performance_telemetry.py",
+    "test_plan_executability.py", "test_plan_verification_scope.py", "test_planner_test_stage_no_change.py",
+    "test_prd006_candidate_workspace.py", "test_prd008_resume_fingerprints.py", "test_prd011_toolchain_evidence.py",
+    "test_prd017_fallback_transition.py", "test_prd021_grounded_ownership.py", "test_prd022_ownership_recovery.py",
+    "test_prd024_baseline_auto_policy.py", "test_prd026_retry_progress.py", "test_prd027_precision_expansion_seeds.py",
+    "test_prd032_chaos_milestone.py", "test_prd032_chaos_recovery.py", "test_prd033_events_and_cli.py",
+    "test_prompt_budget_fit_001ab.py", "test_prompt_budget_fit_001c.py", "test_prompt_fit_role_chain_001.py",
+    "test_proposal_promotion.py", "test_provider_contract_001a.py", "test_recovery_may_change_001.py",
+    "test_recovery_may_change_characterization.py", "test_repair_002_d1_candidate_gate_baseline.py",
+    "test_repair_002_d4_identical_write.py", "test_repair_orchestrator.py", "test_s18b_planned_tool_contracts.py",
+    "test_s19e_honest_refusal.py", "test_s2_prompt_trust_boundary.py", "test_skill_verification_deferral.py",
+    "test_validation_baseline.py", "test_verification_owner_reopen_review_and_owner_search_001.py",
+    "test_w36_terminal_result_truth.py", "test_workflow_recovery_handback.py", "test_worktree_canonical_root.py",
+})
+COMPLETE_CHANGE_QUESTION = "This is the complete change this run will apply to your project"
+
+
+@pytest.fixture
+def complete_change_approved(monkeypatch):
+    """S7 (C-03): a person approves the complete change of an enforce run that names no approval channel of its own. The answer travels
+    the product's channel (``approval_callback`` -> ``resolve_approval`` in the commit service); it answers ONLY the complete-change
+    question, so no other question (a runtime command, a sensitive file of a unit) is approved by it. A run that passes its own callback
+    is not touched. Opt in by naming the fixture; listed files get it from ``PRE_S6_S7_SCRIPTED_RUN_FILES``."""
+    from kriya.workflow.workflow_controller import WorkflowController
+
+    original = WorkflowController.execute
+
+    def the_person(files, reason):
+        del files
+        return COMPLETE_CHANGE_QUESTION in str(reason)
+
+    async def execute(self, *args, **kwargs):
+        if kwargs.get("migration_mode") == "enforce" and kwargs.get("approval_callback") is None:
+            kwargs = {**kwargs, "approval_callback": the_person}
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorkflowController, "execute", execute)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _pre_s6_s7_scripted_runs(request):
+    if getattr(getattr(request, "path", None), "name", None) in PRE_S6_S7_SCRIPTED_RUN_FILES:
+        request.getfixturevalue("requirements_closed")
+        request.getfixturevalue("complete_change_approved")
+    yield
+
+
 _TEST_HOST = {"os": "linux", "architecture": "x86_64", "memory_bytes": 64 * (1 << 30), "cpu_model": None,
               "gpus": [], "gpu_backend": None}
 

@@ -554,7 +554,8 @@ def test_a_deadline_stop_at_the_final_review_keeps_the_committed_run(tmp_path):
     ])
     engine = WorkflowEngine(Kernel(config=cfg), llm)
     result = asyncio.run(engine.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path)))
-    assert result["failure_category"] == "final_review_refused"
+    # S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a review that was not performed is recorded and shown, and the run is judged by its gates
+    assert result["failure_category"] is None and result["quality_gates_passed"] is True
     refusal = result["final_review_refusal"]
     assert refusal["reason_code"] == INFERENCE_DEADLINE_EXCEEDED
     assert refusal["candidate_applied"] is True and refusal["rolled_back"] is False

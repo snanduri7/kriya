@@ -23,6 +23,7 @@ from _chaos_harness import (
     git_workspace,
     run_direct,
 )
+from _requirement_truth import resolved_truth
 from click.testing import CliRunner
 
 import kriya.control.run_coordinator as run_coordinator_module
@@ -35,7 +36,8 @@ from kriya.workflow.workflow_types import WorkflowResult
 
 GOAL = "add sub to calc.py"
 SUCCESS_CLAIM = {"status": "success", "quality_gates_passed": True, "candidate_gates_passed": True, "terminal_regression_passed": True,
-                 "overall_attempt_passed": True, "files": ["app.py"], "run_id": "r-1"}
+                 "overall_attempt_passed": True, "files": ["app.py"], "run_id": "r-1",
+                 "requirement_truth": resolved_truth()}  # S6: a real success claim always states its resolved truth
 
 
 def _fail_the_settle_save_once(monkeypatch):
@@ -80,6 +82,7 @@ def test_direct_workflow_with_a_failed_commit_settle_is_needs_review_not_success
     assert result["run_record_id"] == record.run_id  # names the record `kriya runs recover` will settle (the result's own run_id is the workflow's trace id)
 
 
+@pytest.mark.usefixtures("requirements_closed")  # S6: the scripted goal's general requirement is closed at the outcome owner
 def test_direct_workflow_without_a_fault_is_still_plain_success(tmp_path):
     """Normal output (rule 4/2): the reconciliation must not touch a run whose record ends SUCCESS - no extra keys, no status change."""
     workspace = git_workspace(tmp_path, {"calc.py": CALC, "test_calc.py": TEST_SUB})
@@ -99,7 +102,9 @@ def _run(function, workspace):
 
 
 @pytest.mark.parametrize("final_state,status,code", [(RunLifecycle.UNCERTAIN, "needs_review", "UNCERTAIN_RUN_RECORD_COMMIT_STATE"),
-                                                      (RunLifecycle.FAILURE, "failed", "RESULT_CONTRADICTS_RUN_RECORD")])
+                                                      # S6 (C-02): a record that ended FAILURE and carries no requirement truth is reported as that gap; the
+                                                      # contradiction code of a record WITH a resolved truth is pinned in tests/test_s6_result_contract.py
+                                                      (RunLifecycle.FAILURE, "failed", "REQUIREMENT_TRUTH_UNRESOLVED")])
 def test_a_success_claim_over_a_record_that_did_not_end_success_is_not_success(tmp_path, final_state, status, code):
     @coordinated_mutation
     async def run(workspace_path):

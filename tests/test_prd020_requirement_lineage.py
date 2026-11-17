@@ -408,7 +408,9 @@ async def test_the_record_policy_reports_an_unknown_requirement_without_blocking
     with p1, p2:
         res = await engine.run_generation_workflow(goal=GOAL, workspace_path=str(workspace))
 
-    assert res["quality_gates_passed"] is True
+    # S6 (C-02): a model claim closes nothing, so under the record policy the change is applied and the run says its requirements are open
+    assert res["technical_gates_passed"] is True and res["status"] == "applied_requirements_open"
+    assert (workspace / "greeting.py").exists()  # reported, not blocked: the change is applied
     assert res["requirements"]["outcomes"]["REQ-2"] == "unknown"
 
 
@@ -518,7 +520,10 @@ async def test_kriyas_own_placeholder_goal_derives_no_requirements(tmp_path):
         res = await engine.run_generation_workflow(goal="Fix compilation/test failure", workspace_path=str(workspace),
                                                    requirements_from_goal=False)
 
-    assert "requirements" not in res and _events(cfg, "requirement.derived") == []
+    # nothing is derived from Kriya's own wording. S6 (INT-05): the repair run has its ONE requirement, closed only by a baseline that
+    # reproduced the failure and the candidate's terminal regression; this scripted run captured no failing baseline, so it stays open
+    assert _events(cfg, "requirement.derived") == []
+    assert res["status"] == "applied_requirements_open" and res["technical_gates_passed"] is True
     assert all("Original Requirements" not in p for p in calls["planner"] + calls["spec"])
 
 

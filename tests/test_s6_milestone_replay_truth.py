@@ -315,4 +315,11 @@ def test_the_cli_treats_every_status_but_success_as_a_failed_run():
     import inspect
 
     from kriya import cli
-    assert 'sys.exit(0 if milestone_result.get("status") == "success" else 1)' in inspect.getsource(cli)
+    from kriya.cli_output import EXIT_SUCCESS, result_exit_code
+
+    # the milestone command exits through the one exit table, and that table gives a milestone result (no quality_gates_passed)
+    # the success exit for success alone
+    assert 'sys.exit(result_exit_code(milestone_result))' in inspect.getsource(cli)
+    assert result_exit_code({"status": "success"}) == EXIT_SUCCESS
+    for status in ("failed", "needs_review", "applied_requirements_open", "stopped", "", None):
+        assert result_exit_code({"status": status}) != EXIT_SUCCESS, status

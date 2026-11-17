@@ -255,6 +255,7 @@ def _run_unit(tmp_path, *, criterion=TOOL_CRITERION, b_changes=False, b_identica
     return workspace, developer, events, result
 
 
+@pytest.mark.usefixtures("requirements_closed", "complete_change_approved")  # S6/S7: about the no-change unit, not the requirement or the approval
 def test_r2_a_unit_that_changes_a_and_answers_no_change_for_b_delivers_b_unchanged_and_completes(tmp_path):
     """The registered row's shape: one mutating unit, A rewritten, NO CHANGE for the planned B. B is delivered
     unchanged (never a no-change claim of its own to verify); the unit is an ordinary mutation of A."""
@@ -281,6 +282,7 @@ def test_r2_a_unit_with_zero_effective_mutation_is_still_judged_by_the_no_change
     assert not any(e.kind in ("unit.verified_no_change", DELIVERED_UNCHANGED) for e in events)
 
 
+@pytest.mark.usefixtures("requirements_closed", "complete_change_approved")  # S6/S7: about the no-change unit, not the requirement or the approval
 def test_r2_a_unit_that_writes_both_planned_files_is_an_ordinary_mutation(tmp_path):
     workspace, _developer, events, result = _run_unit(tmp_path, b_changes=True)
     assert result["quality_gates_passed"] is True
@@ -298,6 +300,7 @@ def _refusal_codes(events):
     return [e.details.get("refusal", {}).get("code") for e in events if e.kind == "unit.verified_no_change_refused"]
 
 
+@pytest.mark.usefixtures("requirements_closed", "complete_change_approved")  # S6/S7: about the no-change unit, not the requirement or the approval
 @pytest.mark.parametrize("b_shape", ["identical", "no_change"])
 def test_p1_a_mutating_unit_whose_other_planned_file_is_untouched_completes_under_free_text_criteria(tmp_path, b_shape):
     """C2-S2_A-final on 557035d (BACKEND-FINAL-CLOSURE-005 final twelve): s1 planned pyproject.toml + MANIFEST.in;

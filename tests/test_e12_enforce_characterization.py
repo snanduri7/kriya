@@ -1490,7 +1490,10 @@ async def test_the_baseline_decides_a_stop_before_any_model_call(tmp_path, monke
         baseline = MagicMock(return_value=_report(authorities_run=[
             {"kind": "external_acceptance_command", "reason_code": "AUTHORITY_EXECUTION_UNAVAILABLE", "reason": "x"}]))
     else:
-        baseline = MagicMock(return_value=_report(no_mutation_required=True, discriminating=False))
+        # S6 (C-02): a real report says "no mutation required" only when every mandatory claim holds at baseline, and the run's truth is
+        # read from those claims; a report that states none would be an open run, not a success.
+        baseline = MagicMock(return_value=_report(no_mutation_required=True, discriminating=False, claims={
+            "REQ-1": {"BEHAVIOR": {"state": "PASS", "authority": "external_acceptance_command", "why": "holds at baseline"}}}))
     monkeypatch.setattr(wf, "run_contract_baseline", baseline)
     we = _enforce_engine(tmp_path)
     result, calls = await _enforce(we, tmp_path, _plan_of(_unit("s1")), goal=_PRESERVATION_GOAL)

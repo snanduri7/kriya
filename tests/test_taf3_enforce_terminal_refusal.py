@@ -115,6 +115,7 @@ def _counting_real_closer(monkeypatch):
     return calls
 
 
+@pytest.mark.usefixtures("requirements_closed", "complete_change_approved")  # S6/S7: the run's requirements are closed and a person approves the complete change; the real closer is still counted
 @pytest.mark.asyncio
 async def test_control_a_dormant_filter_run_reaches_the_terminal_closer_and_succeeds(tmp_path, monkeypatch):
     """Negative control: the same run without the binding commits, and the real closer really ran in the terminal gate,

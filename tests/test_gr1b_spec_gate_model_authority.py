@@ -90,7 +90,8 @@ async def test_5_a_compile_failure_still_fails_the_attempt_whatever_the_model_sa
     fail = {"success": False, "output": "SyntaxError: invalid syntax (greeting.py, line 1)"}
     ok = {"success": True, "output": ""}
     res = await _run(engine, _workspace(tmp_path), compile_results=[fail, ok, ok, ok, ok, ok])
-    assert res["quality_gates_passed"] is True
+    # S6 (C-02): a model claim closes nothing, so under the record policy the change is applied and the run says its requirements are open
+    assert res["technical_gates_passed"] is True and res["status"] == "applied_requirements_open"
     assert any(g.get("type") == "compile" and g.get("success") is False for g in _gates(cfg))
     assert engine.developer.run_generation.await_count >= 2  # the deterministic failure still drives the retry
     assert len(calls["spec"]) >= 1

@@ -108,18 +108,19 @@ def _trace_rows(cfg):
         return db.execute("SELECT status, failure_category, run_events FROM runs ORDER BY rowid").fetchall()
 
 
-def test_a_refused_final_review_after_an_applied_commit_is_a_typed_non_success(tmp_path, monkeypatch):
+def test_a_refused_final_review_after_an_applied_commit_is_recorded_and_does_not_fail_the_run(tmp_path, monkeypatch):
+    """S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a review that was not performed is recorded and shown, and the run is judged by its gates."""
     workspace = _workspace(tmp_path)
     refusing = RefusingReviewer()
     cfg, cli, results = _invoke(tmp_path, monkeypatch, ["generate", "build M1: create m1.py", "-y"], refusing)
 
     assert cli.exception is None or isinstance(cli.exception, SystemExit), cli.output  # nothing raw escapes
-    assert cli.exit_code != 0 and refusing.refused == 1  # not retried
+    assert cli.exit_code == 0 and refusing.refused == 1  # not retried
     # The direct goal runs as a one-unit plan: the unit's result is the run's.
     result = results[-1]
-    # Never SUCCESS, with the refusal as the typed terminal reason.
-    assert result["quality_gates_passed"] is False
-    assert result["failure_category"] == "final_review_refused"
+    # The gates decide the run; the refusal is its own typed record beside them.
+    assert result["quality_gates_passed"] is True
+    assert result["failure_category"] is None
     assert result["environment_failure"] is None
     # What already happened is reported as it is.
     assert result["candidate_gates_passed"] and result["terminal_regression_passed"]
@@ -129,11 +130,11 @@ def test_a_refused_final_review_after_an_applied_commit_is_a_typed_non_success(t
     assert refusal["candidate_applied"] is True and refusal["rolled_back"] is False
     record = _run_record(workspace)
     assert refusal["committed_work_units"] == record.committed_work_units() == ["direct"]
-    assert record.terminal_status != "SUCCESS"
+    assert record.terminal_status == "SUCCESS"
     assert (workspace / "m1.py").read_text().strip() == "VALUE = 'm1.py'"  # really applied, not rolled back
     # The trace and the CLI say the same, never "NOT applied".
     status, category, events = _trace_rows(cfg)[-1]
-    assert (status, category) == ("failure", "final_review_refused")
+    assert (status, category) == ("success", None)
     refused = [e["details"] for e in json.loads(events) if e["kind"] == "review.refused"]
     assert refused and refused[0]["reason_code"] == CONTEXT_BUDGET_UNSATISFIABLE
     assert "Files applied to workspace and committed (direct), not rolled back: m1.py" in cli.output
@@ -157,7 +158,8 @@ def test_the_same_run_with_its_final_review_is_successful(tmp_path, monkeypatch)
     assert _run_record(workspace).terminal_status == "SUCCESS"
 
 
-def test_a_milestone_whose_final_review_is_refused_keeps_earlier_commits_and_fails(tmp_path, monkeypatch):
+def test_a_milestone_whose_final_review_is_refused_keeps_every_commit_and_records_the_refusal(tmp_path, monkeypatch):
+    """S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a review that was not performed is recorded and shown, and the run is judged by its gates."""
     workspace = _workspace(tmp_path)
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({"group_id": "fit001c", "original_goal": "Build m1.py and m2.py.", "milestones": [
@@ -168,18 +170,18 @@ def test_a_milestone_whose_final_review_is_refused_keeps_earlier_commits_and_fai
     _, cli, results = _invoke(tmp_path, monkeypatch, ["generate", "--from-milestones", str(plan), "-y"], refusing)
 
     assert cli.exception is None or isinstance(cli.exception, SystemExit), cli.output
-    assert cli.exit_code != 0 and refusing.refused == 1
+    assert cli.exit_code == 0 and refusing.refused == 1
     m2 = [r for r in results if r.get("final_review_refusal")]
-    assert m2 and all(r is m2[0] or r == m2[0] for r in m2) and m2[0]["failure_category"] == "final_review_refused"
+    assert m2 and all(r is m2[0] or r == m2[0] for r in m2) and m2[0]["failure_category"] is None
     assert m2[0]["final_review_refusal"]["candidate_applied"] is True
     record = _run_record(workspace)
-    assert record.terminal_status != "SUCCESS"
+    assert record.terminal_status == "SUCCESS"
     committed = record.committed_work_units()
     assert committed[0] == "M1" and m2[0]["final_review_refusal"]["committed_work_units"] == committed
     assert (workspace / "m1.py").exists() and (workspace / "m2.py").exists()  # nothing rolled back
     payload = json.loads(cli.output[cli.output.index("{", cli.output.index("=== Milestone sequence")):])
-    assert payload["work_unit_states"]["M2"]["status"] != "VERIFIED"
-    assert payload["committed_work_units"] == committed and payload["committed_changes_retained"] is True
+    assert payload["work_unit_states"]["M2"]["status"] == "VERIFIED"
+    assert payload["status"] == "success" and committed == ["M1", "M2"]
 
 
 @pytest.mark.asyncio
@@ -231,7 +233,9 @@ async def test_an_enforce_subtask_whose_final_review_is_refused_is_accepted_on_i
     assert "final_review_refusal" not in legacy
 
 
-def test_terminal_quality_never_passes_with_a_refused_final_review():
+def test_a_refused_final_review_is_recorded_and_is_not_a_term_of_terminal_quality():
+    """S6 (C-02 truth 5, owner ruling 2): the final review is ADVISORY on every executor. A refused review is recorded and shown
+    (final_review_refusal); it does not decide the terminal quality verdict, which the deterministic gates own."""
     state = GenerationState.__new__(GenerationState)
     state.candidate_gates_succeeded = state.terminal_regression_succeeded = True
     state.overall_attempt_succeeded = state.quality_gates_succeeded = True
@@ -239,6 +243,8 @@ def test_terminal_quality_never_passes_with_a_refused_final_review():
     state.final_review_refusal = None
     assert state.final_workflow_quality_passed() is True
     state.final_review_refusal = {"reason_code": CONTEXT_BUDGET_UNSATISFIABLE}
+    assert state.final_workflow_quality_passed() is True
+    state.quality_gates_succeeded = False                    # a gate, unlike the review, does decide it
     assert state.final_workflow_quality_passed() is False
 
 

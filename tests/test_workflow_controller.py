@@ -14,6 +14,7 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _requirement_truth import resolved_truth
 from _strict_doubles import strict_config, strict_engine
 
 from kriya.control.persistence import load_control_state
@@ -50,11 +51,20 @@ def _route(kind=ChangeKind.TASK):
     )
 
 
+def _passed(run_id=None):
+    """A fake engine's passing result. S6 (C-02): a real passing result always states its resolved requirement truth; one that
+    states none is failed closed by the run coordinator (``tests/_requirement_truth.py``)."""
+    result = {"status": "success", "requirement_truth": resolved_truth()}
+    if run_id is not None:
+        result["run_id"] = run_id
+    return result
+
+
 def _workflow_engine(route=None, legacy_result=None):
     # PRD-020's terminal requirement verifier is not exercised in this module.
     we = strict_engine(strict_config(autonomy={"spec_compliance_enabled": False}))
     we.engineering_triage.classify = AsyncMock(return_value=route or _route())
-    we.run_generation_workflow = AsyncMock(return_value=legacy_result or {"status": "success", "run_id": "legacy-run"})
+    we.run_generation_workflow = AsyncMock(return_value=legacy_result or _passed("legacy-run"))
     return we
 
 
@@ -118,6 +128,7 @@ def test_quarantine_abandoned_plan_files_skips_a_file_that_no_longer_exists():
 
 # --- migration_mode validation ---
 
+@pytest.mark.usefixtures("requirements_closed", "complete_change_approved")  # S6/S7: the run closes its requirement and a person approves the complete change
 @pytest.mark.asyncio
 async def test_enforce_migration_mode_is_now_accepted_not_rejected(tmp_path):
     """MA7.8 (2026-08-24): 'enforce' is real, explicitly-authorized code
@@ -173,12 +184,12 @@ async def test_unknown_migration_mode_is_rejected(tmp_path):
 
 @pytest.mark.asyncio
 async def test_legacy_mode_never_touches_the_shadow_path(tmp_path):
-    we = _workflow_engine(legacy_result={"status": "success", "run_id": "r1"})
+    we = _workflow_engine(legacy_result=_passed("r1"))
     controller = WorkflowController(we)
 
     result = await controller.execute("goal", str(tmp_path), migration_mode="legacy")
 
-    assert result.legacy_result == {"status": "success", "run_id": "r1"}
+    assert result.legacy_result == _passed("r1")
     assert result.subtask_results == ()
     assert result.decisions == ()
     assert result.verification_report is None
@@ -220,7 +231,7 @@ async def test_execute_persists_control_state_to_disk(tmp_path):
 
 @pytest.mark.asyncio
 async def test_control_state_persist_failure_is_non_fatal(tmp_path, monkeypatch):
-    we = _workflow_engine(legacy_result={"status": "success", "run_id": "r1"})
+    we = _workflow_engine(legacy_result=_passed("r1"))
     controller = WorkflowController(we)
 
     def boom(*a, **kw):
@@ -230,7 +241,7 @@ async def test_control_state_persist_failure_is_non_fatal(tmp_path, monkeypatch)
 
     result = await controller.execute("goal", str(tmp_path), migration_mode="legacy")
 
-    assert result.legacy_result == {"status": "success", "run_id": "r1"}
+    assert result.legacy_result == _passed("r1")
 
 
 # --- per-kind control-plane bookkeeping (MA6.9) ---
@@ -301,7 +312,7 @@ def _shadow_plan():
 
 @pytest.mark.asyncio
 async def test_shadow_mode_still_returns_the_real_legacy_result_unchanged(tmp_path):
-    we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
+    we = _workflow_engine(legacy_result=_passed("legacy-run"))
     we.planner.run = AsyncMock(return_value="fake plan text")
     we.kernel = None
     we.developer = MagicMock()
@@ -317,7 +328,7 @@ async def test_shadow_mode_still_returns_the_real_legacy_result_unchanged(tmp_pa
 
     # the real outcome is exactly what the legacy call produced, regardless
     # of what the shadow run did
-    assert result.legacy_result == {"status": "success", "run_id": "legacy-run"}
+    assert result.legacy_result == _passed("legacy-run")
     we.run_generation_workflow.assert_awaited_once()
 
 
@@ -369,7 +380,7 @@ async def test_shadow_mode_records_undeclared_file_touch_decision(tmp_path):
 
 @pytest.mark.asyncio
 async def test_shadow_mode_no_structured_plan_leaves_shadow_fields_empty_but_legacy_still_runs(tmp_path):
-    we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
+    we = _workflow_engine(legacy_result=_passed("legacy-run"))
     we.planner.run = AsyncMock(return_value="prose plan, no JSON block")
 
     with patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(None, "no fenced JSON block found")):
@@ -379,12 +390,12 @@ async def test_shadow_mode_no_structured_plan_leaves_shadow_fields_empty_but_leg
     assert result.subtask_results == ()
     assert result.decisions == ()
     assert result.verification_report is None
-    assert result.legacy_result == {"status": "success", "run_id": "legacy-run"}
+    assert result.legacy_result == _passed("legacy-run")
 
 
 @pytest.mark.asyncio
 async def test_shadow_mode_plan_validation_failure_still_lets_legacy_run(tmp_path):
-    we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
+    we = _workflow_engine(legacy_result=_passed("legacy-run"))
     we.planner.run = AsyncMock(return_value="fake plan text")
     we.kernel = None
 
@@ -397,7 +408,7 @@ async def test_shadow_mode_plan_validation_failure_still_lets_legacy_run(tmp_pat
 
     assert result.subtask_results == ()
     assert result.verification_report is None
-    assert result.legacy_result == {"status": "success", "run_id": "legacy-run"}
+    assert result.legacy_result == _passed("legacy-run")
 
 
 @pytest.mark.asyncio
@@ -433,18 +444,18 @@ async def test_shadow_mode_never_really_executes_a_tool_tagged_subtask(tmp_path)
     # still real telemetry - the attempt is recorded, not silently dropped
     assert "subtask_attempt" in [d.type for d in result.decisions]
     # and the real outcome (legacy) is completely unaffected
-    assert result.legacy_result == {"status": "success", "run_id": "legacy-run"}
+    assert result.legacy_result == _passed("legacy-run")
 
 
 @pytest.mark.asyncio
 async def test_shadow_mode_exception_is_swallowed_and_never_fails_the_real_run(tmp_path):
-    we = _workflow_engine(legacy_result={"status": "success", "run_id": "legacy-run"})
+    we = _workflow_engine(legacy_result=_passed("legacy-run"))
     we.planner.run = AsyncMock(side_effect=RuntimeError("planner exploded"))
 
     controller = WorkflowController(we)
     result = await controller.execute("goal", str(tmp_path), migration_mode="shadow")
 
-    assert result.legacy_result == {"status": "success", "run_id": "legacy-run"}
+    assert result.legacy_result == _passed("legacy-run")
     assert result.subtask_results == ()
     assert result.decisions == ()
     assert result.verification_report is None
@@ -566,7 +577,7 @@ def _milestone_run_state(group_id="grp-1", original_goal="build a thing"):
 async def test_execute_milestones_calls_run_milestones_with_the_real_run_state_and_kwargs(tmp_path):
     we = _workflow_engine()
     run_state = _milestone_run_state()
-    fake_run_milestones = AsyncMock(return_value={"status": "success"})
+    fake_run_milestones = AsyncMock(return_value=_passed())
 
     with patch("kriya.workflow.milestones.run_milestones", fake_run_milestones):
         controller = WorkflowController(we)
@@ -578,14 +589,14 @@ async def test_execute_milestones_calls_run_milestones_with_the_real_run_state_a
         we, run_state, str(tmp_path), authoritative=True,
         knowledge_risk_confirmed=True, resume=False,
     )
-    assert result.legacy_result == {"status": "success"}
+    assert result.legacy_result == _passed()
 
 
 @pytest.mark.asyncio
 async def test_execute_milestones_persists_control_state_keyed_by_group_id(tmp_path):
     we = _workflow_engine()
     run_state = _milestone_run_state(group_id="grp-real")
-    fake_run_milestones = AsyncMock(return_value={"status": "success"})
+    fake_run_milestones = AsyncMock(return_value=_passed())
 
     with patch("kriya.workflow.milestones.run_milestones", fake_run_milestones):
         controller = WorkflowController(we)
@@ -605,7 +616,7 @@ async def test_execute_milestones_persists_control_state_keyed_by_group_id(tmp_p
 async def test_execute_milestones_initial_persist_failure_fails_closed_before_execution(tmp_path):
     we = _workflow_engine()
     run_state = _milestone_run_state()
-    fake_run_milestones = AsyncMock(return_value={"status": "success"})
+    fake_run_milestones = AsyncMock(return_value=_passed())
 
     with patch("kriya.workflow.milestones.run_milestones", fake_run_milestones), \
          patch("kriya.workflow.workflow_controller.save_control_state", side_effect=RuntimeError("disk full")):
@@ -621,7 +632,7 @@ async def test_execute_milestones_initial_persist_failure_fails_closed_before_ex
 async def test_execute_milestones_final_persist_failure_overrides_success(tmp_path):
     we = _workflow_engine()
     run_state = _milestone_run_state()
-    fake_run_milestones = AsyncMock(return_value={"status": "success"})
+    fake_run_milestones = AsyncMock(return_value=_passed())
     from kriya.control.persistence import save_control_state as real_save_control_state
     save_count = 0
 
@@ -660,7 +671,7 @@ async def test_execute_milestones_persists_initial_state_before_running_m1(tmp_p
         assert persisted.milestone_states == {"M1": "pending"}
         assert persisted.current_milestone_id == "M1"
         assert persisted.current_plan_hash
-        return {"status": "success"}
+        return _passed()
 
     with patch(
         "kriya.workflow.milestones.run_milestones",

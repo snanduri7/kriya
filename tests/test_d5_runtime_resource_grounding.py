@@ -235,7 +235,8 @@ async def test_a_verification_only_unit_grounds_the_resource_owner_with_its_scop
         "command_source": "inferred", "success_criteria": "prints the cached value"})
     run_verifier.grade = AsyncMock(return_value={
         "passed": False, "reasoning": 'the program printed "[VERIFICATION] FAIL"', "likely_files": []})
-    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier, established_files=LIVE_FILES)
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier, established_files=LIVE_FILES,
+                                runtime_verification_required=True)  # S6 (owner ruling 17): only a REQUIRED runtime check is a gate; the live unit declared it
     state = GenerationState()
     with patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", return_value=_live_run_result()):
         with pytest.raises(QualityGateFailure) as raised:
