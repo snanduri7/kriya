@@ -1,5 +1,5 @@
 /** Run status rendering (production-data fidelity batch, 2026-10-05): runs.status is shown literally; a colour hint is applied
- * only to the four values whose meaning is explicit; every other recorded value is neutral and never read as success or
+ * only to the values of STATUS_HINTS, whose meaning is explicit; every other recorded value is neutral and never read as success or
  * failure. The vocabulary is the one MEASURED on the owner's store: lowercase. */
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -10,8 +10,10 @@ const run = (id: string, status: string | null, failure_category: string | null 
 const REAL = ['success', 'failure', 'approval_required', 'needs_review', 'planner_output_incomplete', 'planner_output_schema_invalid'];
 
 describe('statusClass: explicit hints only', () => {
-  it('hints exactly success, failure, needs_review and approval_required; everything else is neutral', () => {
-    expect(Object.keys(STATUS_HINTS).sort()).toEqual(['approval_required', 'failure', 'needs_review', 'success']);
+  it('hints exactly the six explicit words (S6 added applied_requirements_open and the enforce row word failed); everything else is neutral', () => {
+    expect(Object.keys(STATUS_HINTS).sort()).toEqual(['applied_requirements_open', 'approval_required', 'failed', 'failure', 'needs_review', 'success']);
+    expect(statusClass('failed')).toBe('st-failed'); // the enforce controller's row word for a terminal failure
+    expect(statusClass('applied_requirements_open')).toBe('st-review'); // S6 (C-02): applied with a requirement open is never hinted as success
     expect(statusClass('success')).toBe('st-success');
     expect(statusClass('failure')).toBe('st-failed');
     expect(statusClass('needs_review')).toBe('st-review');

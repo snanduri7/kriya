@@ -16,7 +16,7 @@ export interface RunsColumnProps {
 /** Colour hints for the RECORDED run status values (runs.status is the literal string Kriya's workflow writes; the real
  * vocabulary is lowercase: success, failure, needs_review, approval_required, knowledge_gap, baseline_indeterminate,
  * planner_output_incomplete, planner_output_schema_invalid, ... - MEASURED on the owner's store 2026-10-05 and TRACED to
- * kriya/workflow/workflow.py). A hint is applied only to the four values whose meaning is explicit; every other value,
+ * kriya/workflow/workflow.py). A hint is applied only to the values listed below, whose meaning is explicit; every other value,
  * including any future or differently-cased one, stays neutral and is never classified as success or failure. */
 export const STATUS_HINTS: Readonly<Record<string, 'st-success' | 'st-failed' | 'st-review'>> = Object.freeze({
   success: 'st-success', // the run completed and its changes were applied
