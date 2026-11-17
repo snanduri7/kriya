@@ -2301,6 +2301,10 @@ class WorkflowEngine:
         # VERIFIER-SEMANTIC-AUTHORITY-001 (kriya/workflow/verifier_semantic.py): the controller's RunSemantics (the run's one ledger and its
         # review bindings). None = a direct run: the unit gets a ledger of its own and regenerates nothing.
         verifier_semantic: Optional[Any] = None,
+        # S7 (C-03): the enforce controller's ledger of granted change approvals (kriya/policy/approval.py::MutationApprovalLedger). The unit's
+        # approval gate records its subject-bound decision there, so the terminal commit can tell whether a person already approved exactly
+        # the cumulative change. None = a direct run (its own gate's decision is the terminal apply's).
+        mutation_approvals: Optional[Any] = None,
         migration_resolution: Optional["MigrationResolution"] = None,
         structured_plan: Optional["EngineeringPlan"] = None,
         current_subtask_id: Optional[str] = None,
@@ -3106,7 +3110,7 @@ class WorkflowEngine:
             execution_scope=execution_scope, reopened_owner=reopened_owner, migration_resolution=migration_resolution,
             dependent_verification_pending=dependent_verification_pending,
             carried_candidate=carried_candidate, capture_refused_candidate=capture_refused_candidate,
-            verifier_repair=verifier_repair, verifier_semantic=verifier_semantic,
+            verifier_repair=verifier_repair, verifier_semantic=verifier_semantic, mutation_approvals=mutation_approvals,
             obligation_ledger=obligation_ledger, completed_subtask_ids=completed_subtask_ids,
             deterministic_failure_diagnostics=deterministic_failure_diagnostics,
         )

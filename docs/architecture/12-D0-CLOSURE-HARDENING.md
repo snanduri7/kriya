@@ -984,3 +984,39 @@ exact-SHA run, the `ui/shared` vitest suite and typecheck (no UI toolchain in th
 any live model. The three `tests/test_b6_optional_runtime_verification.py` reds of the first adjacent run were MEASURED red at `63c04ba`
 for a fixture reason unrelated to S6 (a configuration with no project identity) and are fixed at that fixture.
 
+## 19. Slice S7: approval binds the exact final mutation subject (C-03, R-03; 2026-11-17, implementation branch)
+
+**Measured defect (pre-fix, `7370d76`).** A human-in-the-loop enforce run of two units: the file approved for unit `s1` was changed in the plan
+candidate afterwards (an injected writer, standing for any later repair or reconciliation) and the terminal commit applied the never-shown bytes.
+`MEASURED`: `~/kriya-evidence/s7-7370d76/reproducer_pre_fix_7370d76.txt`. First wrong owner (`TRACED`): the enforce terminal commit asked nobody and
+compared no approval identity; `stage_apply.approval_gate` re-read the sandbox for its diff and recorded no identity.
+
+**Invariant.** An approval is sufficient iff an existing apply-capable approval is bound to the exact final mutation subject being applied
+(owner ruling 2026-11-17). Triggers decide whether an approval is required; they never decide what was approved.
+
+| Item | Implemented |
+|---|---|
+| Subject | The existing `verification_binding.bind_candidate(writes).digest` of the batch a commit will write (path, operation, bytes digest or deletion, mode, base revision, base existence, relative to the root). No new digest |
+| One record, one owner | `kriya/policy/approval.py`: `MutationApproval` (subject digest, root, run, required, triggers, decision, scope, id, mutation identity), `mutation_approval_refusal`, `change_approval_triggers`, `sensitive_path_reason`, `MutationApprovalLedger`. No earlier decision object carried a subject (the change gate kept a local outcome), so this is the change approval's decision value, beside `RuntimeCommandDecision` |
+| Scope | `TRACED`: the change gate's question is the application (`cli.py`: "Do you approve applying these changes to the codebase?"), so a granted answer is `SCOPE_APPLY`. `SCOPE_REVIEW_ONLY` exists only to be refused: nothing produces it |
+| Application gate | `terminal_commit.commit_terminal_candidate(..., approval=, run_id=)`: after every other refusal and immediately before the durable intent the subject is recomputed from the batch about to be written. Refusals, nothing written: `APPROVAL_SUBJECT_MISSING`, `APPROVAL_WRONG_RUN_OR_ROOT`, `APPROVAL_SUBJECT_STALE`, `APPROVAL_REQUIRED_NOT_GRANTED`, `APPROVAL_NOT_APPLY_CAPABLE`. "Not required" is also a decision about one batch and is checked the same way |
+| Direct / milestone / enforce unit | `stage_apply.approval_gate` materializes the terminal batch once, renders the diff from those bytes, and binds its decision to that digest on `state.mutation_approval` (reset per attempt beside `verified_candidate_binding`); `apply_terminal_candidate` hands it to the seam. An enforce unit's commit into the plan sandbox keeps exactly its unit approval |
+| Enforce terminal | `commit_service.approve_terminal_mutation`: the triggers (human-in-the-loop, sensitive path, size, process profile) are evaluated on the cumulative batch, so a plan cut into small units cannot lower the size measure (`GAP-A3-05`). A granted apply-capable approval of this run whose mutation is exactly the cumulative one is reused (a one-unit run asks once); any other final subject (several units, a later repair, any changed byte, another base) is put to the person once as the complete change |
+| Reuse identity | A unit batch binds `write` where the terminal binds `add`/`modify` for the same bytes on the same base, so the two digests are never equal. `verification_binding.mutation_identity` (path, bytes digest or deletion, base revision) decides only whether one approval covers another batch exactly; the commit is always checked against the full digest |
+| Decline / no decision | Terminal decline: `failed`, `failure_category: human_rejected`, nothing applied. Required and no decision obtainable (no callback, unavailable, unrecognized answer): `approval_required`, nothing applied |
+| Durable record | The RunRecord commit cycle carries `approval` (id, subject digest, required, decision, scope, triggers) beside the candidate hash. The `approval.decision` event is unchanged (its content is hashed by the gate goldens) |
+| Resume / replay | A granted approval lives in process memory only; a resumed run has none and asks again. Another run, another root, another candidate or a pre-repair candidate cannot authorize the current application (seam refusals, ledger filters) |
+
+**Not approval's business (unchanged owners).** Requirement truth, verifier success, runtime command selection, result truth, model admission.
+A sealed verifier command run isolated on the final candidate is verification authority and asks nobody
+(`ENFORCE-RUNTIME-STDOUT-SUBJECT-AND-REVIEW-LIMITS-001`, closed). Approval never overrides path or write authority: the write gate keeps refusing
+project-authority paths and goal text grants nothing (`PROJECT-AUTHORITY-GOAL-NAMED-EXCEPTION-001`, its own policy row).
+`ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001` is not an approval-subject problem (a disposition binds a requirement id and statement text, no path)
+and is retargeted to the post-S8 characterization.
+
+**Limits, stated.** `S7-APPROVAL-SUBJECT-RESIDUALS-001`: the text diff does not show a mode or binary change; an engine with no configuration
+object evaluates no terminal policy; no path-class trigger; approvals are not persisted across processes; INT-09 not done.
+
+**Proof.** `tests/test_s7_approval_subject.py` (the reproducer through the real enforce controller, ten seam refusals, the terminal ask and reuse
+rules with five non-covering controls, the split-plan size case, the one-unit single prompt, the verifier-execution pin). Mutants and gates:
+`~/kriya-evidence/s7-7370d76/`.

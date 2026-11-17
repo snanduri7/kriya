@@ -17,12 +17,25 @@ module existed.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from kriya.config.authority import is_human_in_the_loop
+from kriya.policy.approval import (
+    APPROVAL_REQUIRED_NOT_GRANTED,
+    TRIGGER_DIFF_SIZE,
+    TRIGGER_HUMAN_IN_THE_LOOP,
+    MutationApproval,
+    MutationApprovalLedger,
+    change_approval_triggers,
+    mutation_approval_id,
+    resolve_approval,
+    sensitive_path_reason,
+)
 from kriya.repository.commit import CommitState, list_commit_evidence
 from kriya.static_analysis.service import StaticAnalysisCommitGuard
 from kriya.workflow.edit_safety import StagedFileWrite
@@ -32,8 +45,11 @@ from kriya.workflow.subtask_checkpoint import topological_subtask_order
 from kriya.workflow.terminal_commit import (
     CandidateFile,
     CandidateMaterializationError,
+    batch_diffs,
+    bind_candidate,
     commit_terminal_candidate,
     materialize_candidate,
+    mutation_identity,
 )
 from kriya.workflow.terminal_gate_service import TerminalGateReport
 
@@ -63,6 +79,64 @@ class TerminalCommitRequest:
     # PRD-031A: built by kriya/static_analysis/service.py::commit_guard from
     # the current configuration and the gate's result.
     static_analysis: StaticAnalysisCommitGuard
+    # S7 (C-03): the approval decision for exactly the cumulative batch (``approve_terminal_mutation``); the commit seam refuses without it.
+    approval: Optional[MutationApproval] = None
+
+
+async def approve_terminal_mutation(
+    *, plan: EngineeringPlan, candidate_root: str, workspace_path: str, original_plan_revisions: Mapping[str, str], run_id: str,
+    autonomy: Any, process_profile_requires_review: bool, ledger: Optional[MutationApprovalLedger], callback: Any,
+) -> Tuple[Optional[MutationApproval], Optional[Dict[str, str]]]:
+    """S7: the approval decision for the enforce run's ONE real-workspace mutation, the cumulative plan candidate.
+
+    -> (approval, None) when the commit may be attempted under it, or (None, stop) when nothing may be applied: ``stop`` carries the
+    existing ``human_rejected`` (a person declined) or ``approval_required`` (required, and no decision could be obtained) category.
+
+    The triggers are evaluated on the cumulative batch (so a plan cut into small units cannot lower the size measure). When policy requires an
+    approval, a granted apply-capable approval of this run whose mutation is EXACTLY the cumulative one (a single unit whose approved change is
+    the whole change) is reused and nobody is asked twice; any other final subject - several units, a later repair, any changed byte - is put
+    to the person once, as the complete change. A candidate that cannot be materialized has no subject: (None, None), and the commit refuses it.
+    """
+    try:
+        writes = plan_terminal_writes(plan, candidate_root, workspace_path, original_plan_revisions)
+    except CandidateMaterializationError:
+        return None, None
+    binding = bind_candidate(writes, workspace_path)
+    root = os.path.realpath(workspace_path)
+    diffs = batch_diffs(writes, workspace_path)
+    triggers: List[str] = []
+    sensitive_reason = ""
+    if writes and autonomy is not None:
+        sensitive_reason = sensitive_path_reason([diff["filepath"] for diff in diffs], autonomy.sensitive_paths)
+        triggers = change_approval_triggers(
+            human_in_the_loop=is_human_in_the_loop(autonomy.mode), sensitive_match=bool(sensitive_reason),
+            diff_lines=sum(len(diff["content"].splitlines()) for diff in diffs), risk_threshold_lines=autonomy.risk_threshold_lines,
+            process_profile_requires_review=process_profile_requires_review)
+    if not triggers:
+        return MutationApproval(subject_digest=binding.digest, root=root, run_id=run_id, required=False), None
+    covering = ledger.covering(mutation_identity(binding), root=os.path.realpath(candidate_root)) if ledger is not None else None
+    if covering is not None:
+        # The same decision (its id, outcome and scope), now bound to the terminal batch it covers exactly.
+        return dataclasses.replace(covering, subject_digest=binding.digest, root=root, run_id=run_id, triggers=tuple(triggers)), None
+    reason = sensitive_reason or (
+        "Human-in-the-loop review policy" if TRIGGER_HUMAN_IN_THE_LOOP in triggers
+        else "Risk threshold exceeded for the complete change" if TRIGGER_DIFF_SIZE in triggers
+        else "Engineering process profile requires review")
+    reason += (f"\nThis is the complete change this run will apply to your project ({len(diffs)} file(s)). Every gate has passed on exactly "
+               "these bytes; nothing has been applied yet.")
+    if callback is None:
+        return None, {"failure_category": "approval_required", "reason_code": APPROVAL_REQUIRED_NOT_GRANTED,
+                      "reason": f"Not applied: human approval of the complete change was required ({reason.splitlines()[0]}) but no approval callback was provided."}
+    outcome = await resolve_approval(callback, diffs, reason)
+    if outcome.declined:
+        return None, {"failure_category": "human_rejected", "reason_code": outcome.reason_code,
+                      "reason": "Rejected by user during the approval of the complete change. Nothing was applied."}
+    if outcome.unavailable:
+        return None, {"failure_category": "approval_required", "reason_code": outcome.reason_code,
+                      "reason": f"Not applied: human approval of the complete change was required ({reason.splitlines()[0]}) but no approval decision "
+                                f"could be obtained ({outcome.reason_code}); nothing was approved and nobody declined."}
+    return MutationApproval(subject_digest=binding.digest, root=root, run_id=run_id, required=True, triggers=tuple(triggers), outcome=outcome,
+                            approval_id=mutation_approval_id(binding.digest), mutation=mutation_identity(binding)), None
 
 
 @dataclass(frozen=True)
@@ -196,6 +270,7 @@ def commit_verified_candidate(report: TerminalGateReport, request: TerminalCommi
         contract_transition=request.contract_transition_for(writes, transaction_id),
         static_analysis=request.static_analysis,
         verified_candidate=report.verified_candidate,
+        approval=request.approval, run_id=request.run_id,
     )
     if not outcome.committed:
         return TerminalCommitResult(completed=False, failure=outcome.failure_payload())

@@ -80,7 +80,7 @@ def _terminal_commit(workspace: str, tx: str = TX, inherit_mode: bool = False):
         transition_mutating_run(context, RunLifecycle.RUNNING)
         transition_mutating_run(context, RunLifecycle.CANDIDATE)
         return commit_terminal_candidate(
-            writes, workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id=tx, verified_candidate=bind_candidate(writes, workspace),
+            writes, workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id=tx, verified_candidate=bind_candidate(writes, workspace), approval=__import__("_fake_static_analysis").no_approval_needed(writes, workspace)
         )
 
 

@@ -144,6 +144,7 @@ from kriya.workflow.checkpoint import (
 )
 from kriya.workflow.commit_service import (
     TerminalCommitRequest,
+    approve_terminal_mutation,
     commit_verified_candidate,
     interrupted_commit_outcome,
     plan_terminal_writes,
@@ -566,7 +567,7 @@ def _enforce_deps(controller: WorkflowController) -> Any:
         compute_base_commit=compute_base_commit, compute_tree_hash=compute_tree_hash,
         compute_workspace_content_hash=compute_workspace_content_hash,
         validate_resume_against_reality=validate_resume_against_reality, TerminalCommitRequest=TerminalCommitRequest,
-        commit_verified_candidate=commit_verified_candidate, plan_terminal_writes=plan_terminal_writes,
+        commit_verified_candidate=commit_verified_candidate, approve_terminal_mutation=approve_terminal_mutation, plan_terminal_writes=plan_terminal_writes,
         interrupted_commit_outcome=interrupted_commit_outcome, run_commit_states=run_commit_states,
         CandidatePrompts=CandidatePrompts, candidate_model=candidate_model,
         fit_reference_section=fit_reference_section, fit_structural_evidence=fit_structural_evidence,

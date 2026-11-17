@@ -81,6 +81,15 @@ def bind_candidate(writes: Iterable[Any], workspace_path: str) -> CandidateVerif
     )
 
 
+def mutation_identity(binding: CandidateVerificationBinding) -> Tuple[Tuple[str, Optional[str], str], ...]:
+    """What the bound batch does to its root, without how its commit path spells it (S7): (path, bytes digest or None for a deletion, base
+    revision) per entry. The direct path binds ``write`` where the enforce terminal binds ``add``/``modify`` for the same bytes on the same base,
+    and an existing file's mode is its root's base mode, so the operation label and the mode are not part of what a person approved; the bytes,
+    the deletion and the base they replace are. Used only to decide whether an approval made for one batch covers another batch EXACTLY; the
+    commit itself is always checked against the full digest."""
+    return tuple((path, content, base_revision) for path, _operation, content, _mode, base_revision, _base_exists in binding.entries)
+
+
 def binding_refusal(
     verified: Optional[CandidateVerificationBinding], writes: Iterable[Any], workspace_path: str,
 ) -> Optional[Tuple[str, str]]:

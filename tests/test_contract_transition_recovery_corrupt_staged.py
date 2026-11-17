@@ -207,7 +207,7 @@ def _uncertain_run_with_a_staged_registry(tmp_path):
     with patch("kriya.control.persistence.promote_pending_contract_registry", side_effect=OSError("io")):
         outcome = _in_run(workspace, lambda: commit_terminal_candidate(
             _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace),
-            static_analysis=__import__("_fake_static_analysis").DISABLED_STATIC_ANALYSIS, transaction_id="tx1", contract_transition=_builder(workspace),
+            static_analysis=__import__("_fake_static_analysis").DISABLED_STATIC_ANALYSIS, transaction_id="tx1", contract_transition=_builder(workspace), approval=__import__("_fake_static_analysis").no_approval_needed(_writes(workspace), workspace)
         ))
     assert not outcome.committed and outcome.workspace_state == "UNCERTAIN"
     staged = pending_contract_registry_path(workspace, "tx1")

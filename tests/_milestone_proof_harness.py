@@ -73,7 +73,7 @@ def _apply(workspace_path, changes):
         writes = materialize_candidate(str(candidate), str(workspace_path), files)
         outcome = commit_terminal_candidate(
             writes, workspace_path=str(workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS,
-            transaction_id=uuid.uuid4().hex, verified_candidate=bind_candidate(writes, str(workspace_path)),
+            transaction_id=uuid.uuid4().hex, verified_candidate=bind_candidate(writes, str(workspace_path)), approval=__import__("_fake_static_analysis").no_approval_needed(writes, str(workspace_path))
         )
         assert outcome.committed, outcome.failure_payload()
     finally:

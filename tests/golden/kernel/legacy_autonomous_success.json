@@ -1693,6 +1693,14 @@
    "commit_transaction_id": "<hex:1>",
    "commits": [
     {
+     "approval": {
+      "approval_id": null,
+      "decision": null,
+      "required": false,
+      "scope": "apply",
+      "subject_digest": "21ce7e3655e18dad6ff77c2562932525e505c4c20da1dcaf7ffc49af30b750d1",
+      "triggers": []
+     },
      "candidate_hash": "9987cc6688f4582ce0d15fdfb6c35c62faa317671d7a8d8d4774964d2151b054",
      "intent": "APPLY_VERIFIED_CANDIDATE",
      "result": "COMMITTED",

@@ -431,9 +431,12 @@ class RunRecord:
 
     def begin_commit(
         self, transaction_id: str, *, intent: str, candidate_hash: Optional[str],
-        contract_registry: Optional[Dict[str, Any]] = None, **evidence: Any,
+        contract_registry: Optional[Dict[str, Any]] = None, approval: Optional[Dict[str, Any]] = None, **evidence: Any,
     ) -> "RunRecord":
         """Durable commit intent: must precede the first workspace byte.
+
+        S7 (C-03): ``approval`` is the approval decision this exact candidate is applied under (subject digest, required, decision, scope,
+        triggers, id), kept on the cycle beside the candidate hash it authorized.
 
         PRD-029: ``contract_registry`` is the cycle's ContractRegistry
         transition (before/after digests, pending payload, delta). It is part
@@ -458,6 +461,8 @@ class RunRecord:
             cycle["work_unit"] = dict(self.active_work_unit)
         if contract_registry is not None:
             cycle["contract_registry"] = dict(contract_registry)
+        if approval is not None:
+            cycle["approval"] = dict(approval)
         return self._advance(
             RunLifecycle.COMMIT_ELIGIBLE,
             commits=[*self.commits, cycle], commit_intent=intent,

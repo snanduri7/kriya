@@ -30,6 +30,7 @@ Callers map the returned TerminalCommitOutcome into their own result shape.
 
 from __future__ import annotations
 
+import difflib
 import os
 import stat
 from dataclasses import dataclass, field
@@ -42,6 +43,7 @@ from kriya.control.run_record import (
     COMMIT_ROLLED_BACK,
     COMMIT_UNCERTAIN,
 )
+from kriya.policy.approval import MutationApproval, mutation_approval_refusal
 from kriya.policy.filesystem import ControlObjectIdentities, is_trusted_control_path
 from kriya.repository.commit import (  # M1: owned by kriya/repository/commit.py, re-exported (PARTIAL_FACADES); Removed in P1
     CandidateMaterializationError as CandidateMaterializationError,
@@ -65,8 +67,36 @@ from kriya.workflow.verification_binding import (
     VerifiedCandidateStale,
     binding_refusal,
 )
+from kriya.workflow.verification_binding import (  # S7: the approval subject's two derivations, re-exported for the gate and the enforce terminal
+    bind_candidate as bind_candidate,
+)
+from kriya.workflow.verification_binding import (
+    mutation_identity as mutation_identity,
+)
 
 VERIFIED_COMMIT_DIGEST_MISMATCH = "VERIFIED_COMMIT_DIGEST_MISMATCH"
+
+
+class MutationApprovalRefused(RuntimeError):
+    """S7: the batch about to be committed is not covered by the approval decision it was handed."""
+
+
+def batch_diffs(writes: Iterable[StagedFileWrite], workspace_path: str) -> List[Dict[str, str]]:
+    """The change a batch makes to ``workspace_path`` as the approval surface shows it: one unified diff per path, the new side from the
+    batch's own bytes (never a re-read of the candidate), the old side from the file the batch is grounded on. Display only: the approval
+    is bound to the batch's digest, and the commit checks each base revision itself."""
+    diffs: List[Dict[str, str]] = []
+    for write in sorted(writes, key=lambda item: item.target_path):
+        relpath = os.path.relpath(write.target_path, workspace_path)
+        try:
+            with open(write.base_path or write.target_path, "rb") as handle:
+                before = display_text(handle.read())
+        except FileNotFoundError:
+            before = ""
+        after = "" if write.delete else write.content
+        diffs.append({"filepath": relpath, "content": "".join(difflib.unified_diff(
+            before.splitlines(keepends=True), after.splitlines(keepends=True), fromfile=f"a/{relpath}", tofile=f"b/{relpath}"))})
+    return diffs
 
 
 def committed_digest_mismatch(writes: Iterable[StagedFileWrite]) -> Optional[str]:
@@ -246,10 +276,16 @@ def commit_terminal_candidate(
     writes: List[StagedFileWrite], *, workspace_path: str, transaction_id: str,
     static_analysis: StaticAnalysisCommitGuard,
     verified_candidate: Optional[CandidateVerificationBinding],
+    approval: Optional[MutationApproval],
+    run_id: Optional[str] = None,
     evidence: Optional[Dict[str, Any]] = None,
     contract_transition: Optional[Callable[[str], Optional[Any]]] = None,
 ) -> TerminalCommitOutcome:
     """Commit a materialized, verified candidate into the real workspace.
+
+    ``approval`` (S7, C-03) is the approval decision for THIS batch (kriya/policy/approval.py::MutationApproval). Its subject is recomputed
+    from ``writes`` as the last check before the durable intent: a missing decision, one bound to another batch, another run or another
+    root, a required approval that was not granted, or one that does not authorize applying, refuses the commit with nothing written.
 
     ``verified_candidate`` is the binding taken when terminal verification
     started (kriya/workflow/verification_binding.py). It is recomputed from
@@ -314,10 +350,21 @@ def commit_terminal_candidate(
                 committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
                 transaction_id=transaction_id, reason_code=error.reason_code, error=error,
             )
+    # S7: the final application authority. Recomputed from the batch about to be written, after every other refusal and immediately before
+    # the durable intent, so nothing between an approval and the first workspace byte can change what is applied under it.
+    approval_refused = mutation_approval_refusal(
+        approval, subject_digest=bind_candidate(writes, workspace_path).digest, root=os.path.realpath(workspace_path), run_id=run_id)
+    if approval_refused is not None:
+        reason_code, detail = approval_refused
+        return TerminalCommitOutcome(
+            committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
+            transaction_id=transaction_id, reason_code=reason_code, error=MutationApprovalRefused(detail),
+        )
     try:
         run = begin_run_commit(
             workspace_path, transaction_id, candidate_hash=candidate_hash,
             contract_registry=transition.intent() if transition is not None else None,
+            approval=approval.record(),
             **(evidence or {}),
         )
     except Exception as error:

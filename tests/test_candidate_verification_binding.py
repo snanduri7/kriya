@@ -107,7 +107,7 @@ def _refused(tmp_path, workspace, verified, committed_batch, reason=VERIFIED_CAN
     before = snapshot_tree(tmp_path)
     outcome = commit_terminal_candidate(
         committed_batch, workspace_path=workspace, transaction_id="tx",
-        static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=verified,
+        static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=verified, approval=__import__("_fake_static_analysis").no_approval_needed(committed_batch, workspace)
     )
     assert not outcome.committed and outcome.workspace_state == "UNCHANGED"
     assert outcome.reason_code == reason
@@ -122,7 +122,7 @@ def test_an_unchanged_candidate_commits_normally(tmp_path):
     batch = _verified_batch(workspace)
     outcome = commit_terminal_candidate(
         batch, workspace_path=workspace, transaction_id="tx", static_analysis=DISABLED_STATIC_ANALYSIS,
-        verified_candidate=bind_candidate(_verified_batch(workspace), workspace),
+        verified_candidate=bind_candidate(_verified_batch(workspace), workspace), approval=__import__("_fake_static_analysis").no_approval_needed(batch, workspace)
     )
     assert outcome.committed and outcome.workspace_state == "COMMITTED"
     assert Path(workspace, "A.java").read_text() == "class A { }\n"
@@ -161,7 +161,7 @@ def test_a_missing_binding_is_refused_even_for_an_empty_batch(tmp_path):
 def _sa_commit(workspace, batch, verified, cfg, result):
     return commit_terminal_candidate(
         batch, workspace_path=workspace, transaction_id="tx",
-        static_analysis=commit_guard(cfg, result), verified_candidate=verified,
+        static_analysis=commit_guard(cfg, result), verified_candidate=verified, approval=__import__("_fake_static_analysis").no_approval_needed(batch, workspace)
     )
 
 

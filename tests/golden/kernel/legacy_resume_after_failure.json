@@ -8433,6 +8433,16 @@
    "commit_transaction_id": "<hex:1>",
    "commits": [
     {
+     "approval": {
+      "approval_id": "4fd6fbe034ab8c0b86ed254638bf11f5dbfb2370c36169bb3ca73fc88123021d",
+      "decision": "approved",
+      "required": true,
+      "scope": "apply",
+      "subject_digest": "21ce7e3655e18dad6ff77c2562932525e505c4c20da1dcaf7ffc49af30b750d1",
+      "triggers": [
+       "human_in_the_loop"
+      ]
+     },
      "candidate_hash": "9987cc6688f4582ce0d15fdfb6c35c62faa317671d7a8d8d4774964d2151b054",
      "intent": "APPLY_VERIFIED_CANDIDATE",
      "result": "COMMITTED",

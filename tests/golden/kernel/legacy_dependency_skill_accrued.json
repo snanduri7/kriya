@@ -2369,6 +2369,16 @@
    "commit_transaction_id": "<hex:1>",
    "commits": [
     {
+     "approval": {
+      "approval_id": "7bed80727ef4970ea5843f2efb79f618687ac91fac75ca6795b8035dc8cd23aa",
+      "decision": "approved",
+      "required": true,
+      "scope": "apply",
+      "subject_digest": "d657a9ecf99f94ad1dcf89bd959290a497436a9c61c7e5c4369e345d8d78ae19",
+      "triggers": [
+       "human_in_the_loop"
+      ]
+     },
      "candidate_hash": "8f4213bece15a04740781b95b3963131ec76a72df4f53a8fd09786adb36222bf",
      "intent": "APPLY_VERIFIED_CANDIDATE",
      "result": "COMMITTED",

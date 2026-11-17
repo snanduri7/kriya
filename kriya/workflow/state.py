@@ -770,6 +770,9 @@ class GenerationState:
     # (kriya/workflow/verification_binding.py). The terminal commit refuses
     # a batch that no longer matches it; None until the gates pass.
     verified_candidate_binding: Optional[Any] = None
+    # S7 (C-03): the approval decision the pre-apply gate bound to this attempt's exact terminal batch
+    # (kriya/policy/approval.py::MutationApproval). The terminal commit refuses a batch it does not cover; None until the gate decided.
+    mutation_approval: Optional[Any] = None
     # ENFORCE-VERIFIED-NO-CHANGE-001: the planned paths this attempt's
     # Developer answered NO CHANGE for, in an enforce unit that wrote
     # nothing - a REQUEST for Kriya to verify the current candidate, settled

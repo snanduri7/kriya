@@ -729,7 +729,7 @@ def test_verified_bytes_equal_committed_bytes_or_the_commit_is_uncertain(tmp_pat
 
     with patch.object(terminal_commit, "commit_revision_grounded_batch", tampering_batch):
         outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), transaction_id="t1",
-                                            static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=binding)
+                                            static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=binding, approval=__import__("_fake_static_analysis").no_approval_needed(writes, str(workspace)))
     assert not outcome.committed and outcome.reason_code == VERIFIED_COMMIT_DIGEST_MISMATCH
     assert outcome.workspace_state == "UNCERTAIN"
 
@@ -748,7 +748,7 @@ def test_a_candidate_changed_after_verification_is_refused(tmp_path):
     (candidate / "a.py").write_bytes(b"b\r\n")  # post-verification mutation
     outcome = commit_terminal_candidate(
         materialize_candidate(str(candidate), str(workspace), files), workspace_path=str(workspace),
-        transaction_id="t2", static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=binding)
+        transaction_id="t2", static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=binding, approval=__import__("_fake_static_analysis").no_approval_needed(materialize_candidate(str(candidate), str(workspace), files), str(workspace)))
     assert not outcome.committed and outcome.reason_code == VERIFIED_CANDIDATE_EVIDENCE_STALE
     assert (workspace / "a.py").read_bytes() == b"a\n"
 

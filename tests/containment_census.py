@@ -203,6 +203,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_owner_recovery_implicated_scope_001.py': ('S', 'M'),  # run 9: the real-unit two-file owner recovery (implicated scope), gates scripted
  'tests/test_recovery_learning_lifecycle_001.py': ('S', 'M'),  # run 9: no lesson from a local owner success (real unit, lesson channel recorded)
  'tests/test_verifier_semantic_loop_001.py': ('S', 'M'),  # WS3-C slice 2: the generated-verifier semantic seams (real unit, gates scripted per tree)
+ 'tests/test_s7_approval_subject.py': ('S', 'M'),  # S7: the real enforce controller through the scripted unit harness (the stale-approval reproducer, one-unit reuse)
  'tests/test_s6_result_contract.py': ('S', 'M'),  # S6: P8 inverted on the real direct and enforce pipelines, the graded runtime check (gates scripted)
  'tests/test_s6_enforce_closer_parity.py': ('S', 'M'),  # S6: the real enforce controller on the hello goal (the application run scripted at the validator seam)
  'tests/test_s5_semantic_contract_authority.py': ('S', 'M'),  # S5: an unmapped generated test stops for review (the same real unit, gates scripted per tree)

@@ -392,7 +392,7 @@ def test_service_stale_evidence_blocks_the_commit(mode, rule_copy, tmp_path):
 
     def commit(batch):
         return commit_terminal_candidate(batch, workspace_path=str(ws), verified_candidate=bind_candidate(batch, str(ws)), transaction_id="t",
-                                         static_analysis=commit_guard(cfg, result))
+                                         static_analysis=commit_guard(cfg, result), approval=__import__("_fake_static_analysis").no_approval_needed(batch, str(ws)))
 
     rule = rule_copy / "java.yml"
     original = rule.read_bytes()

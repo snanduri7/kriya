@@ -81,8 +81,11 @@ def test_one_changed_file_asks_exactly_once_with_the_complete_subject(tmp_path):
 def test_two_units_each_ask_once_for_their_own_files(tmp_path):
     _workspace, events, _result, approvals = run_enforce(tmp_path, editors=TWO, verification_only=True)
 
-    assert [(unit, files) for unit, files, _reason in approvals] == [("s1", [SERVICE]), ("s2", [OTHER])]
-    assert _decisions(events) == ["approved", "approved"]
+    # S7 (C-03): neither unit approval covers the cumulative change, so the complete change is put to the person once at the terminal commit
+    # (asked after the last unit ran, hence its id on the harness record; it is the run's approval, not that unit's).
+    assert [files for _unit, files, _reason in approvals] == [[SERVICE], [OTHER], [OTHER, SERVICE]]
+    assert [unit for unit, _files, _reason in approvals][:2] == ["s1", "s2"]
+    assert _decisions(events) == ["approved", "approved"]          # the units' gate events; the terminal decision is on the commit cycle
 
 
 def test_a_rejected_real_change_still_records_the_rejection_and_applies_nothing(tmp_path):

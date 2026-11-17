@@ -230,7 +230,7 @@ def _record(workspace):
 def test_committed_transition_is_bound_to_the_commit_and_recorded_in_the_run_record(tmp_path):
     workspace = _workspace(tmp_path)
     outcome = _in_run(workspace, lambda: commit_terminal_candidate(
-        _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1", contract_transition=_builder(workspace),
+        _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1", contract_transition=_builder(workspace), approval=__import__("_fake_static_analysis").no_approval_needed(_writes(workspace), workspace)
     ))
     assert outcome.committed and outcome.workspace_state == "COMMITTED"
     live = load_contract_registry(workspace)
@@ -248,7 +248,7 @@ def test_refused_transition_refuses_the_commit_before_any_intent(tmp_path):
     workspace = _workspace(tmp_path)
     outcome = _in_run(workspace, lambda: commit_terminal_candidate(
         _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
-        contract_transition=_builder(workspace, verified=False),
+        contract_transition=_builder(workspace, verified=False), approval=__import__("_fake_static_analysis").no_approval_needed(_writes(workspace), workspace)
     ))
     assert not outcome.committed and outcome.workspace_state == "UNCHANGED"
     assert outcome.reason_code == cl.CONTRACT_CONSUMER_VERIFICATION_MISSING
@@ -263,7 +263,7 @@ def test_corrupt_registry_refuses_the_commit_and_is_left_untouched(tmp_path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     Path(path).write_text("{bad")
     outcome = _in_run(workspace, lambda: commit_terminal_candidate(
-        _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1", contract_transition=_builder(workspace),
+        _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1", contract_transition=_builder(workspace), approval=__import__("_fake_static_analysis").no_approval_needed(_writes(workspace), workspace)
     ))
     assert outcome.reason_code == CONTRACT_REGISTRY_CORRUPT and not outcome.committed
     assert Path(path).read_text() == "{bad" and Path(workspace, OWNER).read_text() == OWNER_V1
@@ -274,7 +274,7 @@ def test_staging_failure_leaves_the_workspace_unchanged(tmp_path):
     with patch("kriya.control.persistence.stage_pending_contract_registry", side_effect=OSError("disk full")):
         outcome = _in_run(workspace, lambda: commit_terminal_candidate(
             _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
-            contract_transition=_builder(workspace),
+            contract_transition=_builder(workspace), approval=__import__("_fake_static_analysis").no_approval_needed(_writes(workspace), workspace)
         ))
     assert outcome.reason_code == cl.CONTRACT_REGISTRY_STAGING_FAILED and outcome.workspace_state == "UNCHANGED"
     assert Path(workspace, OWNER).read_text() == OWNER_V1
@@ -287,7 +287,7 @@ def test_promotion_failure_is_uncertain_never_success_and_recovery_completes_it(
     with patch("kriya.control.persistence.promote_pending_contract_registry", side_effect=OSError("io")):
         outcome = _in_run(workspace, lambda: commit_terminal_candidate(
             _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
-            contract_transition=_builder(workspace),
+            contract_transition=_builder(workspace), approval=__import__("_fake_static_analysis").no_approval_needed(_writes(workspace), workspace)
         ))
     assert not outcome.committed and outcome.workspace_state == "UNCERTAIN"
     assert outcome.reason_code == cl.CONTRACT_REGISTRY_TRANSITION_INCOMPLETE
@@ -309,7 +309,7 @@ def test_recovery_refuses_a_registry_changed_behind_the_transaction(tmp_path):
     with patch("kriya.control.persistence.promote_pending_contract_registry", side_effect=OSError("io")):
         _in_run(workspace, lambda: commit_terminal_candidate(
             _writes(workspace), workspace_path=workspace, verified_candidate=bind_candidate(_writes(workspace), workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
-            contract_transition=_builder(workspace),
+            contract_transition=_builder(workspace), approval=__import__("_fake_static_analysis").no_approval_needed(_writes(workspace), workspace)
         ))
     foreign = ContractRegistry()
     foreign.register("M9:cap", "cap", "M9", "other")
@@ -368,7 +368,7 @@ def build(*, candidate_hash):
 with begin_mutating_run(workspace) as ctx:
     transition_mutating_run(ctx, RunLifecycle.RUNNING)
     transition_mutating_run(ctx, RunLifecycle.CANDIDATE)
-    commit_terminal_candidate(writes, workspace_path=ctx.workspace_path, verified_candidate=bind_candidate(writes, ctx.workspace_path), static_analysis=commit_guard(None, None), transaction_id="tx1", contract_transition=build)
+    commit_terminal_candidate(writes, workspace_path=ctx.workspace_path, verified_candidate=bind_candidate(writes, ctx.workspace_path), static_analysis=commit_guard(None, None), transaction_id="tx1", contract_transition=build, approval=__import__("kriya.policy.approval", fromlist=["MutationApproval"]).MutationApproval(subject_digest=bind_candidate(writes, ctx.workspace_path).digest, root=os.path.realpath(ctx.workspace_path), run_id=None, required=False))
 os._exit(0)
 '''
 

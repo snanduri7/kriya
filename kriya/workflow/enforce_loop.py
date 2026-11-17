@@ -42,6 +42,7 @@ from kriya.config.authority import AutonomyModeError, is_human_in_the_loop
 from kriya.core.state_paths import resolve_state_directory
 from kriya.memory.project_store import project_store_path
 from kriya.policy.approval import (
+    MutationApprovalLedger,
     TypedApprovalCallback,
     VerifierRepairSubject,
     ask_verifier_repair,
@@ -211,6 +212,7 @@ class EnforceDeps:
     # kriya.workflow.commit_service (all-import cycle)
     TerminalCommitRequest: Any
     commit_verified_candidate: Callable[..., Any]
+    approve_terminal_mutation: Callable[..., Any]      # S7: commit_service.approve_terminal_mutation
     interrupted_commit_outcome: Callable[..., Any]
     plan_terminal_writes: Callable[..., Any]
     run_commit_states: Callable[..., Any]
@@ -1740,6 +1742,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # VERIFIER-SEMANTIC-AUTHORITY-001 (kriya/workflow/verifier_semantic.py): the run's ONE generated-verifier semantic ledger. Every unit
         # invocation of this run receives it; none builds its own.
         verifier_semantic_ledger = VerifierSemanticLedger()
+        # S7 (C-03): the run's ONE ledger of granted change approvals. Every unit's approval gate records its subject-bound decision here; the
+        # terminal asks it whether a person already approved exactly the cumulative change (kriya/workflow/commit_service.py).
+        mutation_approvals = MutationApprovalLedger()
+        terminal_approval_stop: Optional[Dict[str, str]] = None
         # MA8.1 completion (2026-08-29 v2 design review): "Requirement-
         # scoped repeated owner recovery." A live PRV-06 run proved a bare
         # owner-id set (reopen each owner at most once per run) is the
@@ -1970,6 +1976,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 verifier_semantic=RunSemantics(
                     ledger=verifier_semantic_ledger, plan_hash=current_plan_hash,
                     verification_contract_digest=verification_contract.digest, goal=goal),
+                mutation_approvals=mutation_approvals,
                 strict_dependency_index=bool(
                     process_profiles is not None
                     and getattr(process_profiles, "enabled", False) is True
@@ -4618,6 +4625,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 ), _emit_gate_outcome)
                 all_completed = gate_report.commit_eligible
 
+                terminal_approval = None
+                if all_completed and plan_workspace_path != workspace_path:
+                    # S7 (C-03): APPROVAL MUST BIND TO THE EXACT FINAL MUTATION SUBJECT. The one real-workspace mutation of this run is the
+                    # cumulative candidate; the decision is made (or an exactly covering one reused) for that batch, and the commit seam
+                    # re-derives the subject from the bytes it is about to write. A decline or an unobtainable decision applies nothing.
+                    terminal_approval, terminal_approval_stop = await deps.approve_terminal_mutation(
+                        plan=plan, candidate_root=plan_workspace_path, workspace_path=workspace_path,
+                        original_plan_revisions=original_plan_revisions, run_id=run_id,
+                        autonomy=getattr(engine_config, "autonomy", None),
+                        process_profile_requires_review=bool(
+                            getattr(getattr(engine_config, "process_profiles", None), "enabled", False) is True
+                            and getattr(getattr(engine_config, "process_profiles", None), "enforce_approval", False) is True
+                            and getattr(getattr(control_context, "process_profile", None), "human_review_required", False) is True),
+                        ledger=mutation_approvals, callback=legacy_kwargs.get("approval_callback"),
+                    )
+                    if terminal_approval_stop is not None:
+                        all_completed = False
+                        await _emit_terminal_event("terminal_approval_not_granted", **terminal_approval_stop)
+
                 if all_completed:
                     await _emit_terminal_event("commit_eligible")
                     if plan_workspace_path != workspace_path:
@@ -4632,6 +4658,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             transaction_id=transaction_id, subtask_call_results=subtask_call_results,
                         ),
                         static_analysis=deps.commit_guard(engine_config, gate_report.static_analysis),
+                        approval=terminal_approval,
                     ))
                     workspace_commit_completed = commit.completed
                     workspace_commit_failure = commit.failure
@@ -4821,6 +4848,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 run_id, workspace_commit_failure["reason_code"],
                 workspace_commit_failure["workspace_state"], workspace_commit_failure["error"],
             )
+        if terminal_approval_stop is not None:
+            # S7: the person declined the complete change (human_rejected), or approval was required and no decision could be obtained
+            # (approval_required): the direct path's own categories for the same stop. Nothing was applied.
+            aggregated.setdefault("reason_codes", []).append(terminal_approval_stop["reason_code"])
+            aggregated["failure_category"] = terminal_approval_stop["failure_category"]
+            aggregated["review"] = terminal_approval_stop["reason"]
         if knowledge_gap_break is not None:
             aggregated["status"] = knowledge_gap_break["status"]
             aggregated["gap_report"] = knowledge_gap_break["gap_report"]

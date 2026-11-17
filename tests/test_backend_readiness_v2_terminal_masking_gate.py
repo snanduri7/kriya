@@ -355,7 +355,7 @@ def _commit(tmp_path, content, *, base=BASE):
                              expected_base_revision=content_revision(base), expected_base_exists=True)]
     outcome = commit_terminal_candidate(batch, workspace_path=str(workspace), transaction_id="t1",
                                         static_analysis=DISABLED_STATIC_ANALYSIS,
-                                        verified_candidate=bind_candidate(batch, str(workspace)))
+                                        verified_candidate=bind_candidate(batch, str(workspace)), approval=__import__("_fake_static_analysis").no_approval_needed(batch, str(workspace)))
     return workspace, outcome
 
 

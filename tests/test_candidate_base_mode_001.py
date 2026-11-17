@@ -55,7 +55,7 @@ def _pair(tmp_path: Path, base_mode: int, candidate_mode: int = 0o644):
 def _commit(writes, workspace: Path, binding, transaction_id: str = "t1"):
     return commit_terminal_candidate(
         writes, workspace_path=str(workspace), transaction_id=transaction_id,
-        static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=binding)
+        static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=binding, approval=__import__("_fake_static_analysis").no_approval_needed(writes, str(workspace)))
 
 
 @pytest.mark.parametrize("base_mode", [0o600, 0o664, 0o644, 0o755, 0o750])

@@ -112,7 +112,7 @@ def commit(root):
               write(root, "gone.py", b"", True, delete=True)]
     os.replace = crashing_replace
     if mode == "run":
-        commit_terminal_candidate(writes, workspace_path=root, verified_candidate=bind_candidate(writes, root), static_analysis=commit_guard(None, None), transaction_id="tx1")
+        commit_terminal_candidate(writes, workspace_path=root, verified_candidate=bind_candidate(writes, root), static_analysis=commit_guard(None, None), transaction_id="tx1", approval=__import__("kriya.policy.approval", fromlist=["MutationApproval"]).MutationApproval(subject_digest=bind_candidate(writes, root).digest, root=__import__("os").path.realpath(root), run_id=None, required=False))
     else:
         commit_revision_grounded_batch(writes, workspace_path=root, transaction_id="tx1")
 
@@ -454,7 +454,7 @@ def _interrupted_commit(tmp_path, monkeypatch, *, rollback_fails=False):
             writes = [write("a.py", A_AFTER, True), write("pkg/new.py", NEW_AFTER, False)]
             commit_terminal_candidate(
                 writes, workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
-                verified_candidate=bind_candidate(writes, workspace),
+                verified_candidate=bind_candidate(writes, workspace), approval=__import__("_fake_static_analysis").no_approval_needed(writes, workspace)
             )
     monkeypatch.setattr(os, "replace", real_replace)
     return workspace

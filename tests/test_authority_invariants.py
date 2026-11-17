@@ -143,7 +143,7 @@ def test_reviewed_built_tested_runtime_and_applied_bytes_are_bound(tmp_path):
         (None, [_write(workspace, "A.java", "class A { }\n", base=BASE_A)], VERIFIED_CANDIDATE_EVIDENCE_MISSING),
     ):
         outcome = commit_terminal_candidate(batch, workspace_path=workspace, transaction_id="tx",
-                                            static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=binding)
+                                            static_analysis=DISABLED_STATIC_ANALYSIS, verified_candidate=binding, approval=__import__("_fake_static_analysis").no_approval_needed(batch, workspace))
         assert not outcome.committed and outcome.workspace_state == "UNCHANGED" and outcome.reason_code == code
         assert snapshot_tree(workspace) == before
 

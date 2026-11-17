@@ -31,7 +31,14 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from kriya.config.authority import is_human_in_the_loop
 from kriya.control.run_coordinator import annotate_run
-from kriya.policy.approval import ApprovalDecision, resolve_approval
+from kriya.policy.approval import (
+    ApprovalDecision,
+    MutationApproval,
+    change_approval_triggers,
+    mutation_approval_id,
+    resolve_approval,
+    sensitive_path_reason,
+)
 from kriya.repository.atomic_write import atomic_write_file
 from kriya.repository.commit import CandidateMaterializationError
 from kriya.workflow.acceptance import output_confirms_nonzero_test_execution
@@ -44,6 +51,7 @@ from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_lifecycle import TerminalTrace, TraceDetail, persist_run_trace
 from kriya.workflow.stage_context import StageContext, StageDeps
 from kriya.workflow.stage_review import pre_approval_review
+from kriya.workflow.terminal_commit import bind_candidate, mutation_identity
 from kriya.workflow.worktree import remove_git_worktree
 
 RunState = Any   # kriya.workflow.state.GenerationState (kriya/workflow/stage_context.py says why it is not imported)
@@ -195,14 +203,27 @@ async def approval_gate(
     # (state.pre_approval_review is reset once per loop iteration, above -
     # before run_attempt() runs, not here - see that comment for why.)
     diffs_to_show = []
+    # S7 (C-03): the approval SUBJECT is the batch the terminal apply will commit, materialized once here. Its digest is what the decision
+    # is bound to (``state.mutation_approval``), and the diff the person sees is rendered from these same bytes, never from a second read
+    # of the sandbox. A candidate that cannot be materialized has no subject: the terminal apply refuses it.
+    try:
+        subject_writes = deps._direct_terminal_writes(worktree_path, workspace_path, state)
+    except CandidateMaterializationError:
+        subject_writes = None
+    subject_binding = bind_candidate(subject_writes, workspace_path) if subject_writes is not None else None
+    subject_text = {os.path.relpath(write.target_path, workspace_path): write.content for write in subject_writes or ()}
+    state.mutation_approval = None
     # Also kept for the pre-approval Reviewer call just below - same
     # worktree read, no second file-open per file.
     worktree_file_contents: Dict[str, str] = {}
     for filepath in sorted(state.all_files_written):
         worktree_file = os.path.join(worktree_path, filepath)
         actual_content = state.all_original_contents.get(filepath, "")
-        with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
-            new_content = fh.read()
+        if filepath in subject_text:
+            new_content = subject_text[filepath]
+        else:
+            with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
+                new_content = fh.read()
         worktree_file_contents[filepath] = new_content
 
         file_diff = "".join(difflib.unified_diff(
@@ -216,20 +237,9 @@ async def approval_gate(
     total_diff_lines = sum(len(d["content"].splitlines()) for d in diffs_to_show)
     autonomy_cfg = deps.config.autonomy
 
-    # Check sensitive paths matches
-    sensitive_match = False
-    sensitive_reason = ""
-    for filepath in state.all_files_written:
-        for pattern in autonomy_cfg.sensitive_paths:
-            try:
-                if re.match(pattern, filepath, re.IGNORECASE):
-                    sensitive_match = True
-                    sensitive_reason = f"Sensitive path matched: {filepath} ({pattern})"
-                    break
-            except Exception as e:
-                logger.warning(f"Invalid sensitive_paths regex '{pattern}' - this pattern is not being enforced: {e}")
-        if sensitive_match:
-            break
+    # Check sensitive paths matches (the one trigger owner: kriya/policy/approval.py)
+    sensitive_reason = sensitive_path_reason(state.all_files_written, autonomy_cfg.sensitive_paths)
+    sensitive_match = bool(sensitive_reason)
 
     # MA2.5 - process_profile.human_review_required is OR'd in as a new,
     # independent trigger, alongside (never replacing) the three that
@@ -263,20 +273,22 @@ async def approval_gate(
     has_source_mutation = bool(state.all_files_written)
     # OI-135 (S18): the mode through the one fail-closed reader (a value outside the vocabulary raises, typed).
     human_in_the_loop = is_human_in_the_loop(autonomy_cfg.mode)
-    need_human_approval = has_source_mutation and (
-        human_in_the_loop or
-        sensitive_match or
-        total_diff_lines > autonomy_cfg.risk_threshold_lines or
-        process_profile_requires_review
-    )
+    # PRD-033: why approval was required, for the approval.decision event (S7: the one trigger owner, kriya/policy/approval.py).
+    approval_triggers = change_approval_triggers(
+        human_in_the_loop=human_in_the_loop, sensitive_match=sensitive_match, diff_lines=total_diff_lines,
+        risk_threshold_lines=autonomy_cfg.risk_threshold_lines, process_profile_requires_review=process_profile_requires_review)
+    need_human_approval = has_source_mutation and bool(approval_triggers)
 
-    # PRD-033: why approval was required, for the approval.decision event.
-    approval_triggers = [name for name, fired in (
-        ("human_in_the_loop", human_in_the_loop),
-        ("sensitive_path", bool(sensitive_match)),
-        ("diff_size", total_diff_lines > autonomy_cfg.risk_threshold_lines),
-        ("process_profile", process_profile_requires_review),
-    ) if fired]
+    def _bind_decision(outcome: Any) -> None:
+        """S7: the decision about exactly this batch, for the terminal apply (and, in an enforce run, the controller's ledger)."""
+        if subject_binding is None:
+            return
+        state.mutation_approval = MutationApproval(
+            subject_digest=subject_binding.digest, root=os.path.realpath(workspace_path), run_id=run_id, required=need_human_approval,
+            triggers=tuple(approval_triggers) if need_human_approval else (), outcome=outcome,
+            approval_id=mutation_approval_id(subject_binding.digest) if outcome is not None else None, mutation=mutation_identity(subject_binding))
+        if ctx.mutation_approvals is not None:
+            ctx.mutation_approvals.record(state.mutation_approval)
 
     escalation_reason = "Human-in-the-loop review policy"
     if sensitive_match:
@@ -437,6 +449,7 @@ async def approval_gate(
                 f"Not applied: human approval was required ({escalation_reason}) but no approval decision could be obtained ({outcome.reason_code}); "
                 "nothing was approved and nobody declined.",
             ), need_human_approval
+        _bind_decision(outcome)
     elif need_human_approval and not approval_callback:
         # Independent adversarial review, 2026-08-16, Finding 2: this gate used
         # to fail OPEN - if policy required approval but no callback was wired
@@ -460,6 +473,8 @@ async def approval_gate(
             f"Not applied: human approval was required ({escalation_reason}) but no "
             "approval_callback was provided to run_generation_workflow().",
         ), need_human_approval
+    else:
+        _bind_decision(None)        # policy requires no approval for exactly this batch
 
     return None, need_human_approval
 
@@ -634,6 +649,7 @@ def apply_terminal_candidate(
         final_writes, workspace_path=workspace_path,
         static_analysis=commit_guard(deps.config, state.static_analysis_result),
         verified_candidate=state.verified_candidate_binding,
+        approval=state.mutation_approval, run_id=run_id,     # S7: the decision the approval gate bound to this exact batch
         transaction_id=terminal_transaction_id,
         evidence={
             "verification_evidence_ids": [

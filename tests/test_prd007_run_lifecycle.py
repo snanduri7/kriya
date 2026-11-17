@@ -290,7 +290,7 @@ def test_materialized_candidate_is_byte_and_mode_exact(tmp_path):
         CandidateFile(name, read_file_revision(str(workspace / name)), expected_base_exists=False)
         for name in ("crlf.txt", "latin1.txt", "mvnw")
     ])
-    outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="exact")
+    outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="exact", approval=__import__("_fake_static_analysis").no_approval_needed(writes, str(workspace)))
     assert outcome.committed
     assert (workspace / "crlf.txt").read_bytes() == b"a\r\nb\r\n"
     assert (workspace / "latin1.txt").read_bytes() == b"caf\xe9\n"
@@ -304,7 +304,7 @@ def _candidate_commit(candidate_root, workspace, relpath, content, transaction_i
     writes = materialize_candidate(str(candidate_root), str(workspace), [
         CandidateFile(relpath, read_file_revision(os.path.join(workspace, relpath))),
     ])
-    return commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id=transaction_id)
+    return commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id=transaction_id, approval=__import__("_fake_static_analysis").no_approval_needed(writes, str(workspace)))
 
 
 def test_nested_real_workspace_commits_are_each_recorded_candidate_commits_are_not(tmp_path):
@@ -357,7 +357,7 @@ def test_later_commit_that_does_not_land_makes_the_run_partially_committed(tmp_p
             CandidateFile("app.py", read_file_revision(os.path.join(workspace_path, "app.py"))),
         ])
         (workspace / "app.py").write_text("edited meanwhile\n")  # real concurrent edit
-        outcome = commit_terminal_candidate(writes, workspace_path=workspace_path, verified_candidate=bind_candidate(writes, workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="m2")
+        outcome = commit_terminal_candidate(writes, workspace_path=workspace_path, verified_candidate=bind_candidate(writes, workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="m2", approval=__import__("_fake_static_analysis").no_approval_needed(writes, workspace_path))
         assert outcome.reason_code == "WORKSPACE_REVISION_CONFLICT"
         return {"status": "failed", "quality_gates_passed": False}
 
@@ -455,7 +455,10 @@ def test_crash_between_intent_and_result_is_recognized_and_blocks_enforce(tmp_pa
     assert record.commits == [{
         "transaction_id": "crash-tx", "intent": "APPLY_VERIFIED_CANDIDATE",
         "candidate_hash": record.candidate_hash, "result": None,
+        # S7 (C-03): the approval decision the candidate is applied under is part of the durable intent
+        "approval": record.commits[0]["approval"],
     }]
+    assert record.commits[0]["approval"]["required"] is False and record.commits[0]["approval"]["subject_digest"]
     assert record.commit_state_unknown
     assert commit_state_for_transaction(str(workspace), "crash-tx") is CommitState.IN_PROGRESS
 

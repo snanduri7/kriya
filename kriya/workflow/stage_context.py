@@ -425,6 +425,7 @@ class StageContext:
     capture_refused_candidate: bool = False
     verifier_repair: Any = None              # verifier_repair.VerifierRepairTransaction or None (see run_generation_workflow)
     verifier_semantic: Any = None            # verifier_semantic.RunSemantics or None (see run_generation_workflow)
+    mutation_approvals: Any = None           # policy.approval.MutationApprovalLedger of an enforce run, or None (S7; see run_generation_workflow)
     migration_resolution: Any = None
     obligation_ledger: Any = None          # the caller's ledger (None: the loop creates the run's own)
     completed_subtask_ids: Optional[FrozenSet[str]] = None

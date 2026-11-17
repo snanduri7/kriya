@@ -785,6 +785,127 @@ def stale(guard: Optional[Callable[[], bool]]) -> bool:
     return not (guard is None or guard())
 
 
+# ----------------------------------------------------------------------------- mutation approval: the subject-bound change approval (S7, C-03 / R-03)
+#
+# APPROVAL MUST BIND TO THE EXACT FINAL MUTATION SUBJECT. The change gate's question is "may this exact change be applied?" (the terminal prompt
+# reads "Do you approve applying these changes to the codebase?"), so a granted answer is apply-capable - but only for the batch it was shown.
+# ``MutationApproval`` is the one record of that decision: the subject (``verification_binding.bind_candidate(writes).digest`` of the batch the
+# policy was evaluated on and the person was shown), whether policy REQUIRED an approval (``triggers`` say why), the decision, its scope, the run and
+# the root the subject is relative to. The commit seam (``workflow/terminal_commit.py::commit_terminal_candidate``) recomputes the subject from the
+# batch it is about to write and calls ``mutation_approval_refusal``: nothing is applied under a missing, stale, foreign, ungranted or
+# review-only approval. Triggers decide "is an approval required?"; they never decide "what was approved?".
+
+APPROVAL_SUBJECT_MISSING = "APPROVAL_SUBJECT_MISSING"                # no approval record (or one with no subject) reached the commit
+APPROVAL_SUBJECT_STALE = "APPROVAL_SUBJECT_STALE"                    # the batch about to be applied is not the batch the approval is bound to
+APPROVAL_REQUIRED_NOT_GRANTED = "APPROVAL_REQUIRED_NOT_GRANTED"      # policy required an approval and none was granted
+APPROVAL_NOT_APPLY_CAPABLE = "APPROVAL_NOT_APPLY_CAPABLE"            # the decision's scope does not include applying the change
+APPROVAL_WRONG_RUN_OR_ROOT = "APPROVAL_WRONG_RUN_OR_ROOT"            # the approval belongs to another run or another workspace root
+MUTATION_APPROVAL_REFUSAL_CODES = (APPROVAL_SUBJECT_MISSING, APPROVAL_SUBJECT_STALE, APPROVAL_REQUIRED_NOT_GRANTED, APPROVAL_NOT_APPLY_CAPABLE,
+                                   APPROVAL_WRONG_RUN_OR_ROOT)
+
+SCOPE_APPLY = "apply"                # the person authorized this exact mutation to be applied (the change gate)
+SCOPE_REVIEW_ONLY = "review_only"    # a review that authorizes no application; never produced by the change gate, never honoured by the commit
+TRIGGER_HUMAN_IN_THE_LOOP, TRIGGER_SENSITIVE_PATH, TRIGGER_DIFF_SIZE, TRIGGER_PROCESS_PROFILE = "human_in_the_loop", "sensitive_path", "diff_size", "process_profile"
+
+# What a batch does to its root, however the commit path that built it spells the operation: (relative path, bytes digest or None for a deletion,
+# base revision). ``verification_binding.mutation_identity`` derives it from a binding.
+MutationIdentity = Tuple[Tuple[str, Optional[str], str], ...]
+
+
+def sensitive_path_reason(paths: Any, patterns: Any) -> str:
+    """The first changed path that matches a configured sensitive pattern, as the gate's reason text; "" when none does."""
+    for filepath in paths:
+        for pattern in patterns:
+            try:
+                if re.match(pattern, filepath, re.IGNORECASE):
+                    return f"Sensitive path matched: {filepath} ({pattern})"
+            except Exception as e:
+                logger.warning(f"Invalid sensitive_paths regex '{pattern}' - this pattern is not being enforced: {e}")
+    return ""
+
+
+def change_approval_triggers(*, human_in_the_loop: bool, sensitive_match: bool, diff_lines: int, risk_threshold_lines: int,
+                             process_profile_requires_review: bool) -> List[str]:
+    """Why a change needs a person, evaluated on ONE subject (the batch a commit will apply). An empty list: policy requires no approval."""
+    return [name for name, fired in (
+        (TRIGGER_HUMAN_IN_THE_LOOP, human_in_the_loop),
+        (TRIGGER_SENSITIVE_PATH, bool(sensitive_match)),
+        (TRIGGER_DIFF_SIZE, diff_lines > risk_threshold_lines),
+        (TRIGGER_PROCESS_PROFILE, process_profile_requires_review),
+    ) if fired]
+
+
+@dataclass(frozen=True)
+class MutationApproval:
+    """The policy decision about applying ONE exact batch. ``required`` False: policy asked nobody (``outcome`` None). ``mutation`` is the
+    batch's cross-shape identity, kept so the enforce terminal can tell whether this decision covers its cumulative batch exactly."""
+
+    subject_digest: Optional[str]
+    root: str
+    run_id: Optional[str]
+    required: bool
+    triggers: Tuple[str, ...] = ()
+    outcome: Optional[ApprovalOutcome] = None
+    scope: str = SCOPE_APPLY
+    approval_id: Optional[str] = None
+    mutation: MutationIdentity = ()
+
+    @property
+    def granted(self) -> bool:
+        return self.outcome is not None and self.outcome.approved
+
+    def record(self) -> Dict[str, Any]:
+        """The durable form (the RunRecord commit cycle keeps it with the candidate hash it authorized)."""
+        return {"approval_id": self.approval_id, "subject_digest": self.subject_digest, "required": self.required,
+                "decision": self.outcome.decision.value if self.outcome is not None else None, "scope": self.scope,
+                "triggers": list(self.triggers)}
+
+
+def mutation_approval_id(subject_digest: str) -> str:
+    """The identity of a granted decision: a digest of the subject it was granted for. It consumes no random id, and it is the same value
+    wherever that decision is recorded (the run that owns the record names the run; ``MutationApproval.run_id`` and ``root`` carry the rest)."""
+    return hashlib.sha256(json.dumps(["mutation-approval", subject_digest]).encode("utf-8")).hexdigest()
+
+
+def mutation_approval_refusal(approval: Optional[MutationApproval], *, subject_digest: str, root: str,
+                              run_id: Optional[str]) -> Optional[Tuple[str, str]]:
+    """(reason code, detail) when the batch whose subject is ``subject_digest`` may NOT be applied to ``root`` by run ``run_id`` under
+    ``approval``; None when it may. The subject is checked whether or not an approval was required: "not required" is itself a decision about
+    one exact batch."""
+    if approval is None or not approval.subject_digest:
+        return APPROVAL_SUBJECT_MISSING, "no approval decision is bound to this change; nothing was applied"
+    if approval.root != root or approval.run_id != run_id:
+        return APPROVAL_WRONG_RUN_OR_ROOT, "the approval decision belongs to another run or another workspace; nothing was applied"
+    if approval.subject_digest != subject_digest:
+        return APPROVAL_SUBJECT_STALE, "the change is not the one the approval decision was made for; nothing was applied"
+    if not approval.required:
+        return None
+    if not approval.granted:
+        return APPROVAL_REQUIRED_NOT_GRANTED, f"approval was required ({', '.join(approval.triggers) or 'policy'}) and was not granted; nothing was applied"
+    if approval.scope != SCOPE_APPLY:
+        return APPROVAL_NOT_APPLY_CAPABLE, "the approval decision does not authorize applying the change; nothing was applied"
+    return None
+
+
+class MutationApprovalLedger:
+    """The granted, apply-capable change approvals of ONE enforce run (process memory: an approval never outlives the process that obtained it, so
+    a resumed run asks again). The terminal asks it whether a person already approved exactly the cumulative mutation."""
+
+    def __init__(self) -> None:
+        self._granted: List[MutationApproval] = []
+
+    def record(self, approval: MutationApproval) -> None:
+        if approval.required and approval.granted and approval.mutation:
+            self._granted.append(approval)
+
+    def covering(self, mutation: MutationIdentity, *, root: str) -> Optional[MutationApproval]:
+        """The latest granted approval, rooted at ``root``, whose mutation is EXACTLY ``mutation`` and whose scope includes applying it."""
+        for approval in reversed(self._granted):
+            if approval.root == root and approval.mutation == mutation and approval.scope == SCOPE_APPLY:
+                return approval
+        return None
+
+
 # ----------------------------------------------------------------------------- the review port control.launch_approval takes as a parameter
 
 class RuntimeCommandReviewPort(Protocol):

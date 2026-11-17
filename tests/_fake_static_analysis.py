@@ -40,6 +40,17 @@ from kriya.static_analysis.service import commit_guard
 
 DISABLED_STATIC_ANALYSIS = commit_guard(AppConfig(), None)
 
+
+def no_approval_needed(writes, workspace_path, run_id=None):
+    """S7 (C-03): the approval decision "policy requires no approval", bound to exactly this batch - what the pre-apply gate of an autonomy mode
+    without review hands the commit seam. A test about something other than approval passes it for the batch it commits; the seam still refuses
+    when the batch it is given is not this one."""
+    from kriya.policy.approval import MutationApproval
+    from kriya.workflow.verification_binding import bind_candidate
+
+    root = str(workspace_path)
+    return MutationApproval(subject_digest=bind_candidate(writes, root).digest, root=os.path.realpath(root), run_id=run_id, required=False)
+
 FAKE = "fake"
 FAKE_VERSION = "9.9.9"
 

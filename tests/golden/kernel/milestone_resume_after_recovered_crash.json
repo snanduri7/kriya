@@ -158,6 +158,14 @@
    "commit_transaction_id": "<hex:1>",
    "commits": [
     {
+     "approval": {
+      "approval_id": null,
+      "decision": null,
+      "required": false,
+      "scope": "apply",
+      "subject_digest": "68320a82b6282d787ef07a3825ba1b1f1766f6fa8cc778b1ecbf7e423b279818",
+      "triggers": []
+     },
      "candidate_hash": "7beb8998708b4795fbe965810b6153e7efeec55f2ad23b61779994b14a208319",
      "intent": "APPLY_VERIFIED_CANDIDATE",
      "result": "COMMITTED",
@@ -170,6 +178,14 @@
      }
     },
     {
+     "approval": {
+      "approval_id": null,
+      "decision": null,
+      "required": false,
+      "scope": "apply",
+      "subject_digest": "c188df106cd76edb55fc0a3a7bf9ba63e66ad899685617561a7a9c2a9efbbf26",
+      "triggers": []
+     },
      "candidate_hash": "e13d66a531359da6e5d05248b759be17e33b480340a2ff482ba57fd7fef8b42b",
      "intent": "APPLY_VERIFIED_CANDIDATE",
      "result": "COMMITTED",

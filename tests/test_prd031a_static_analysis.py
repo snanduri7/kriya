@@ -551,7 +551,7 @@ def test_an_evidence_write_failure_is_recorded_and_never_changes_the_verdict(tmp
 
 
 def _commit(workspace, writes, guard):
-    return commit_terminal_candidate(writes, workspace_path=workspace, verified_candidate=bind_candidate(writes, workspace), transaction_id="tx", static_analysis=guard)
+    return commit_terminal_candidate(writes, workspace_path=workspace, verified_candidate=bind_candidate(writes, workspace), transaction_id="tx", static_analysis=guard, approval=__import__("_fake_static_analysis").no_approval_needed(writes, workspace))
 
 
 def test_fresh_evidence_commits_and_names_itself_in_the_commit_evidence(tmp_path):
