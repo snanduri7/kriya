@@ -807,10 +807,6 @@ SCOPE_APPLY = "apply"                # the person authorized this exact mutation
 SCOPE_REVIEW_ONLY = "review_only"    # a review that authorizes no application; never produced by the change gate, never honoured by the commit
 TRIGGER_HUMAN_IN_THE_LOOP, TRIGGER_SENSITIVE_PATH, TRIGGER_DIFF_SIZE, TRIGGER_PROCESS_PROFILE = "human_in_the_loop", "sensitive_path", "diff_size", "process_profile"
 
-# What a batch does to its root, however the commit path that built it spells the operation: (relative path, bytes digest or None for a deletion,
-# base revision). ``verification_binding.mutation_identity`` derives it from a binding.
-MutationIdentity = Tuple[Tuple[str, Optional[str], str], ...]
-
 
 def sensitive_path_reason(paths: Any, patterns: Any) -> str:
     """The first changed path that matches a configured sensitive pattern, as the gate's reason text; "" when none does."""
@@ -837,8 +833,8 @@ def change_approval_triggers(*, human_in_the_loop: bool, sensitive_match: bool, 
 
 @dataclass(frozen=True)
 class MutationApproval:
-    """The policy decision about applying ONE exact batch. ``required`` False: policy asked nobody (``outcome`` None). ``mutation`` is the
-    batch's cross-shape identity, kept so the enforce terminal can tell whether this decision covers its cumulative batch exactly."""
+    """The policy decision about applying ONE exact batch. ``required`` False: policy asked nobody (``outcome`` None). The subject digest is
+    canonical (one semantic operation per path, whichever commit path built the batch), so a decision covers another batch iff the digests are equal."""
 
     subject_digest: Optional[str]
     root: str
@@ -848,7 +844,6 @@ class MutationApproval:
     outcome: Optional[ApprovalOutcome] = None
     scope: str = SCOPE_APPLY
     approval_id: Optional[str] = None
-    mutation: MutationIdentity = ()
 
     @property
     def granted(self) -> bool:
@@ -895,13 +890,13 @@ class MutationApprovalLedger:
         self._granted: List[MutationApproval] = []
 
     def record(self, approval: MutationApproval) -> None:
-        if approval.required and approval.granted and approval.mutation:
+        if approval.required and approval.granted and approval.subject_digest:
             self._granted.append(approval)
 
-    def covering(self, mutation: MutationIdentity, *, root: str) -> Optional[MutationApproval]:
-        """The latest granted approval, rooted at ``root``, whose mutation is EXACTLY ``mutation`` and whose scope includes applying it."""
+    def covering(self, subject_digest: str, *, root: str) -> Optional[MutationApproval]:
+        """The latest granted approval, rooted at ``root``, whose subject is EXACTLY ``subject_digest`` and whose scope includes applying it."""
         for approval in reversed(self._granted):
-            if approval.root == root and approval.mutation == mutation and approval.scope == SCOPE_APPLY:
+            if approval.root == root and approval.subject_digest == subject_digest and approval.scope == SCOPE_APPLY:
                 return approval
         return None
 

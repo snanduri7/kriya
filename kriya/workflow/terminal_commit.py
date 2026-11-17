@@ -67,11 +67,8 @@ from kriya.workflow.verification_binding import (
     VerifiedCandidateStale,
     binding_refusal,
 )
-from kriya.workflow.verification_binding import (  # S7: the approval subject's two derivations, re-exported for the gate and the enforce terminal
+from kriya.workflow.verification_binding import (  # S7: the approval subject's derivation, re-exported for the gate and the enforce terminal
     bind_candidate as bind_candidate,
-)
-from kriya.workflow.verification_binding import (
-    mutation_identity as mutation_identity,
 )
 
 VERIFIED_COMMIT_DIGEST_MISMATCH = "VERIFIED_COMMIT_DIGEST_MISMATCH"

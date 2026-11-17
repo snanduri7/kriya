@@ -1002,7 +1002,7 @@ compared no approval identity; `stage_apply.approval_gate` re-read the sandbox f
 | Application gate | `terminal_commit.commit_terminal_candidate(..., approval=, run_id=)`: after every other refusal and immediately before the durable intent the subject is recomputed from the batch about to be written. Refusals, nothing written: `APPROVAL_SUBJECT_MISSING`, `APPROVAL_WRONG_RUN_OR_ROOT`, `APPROVAL_SUBJECT_STALE`, `APPROVAL_REQUIRED_NOT_GRANTED`, `APPROVAL_NOT_APPLY_CAPABLE`. "Not required" is also a decision about one batch and is checked the same way |
 | Direct / milestone / enforce unit | `stage_apply.approval_gate` materializes the terminal batch once, renders the diff from those bytes, and binds its decision to that digest on `state.mutation_approval` (reset per attempt beside `verified_candidate_binding`); `apply_terminal_candidate` hands it to the seam. An enforce unit's commit into the plan sandbox keeps exactly its unit approval |
 | Enforce terminal | `commit_service.approve_terminal_mutation`: the triggers (human-in-the-loop, sensitive path, size, process profile) are evaluated on the cumulative batch, so a plan cut into small units cannot lower the size measure (`GAP-A3-05`). A granted apply-capable approval of this run whose mutation is exactly the cumulative one is reused (a one-unit run asks once); any other final subject (several units, a later repair, any changed byte, another base) is put to the person once as the complete change |
-| Reuse identity | A unit batch binds `write` where the terminal binds `add`/`modify` for the same bytes on the same base, so the two digests are never equal. `verification_binding.mutation_identity` (path, bytes digest or deletion, base revision) decides only whether one approval covers another batch exactly; the commit is always checked against the full digest |
+| Reuse identity | Exact `subject_digest` equality, nothing else (corrected, see 19.1). The binding hashes one semantic operation per path (`create`, `modify`, `delete`) derived from base facts, so the same logical mutation has the same digest at the unit and at the terminal |
 | Decline / no decision | Terminal decline: `failed`, `failure_category: human_rejected`, nothing applied. Required and no decision obtainable (no callback, unavailable, unrecognized answer): `approval_required`, nothing applied |
 | Durable record | The RunRecord commit cycle carries `approval` (id, subject digest, required, decision, scope, triggers) beside the candidate hash. The `approval.decision` event is unchanged (its content is hashed by the gate goldens) |
 | Resume / replay | A granted approval lives in process memory only; a resumed run has none and asks again. Another run, another root, another candidate or a pre-repair candidate cannot authorize the current application (seam refusals, ledger filters) |
@@ -1020,3 +1020,26 @@ object evaluates no terminal policy; no path-class trigger; approvals are not pe
 **Proof.** `tests/test_s7_approval_subject.py` (the reproducer through the real enforce controller, ten seam refusals, the terminal ask and reuse
 rules with five non-covering controls, the split-plan size case, the one-unit single prompt, the verifier-execution pin). Mutants and gates:
 `~/kriya-evidence/s7-7370d76/`.
+
+### 19.1 Correction after `db7bb38`: one canonical subject, reuse by exact digest equality (owner ruling 2026-11-17)
+
+**OLD ASSUMPTION (`db7bb38`).** A unit batch and the terminal batch of the same change cannot share a digest, so reuse of a unit approval was
+decided by a second comparison (`mutation_identity`: path, bytes, base revision) beside the subject digest.
+
+**NEW EVIDENCE.** The two digests differed only because each commit path spelled the operation with its own lifecycle label: the direct path
+bound `write` with an undeclared base existence, the terminal bound `add` / `modify` with a declared one. Identical mutations hashed
+differently, and the comparison that bridged them was a second approval-equivalence authority beside the subject.
+
+**CORRECTION.** `verification_binding.bind_candidate` hashes ONE semantic operation per write: `delete`; else `modify` when the base exists and
+`create` when it does not. Base existence is a fact, never a label: the declared `expected_base_exists` where a path declares it (the terminal,
+from the plan's final action), otherwise the base file mode `materialize_candidate` read from the root (`expected_base_mode`). `BINDING_VERSION`
+is 2. `mutation_identity` and `MutationApproval.mutation` are deleted; `MutationApprovalLedger.covering` matches the exact subject digest. Path,
+bytes, mode and base revision stay in the digest; a workspace file whose mode differs from the sandbox checkout's therefore makes the unit and
+terminal subjects differ and the person is asked again (accepted limit: the safe direction). The commit seam's recheck and the run, root, grant
+and scope checks are unchanged.
+
+**Goldens.** The 18 kernel goldens that carry an approval object changed in `subject_digest` and derived `approval_id` values only (35 value
+lines; no other line; the guard refuses any other delta). **Proof.** `tests/test_s7_approval_subject.py`: one digest for the same mutation at
+unit and terminal (modify and create), every material difference is another subject (byte, path, mode, base revision, create vs modify of an
+existing empty file, delete), a declared base existence is authoritative, the ledger matches the whole digest, and the one-unit run through the
+real controller still asks once. Ten targeted mutants: `~/kriya-evidence/s7-7370d76/mutants_s7_correction_run2.txt`.

@@ -24,14 +24,14 @@ import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional, Tuple
 
-BINDING_VERSION = 1
+BINDING_VERSION = 2   # 2: one semantic operation and one base-existence fact per entry, whichever commit path built the batch
 
 VERIFIED_CANDIDATE_EVIDENCE_STALE = "VERIFIED_CANDIDATE_EVIDENCE_STALE"
 VERIFIED_CANDIDATE_EVIDENCE_MISSING = "VERIFIED_CANDIDATE_EVIDENCE_MISSING"
 
-# (relpath, operation, sha256 of the bytes or None for a deletion, mode,
-# expected base revision, expected base existence)
-BindingEntry = Tuple[str, str, Optional[str], Optional[int], str, Optional[bool]]
+# (relpath, semantic operation, sha256 of the bytes or None for a deletion, mode,
+# expected base revision, base existence)
+BindingEntry = Tuple[str, str, Optional[str], Optional[int], str, bool]
 
 
 class VerifiedCandidateStale(RuntimeError):
@@ -44,15 +44,24 @@ class CandidateVerificationBinding:
     entries: Tuple[BindingEntry, ...]
 
 
+def _base_exists(write: Any) -> bool:
+    """Whether the batch replaces an existing file - a fact about the base, never a label. The enforce terminal declares it
+    (``expected_base_exists``, from the plan's final action); the direct path does not, and there the fact is the base file's mode, which
+    ``materialize_candidate`` read from the root (``expected_base_mode``: None when no regular file exists there). A deletion has a base."""
+    if write.delete:
+        return True
+    if write.expected_base_exists is not None:
+        return bool(write.expected_base_exists)
+    return getattr(write, "expected_base_mode", None) is not None
+
+
 def _operation(write: Any) -> str:
+    """The ONE semantic operation of a write (S7 correction): ``delete``, ``modify`` (the base exists) or ``create`` (it does not). Before
+    this the direct path bound ``write`` where the terminal bound ``add``/``modify``, so the same mutation had two digests depending on the
+    lifecycle stage that observed it."""
     if write.delete:
         return "delete"
-    if write.expected_base_exists is None:
-        # The batch declares only the base revision (the direct path cannot
-        # tell an empty existing file from a missing one); that revision is
-        # bound either way.
-        return "write"
-    return "modify" if write.expected_base_exists else "add"
+    return "modify" if _base_exists(write) else "create"
 
 
 def _relpath(target_path: str, workspace_root: str) -> str:
@@ -72,22 +81,13 @@ def bind_candidate(writes: Iterable[Any], workspace_path: str) -> CandidateVerif
         entries.append((
             _relpath(write.target_path, workspace_path), _operation(write),
             None if write.delete else hashlib.sha256(data).hexdigest(), write.mode,
-            write.expected_base_revision, write.expected_base_exists,
+            write.expected_base_revision, _base_exists(write),
         ))
     ordered = tuple(sorted(entries, key=lambda entry: (entry[0], entry[1])))
     blob = json.dumps({"version": BINDING_VERSION, "entries": ordered}, sort_keys=True, separators=(",", ":"))
     return CandidateVerificationBinding(
         digest=hashlib.sha256(blob.encode("utf-8")).hexdigest(), entries=ordered,
     )
-
-
-def mutation_identity(binding: CandidateVerificationBinding) -> Tuple[Tuple[str, Optional[str], str], ...]:
-    """What the bound batch does to its root, without how its commit path spells it (S7): (path, bytes digest or None for a deletion, base
-    revision) per entry. The direct path binds ``write`` where the enforce terminal binds ``add``/``modify`` for the same bytes on the same base,
-    and an existing file's mode is its root's base mode, so the operation label and the mode are not part of what a person approved; the bytes,
-    the deletion and the base they replace are. Used only to decide whether an approval made for one batch covers another batch EXACTLY; the
-    commit itself is always checked against the full digest."""
-    return tuple((path, content, base_revision) for path, _operation, content, _mode, base_revision, _base_exists in binding.entries)
 
 
 def binding_refusal(

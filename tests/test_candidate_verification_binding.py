@@ -83,7 +83,7 @@ def test_the_binding_is_canonical_and_independent_of_batch_order_and_workspace_s
     assert bind_candidate(batch, workspace) == bind_candidate(list(reversed(batch)), workspace)
     assert bind_candidate(batch, workspace).digest == bind_candidate(batch, str(link)).digest
     assert [entry[:2] for entry in bind_candidate(batch, workspace).entries] == [
-        ("A.java", "modify"), ("gone.py", "delete"), ("pkg/new.py", "add")]
+        ("A.java", "modify"), ("gone.py", "delete"), ("pkg/new.py", "create")]
 
 
 @pytest.mark.parametrize("field,change", [

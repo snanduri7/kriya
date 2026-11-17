@@ -2370,11 +2370,11 @@
    "commits": [
     {
      "approval": {
-      "approval_id": "7bed80727ef4970ea5843f2efb79f618687ac91fac75ca6795b8035dc8cd23aa",
+      "approval_id": "c3049bb0723c51107d507e48dc4aa7a2c4d3054661a817bb58e42ae04159f0b5",
       "decision": "approved",
       "required": true,
       "scope": "apply",
-      "subject_digest": "d657a9ecf99f94ad1dcf89bd959290a497436a9c61c7e5c4369e345d8d78ae19",
+      "subject_digest": "6d5ee338752144149a2322a7e79c51e5c5378a498ccc52c380c65de98cf5620a",
       "triggers": [
        "human_in_the_loop"
       ]

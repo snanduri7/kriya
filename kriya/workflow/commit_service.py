@@ -49,7 +49,6 @@ from kriya.workflow.terminal_commit import (
     bind_candidate,
     commit_terminal_candidate,
     materialize_candidate,
-    mutation_identity,
 )
 from kriya.workflow.terminal_gate_service import TerminalGateReport
 
@@ -114,10 +113,10 @@ async def approve_terminal_mutation(
             process_profile_requires_review=process_profile_requires_review)
     if not triggers:
         return MutationApproval(subject_digest=binding.digest, root=root, run_id=run_id, required=False), None
-    covering = ledger.covering(mutation_identity(binding), root=os.path.realpath(candidate_root)) if ledger is not None else None
+    covering = ledger.covering(binding.digest, root=os.path.realpath(candidate_root)) if ledger is not None else None
     if covering is not None:
         # The same decision (its id, outcome and scope), now bound to the terminal batch it covers exactly.
-        return dataclasses.replace(covering, subject_digest=binding.digest, root=root, run_id=run_id, triggers=tuple(triggers)), None
+        return dataclasses.replace(covering, root=root, run_id=run_id, triggers=tuple(triggers)), None
     reason = sensitive_reason or (
         "Human-in-the-loop review policy" if TRIGGER_HUMAN_IN_THE_LOOP in triggers
         else "Risk threshold exceeded for the complete change" if TRIGGER_DIFF_SIZE in triggers
@@ -136,7 +135,7 @@ async def approve_terminal_mutation(
                       "reason": f"Not applied: human approval of the complete change was required ({reason.splitlines()[0]}) but no approval decision "
                                 f"could be obtained ({outcome.reason_code}); nothing was approved and nobody declined."}
     return MutationApproval(subject_digest=binding.digest, root=root, run_id=run_id, required=True, triggers=tuple(triggers), outcome=outcome,
-                            approval_id=mutation_approval_id(binding.digest), mutation=mutation_identity(binding)), None
+                            approval_id=mutation_approval_id(binding.digest)), None
 
 
 @dataclass(frozen=True)

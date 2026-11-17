@@ -52,7 +52,7 @@ from kriya.workflow.commit_service import approve_terminal_mutation
 from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.plan_schema import EngineeringPlan
 from kriya.workflow.terminal_commit import CandidateFile, commit_terminal_candidate, materialize_candidate
-from kriya.workflow.verification_binding import bind_candidate, mutation_identity
+from kriya.workflow.verification_binding import bind_candidate
 
 SERVICE, OTHER = "shop/service.py", "shop/other.py"
 BASE = "def page_size():\n    return 5\n"
@@ -75,8 +75,7 @@ def _batch(tmp_path, content="v1\n"):
 def _granted(writes, workspace, **changes):
     binding = bind_candidate(writes, workspace)
     approval = MutationApproval(subject_digest=binding.digest, root=os.path.realpath(workspace), run_id="run-1", required=True,
-                                triggers=("human_in_the_loop",), outcome=ApprovalOutcome.approve(), approval_id="a1",
-                                mutation=mutation_identity(binding))
+                                triggers=("human_in_the_loop",), outcome=ApprovalOutcome.approve(), approval_id="a1")
     return dataclasses.replace(approval, **changes)
 
 
@@ -145,6 +144,76 @@ def test_every_production_commit_hands_the_seam_its_approval_decision_and_run():
         source = inspect.getsource(owner or module.apply_terminal_candidate)
         call = source[source.index("commit_terminal_candidate("):]
         assert "approval=" in call and "run_id=" in call, module.__name__
+
+
+# ------------------------------------------------------------------------------------------------ the canonical subject (one digest per mutation)
+
+def _shape(tmp_path, name, *, base, content="new\n", declared, mode=0o644, relpath="app.py", delete=False):
+    """One write as the UNIT path builds it (base existence not declared: ``declared=None``) or as the TERMINAL builds it (declared)."""
+    workspace, candidate = tmp_path / name / "ws", tmp_path / name / "candidate"
+    for folder in (workspace, candidate):
+        (folder / relpath).parent.mkdir(parents=True, exist_ok=True)
+    if base is not None:
+        (workspace / relpath).write_text(base)
+        os.chmod(workspace / relpath, mode)
+    if not delete:
+        (candidate / relpath).write_text(content)
+        os.chmod(candidate / relpath, mode)
+    writes = materialize_candidate(str(candidate), str(workspace), [
+        CandidateFile(relpath, read_file_revision(str(workspace / relpath)), expected_base_exists=declared, delete=delete)])
+    return bind_candidate(writes, str(workspace))
+
+
+@pytest.mark.parametrize("base,operation", [("old\n", "modify"), (None, "create")])
+def test_the_same_logical_mutation_has_one_digest_at_the_unit_and_at_the_terminal(tmp_path, base, operation):
+    unit = _shape(tmp_path, "unit", base=base, declared=None)
+    terminal = _shape(tmp_path, "terminal", base=base, declared=base is not None)
+    assert unit.digest == terminal.digest and [entry[1] for entry in unit.entries] == [operation] == [entry[1] for entry in terminal.entries]
+
+
+def test_every_material_difference_is_another_subject(tmp_path):
+    subject = _shape(tmp_path, "subject", base="old\n", declared=None).digest
+    others = {
+        "a byte": _shape(tmp_path, "byte", base="old\n", declared=None, content="new!\n"),
+        "the path": _shape(tmp_path, "path", base="old\n", declared=None, relpath="pkg/app.py"),
+        "the mode": _shape(tmp_path, "mode", base="old\n", declared=None, mode=0o755),
+        "the base revision": _shape(tmp_path, "base", base="older\n", declared=None),
+        "create instead of modify (no base)": _shape(tmp_path, "create", base=None, declared=None),
+        "create instead of modify (an existing EMPTY base has the missing file's revision)": _shape(tmp_path, "empty", base="", declared=None),
+        "delete": _shape(tmp_path, "delete", base="old\n", declared=True, delete=True),
+    }
+    digests = {name: binding.digest for name, binding in others.items()}
+    assert subject not in digests.values() and len(set(digests.values())) == len(digests), digests
+    # the last two differ ONLY by the semantic operation: same bytes, same base revision (empty == missing), same mode
+    create, empty = others["create instead of modify (no base)"].entries[0], others["create instead of modify (an existing EMPTY base has the missing file's revision)"].entries[0]
+    assert (create[1], empty[1]) == ("create", "modify") and create[2:5] == empty[2:5]
+
+
+def test_a_declared_base_existence_is_the_authoritative_fact_the_root_is_only_read_when_nothing_declares_it(tmp_path):
+    """The terminal declares base existence from the plan's final action. A plan that CREATES a path which exists in the root is a create
+    subject (the commit then refuses the existence conflict); it is never silently rebound as the modify the root would suggest."""
+    declared_create = _shape(tmp_path, "declared_create", base="old\n", declared=False)
+    declared_modify = _shape(tmp_path, "declared_modify", base="old\n", declared=True)
+    assert [entry[1] for entry in declared_create.entries] == ["create"] and [entry[1] for entry in declared_modify.entries] == ["modify"]
+    assert declared_create.digest != declared_modify.digest
+    # and the other direction: a plan that MODIFIES a path the root does not hold is a modify subject (the commit refuses the missing base),
+    # never the create the root alone would suggest
+    declared_modify_of_missing = _shape(tmp_path, "declared_modify_of_missing", base=None, declared=True)
+    undeclared_on_missing = _shape(tmp_path, "undeclared_on_missing", base=None, declared=None)
+    assert [entry[1] for entry in declared_modify_of_missing.entries] == ["modify"] and [entry[1] for entry in undeclared_on_missing.entries] == ["create"]
+    assert declared_modify_of_missing.digest != undeclared_on_missing.digest
+
+
+def test_the_ledger_matches_the_whole_subject_digest_and_nothing_less(tmp_path):
+    workspace, writes = _batch(tmp_path)
+    approval = _granted(writes, workspace)
+    ledger = MutationApprovalLedger()
+    ledger.record(approval)
+    digest = approval.subject_digest
+    assert ledger.covering(digest, root=approval.root) is approval
+    for near in (digest[:-1] + ("0" if digest[-1] != "0" else "1"), digest[:32] + "0" * 32, digest[0] + "0" * 63, digest[:-1], ""):
+        assert near != digest and ledger.covering(near, root=approval.root) is None, near
+    assert ledger.covering(digest, root=approval.root + "-elsewhere") is None
 
 
 # ------------------------------------------------------------------------------------------------ the enforce terminal decision (cumulative batch)
@@ -220,9 +289,8 @@ def test_a_decline_and_an_unobtainable_decision_stop_with_the_existing_categorie
 
 def _unit_approval(tmp_path, base=BASE, **changes):
     """What a unit's gate records: a granted approval of the unit's batch, rooted at the plan candidate it was committed into."""
-    approval, _stop, _calls, writes, workspace, root = _terminal(tmp_path / "unit", base=base)
-    cumulative = mutation_identity(bind_candidate(writes, workspace))
-    return dataclasses.replace(approval, root=os.path.realpath(root), mutation=cumulative, approval_id="unit-approval", **changes), root
+    approval, _stop, _calls, _writes, _workspace, root = _terminal(tmp_path / "unit", base=base)
+    return dataclasses.replace(approval, root=os.path.realpath(root), approval_id="unit-approval", **changes), root
 
 
 def test_an_exactly_covering_apply_capable_approval_is_reused_and_nobody_is_asked_twice(tmp_path):
@@ -246,8 +314,8 @@ def test_an_approval_that_does_not_cover_the_final_subject_exactly_is_not_reused
         recorded = dataclasses.replace(recorded, scope=SCOPE_REVIEW_ONLY)
     elif case == "rooted_in_another_candidate":
         recorded = dataclasses.replace(recorded, root=os.path.realpath(str(tmp_path / "another-run" / "candidate")))
-    elif case == "another_base":      # the same final bytes, approved as a change to OTHER base bytes: not this mutation
-        assert [(path, content) for path, content, _base in recorded.mutation] == [(path, content) for path, content, _base in unit.mutation]
+    elif case == "another_base":      # the same final bytes, approved as a change to OTHER base bytes: another subject digest
+        pass
     elif case == "declined":
         recorded = dataclasses.replace(recorded, outcome=ApprovalOutcome.decline())
     ledger = MutationApprovalLedger()

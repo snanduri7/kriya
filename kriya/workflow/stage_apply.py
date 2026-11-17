@@ -51,7 +51,7 @@ from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_lifecycle import TerminalTrace, TraceDetail, persist_run_trace
 from kriya.workflow.stage_context import StageContext, StageDeps
 from kriya.workflow.stage_review import pre_approval_review
-from kriya.workflow.terminal_commit import bind_candidate, mutation_identity
+from kriya.workflow.terminal_commit import bind_candidate
 from kriya.workflow.worktree import remove_git_worktree
 
 RunState = Any   # kriya.workflow.state.GenerationState (kriya/workflow/stage_context.py says why it is not imported)
@@ -286,7 +286,7 @@ async def approval_gate(
         state.mutation_approval = MutationApproval(
             subject_digest=subject_binding.digest, root=os.path.realpath(workspace_path), run_id=run_id, required=need_human_approval,
             triggers=tuple(approval_triggers) if need_human_approval else (), outcome=outcome,
-            approval_id=mutation_approval_id(subject_binding.digest) if outcome is not None else None, mutation=mutation_identity(subject_binding))
+            approval_id=mutation_approval_id(subject_binding.digest) if outcome is not None else None)
         if ctx.mutation_approvals is not None:
             ctx.mutation_approvals.record(state.mutation_approval)
 
