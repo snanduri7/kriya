@@ -1,0 +1,319 @@
+{
+  "global_invariants": [
+    {
+      "id": "gi1",
+      "statement": "All Java code must use Java 17 language and runtime features, with explicit --add-opens JVM flags for Ignite compatibility."
+    },
+    {
+      "id": "gi2",
+      "statement": "The application must start an embedded Apache Ignite 2.18.0 node using Spring XML configuration."
+    },
+    {
+      "id": "gi3",
+      "statement": "Protocol class must contain protocolVersion, softwareVersion, dataLength, time, and body fields with specific wire format encoding."
+    },
+    {
+      "id": "gi4",
+      "statement": "All resources including Spring context and Ignite node must be properly closed to ensure normal application exit."
+    }
+  ],
+  "subtasks": [
+    {
+      "id": "s1",
+      "description": "Create Maven project structure with Java 17 compatibility and required Ignite dependencies",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": [],
+      "planned_files": [
+        {
+          "path": "pom.xml",
+          "action": "create",
+          "environment_requirements": [
+            "java",
+            "maven"
+          ],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": [
+        "maven_project_structure"
+      ],
+      "requires": [],
+      "relevant_global_invariant_ids": [
+        "gi1",
+        "gi2"
+      ],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify Maven project compiles successfully with Ignite dependencies",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": [
+        "ac1"
+      ]
+    },
+    {
+      "id": "s2",
+      "description": "Implement Protocol class with specified fields and wire format encoding",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": [],
+      "planned_files": [
+        {
+          "path": "src/main/java/com/example/Protocol.java",
+          "action": "create",
+          "environment_requirements": [
+            "java"
+          ],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": [
+        "protocol_class"
+      ],
+      "requires": [],
+      "relevant_global_invariant_ids": [
+        "gi3"
+      ],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify Protocol class compiles without errors",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": [
+        "ac2"
+      ]
+    },
+    {
+      "id": "s3",
+      "description": "Implement ProtocolParser with encode and decode methods using specified wire format",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": [],
+      "planned_files": [
+        {
+          "path": "src/main/java/com/example/ProtocolParser.java",
+          "action": "create",
+          "environment_requirements": [
+            "java"
+          ],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": [
+        "protocol_parser"
+      ],
+      "requires": [],
+      "relevant_global_invariant_ids": [
+        "gi3"
+      ],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify ProtocolParser compiles without errors",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": [
+        "ac2"
+      ]
+    },
+    {
+      "id": "s4",
+      "description": "Create Spring XML configuration file for Ignite node startup",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": [],
+      "planned_files": [
+        {
+          "path": "src/main/resources/ignite-config.xml",
+          "action": "create",
+          "environment_requirements": [
+            "java"
+          ],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": [
+        "ignite_configuration"
+      ],
+      "requires": [],
+      "relevant_global_invariant_ids": [
+        "gi2"
+      ],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify Spring XML configuration file compiles without errors",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": [
+        "ac1"
+      ]
+    },
+    {
+      "id": "s5",
+      "description": "Implement main application class that creates sample Protocol, encodes/decodes it, stores in cache, reads back and verifies equality",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4"
+      ],
+      "planned_files": [
+        {
+          "path": "src/main/java/com/example/App.java",
+          "action": "create",
+          "environment_requirements": [
+            "java"
+          ],
+          "requires_capabilities": [
+            "protocol_class",
+            "protocol_parser",
+            "ignite_configuration"
+          ],
+          "preserved_references": []
+        }
+      ],
+      "provides": [
+        "main_application"
+      ],
+      "requires": [
+        "maven_project_structure",
+        "protocol_class",
+        "protocol_parser",
+        "ignite_configuration"
+      ],
+      "relevant_global_invariant_ids": [
+        "gi1",
+        "gi2",
+        "gi3",
+        "gi4"
+      ],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify main application compiles without errors",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": [
+        "ac1"
+      ]
+    },
+    {
+      "id": "s6",
+      "description": "Create JUnit test class to verify ProtocolParser round-trip functionality",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": [
+        "s2",
+        "s3"
+      ],
+      "planned_files": [
+        {
+          "path": "src/test/java/com/example/ProtocolParserTest.java",
+          "action": "create",
+          "environment_requirements": [
+            "java"
+          ],
+          "requires_capabilities": [
+            "protocol_class",
+            "protocol_parser"
+          ],
+          "preserved_references": []
+        }
+      ],
+      "provides": [
+        "protocol_parser_test"
+      ],
+      "requires": [
+        "protocol_class",
+        "protocol_parser"
+      ],
+      "relevant_global_invariant_ids": [
+        "gi3"
+      ],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify JUnit test compiles and runs successfully",
+          "tool_name": "test",
+          "verifier_kind": "test",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": [
+        "ac2"
+      ]
+    },
+    {
+      "id": "s7",
+      "description": "Run complete application and verify output matches expected format with proper resource cleanup",
+      "execution_method": "verification",
+      "execution_role": "verification",
+      "depends_on": [
+        "s1",
+        "s5"
+      ],
+      "planned_files": [],
+      "provides": [],
+      "requires": [
+        "maven_project_structure",
+        "main_application"
+      ],
+      "relevant_global_invariant_ids": [
+        "gi1",
+        "gi2",
+        "gi3",
+        "gi4"
+      ],
+      "verification": [
+        {
+          "type": "judgment",
+          "description": "Verify application runs successfully and produces expected [RESULT] output line with proper resource cleanup",
+          "verifier_kind": "application_runtime",
+          "requires_runtime_execution": true
+        }
+      ],
+      "acceptance_criteria_ids": [
+        "ac1"
+      ]
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "ac1",
+      "description": "Application must be runnable with Maven and produce expected [RESULT] output line with proper resource cleanup",
+      "method": "judgment"
+    },
+    {
+      "id": "ac2",
+      "description": "ProtocolParser round-trip functionality must be proven by JUnit test",
+      "method": "judgment"
+    }
+  ],
+  "extension_points": [],
+  "refactor_baseline": null
+}

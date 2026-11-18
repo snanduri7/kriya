@@ -565,6 +565,12 @@ class LLMClient:
         registry lookup; an unknown name is refused)."""
         return runtime_for_binding(self._binding(model))
 
+    def constrains_json_schema(self, model: Optional[str] = None) -> bool:
+        """PLANNER-SCHEMA-CONSTRAINED-OUTPUT-001: whether the runtime of ``model``'s binding (the primary's when None) declares that it constrains a response to a
+        JSON schema at decode time (``RuntimeCapabilities.json_schema_output``). A caller that holds a canonical output schema asks this per candidate model and
+        sends the schema only where it is enforced; a schema is never sent to a runtime that would merely ignore it (``complete_result`` refuses that)."""
+        return bool(self._runtime(model or self.model).capabilities.json_schema_output)
+
     async def _runtime_fingerprint(self, model: str, base_url: str, api_key: str,
                                    extra_body: Optional[Dict[str, Any]]):
         """PRD-013: the exact runtime this call goes to (cached per process),
@@ -827,6 +833,7 @@ class LLMClient:
         extra_body_override: Optional[Dict[str, Any]] = None,
         expected_output=None,
         require_complete: bool = False,
+        response_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Call the local LLM server and return the text completion (supporting streaming and JSON mode).
 
@@ -859,6 +866,8 @@ class LLMClient:
             api_key_override=api_key_override, temperature_override=temperature_override,
             max_tokens_override=max_tokens_override, reasoning_override=reasoning_override,
             extra_body_override=extra_body_override, expected_output=expected_output,
+            # PLANNER-SCHEMA-CONSTRAINED-OUTPUT-001: passed only when a caller supplies one, so every other call keeps its exact request.
+            **({"response_schema": response_schema} if response_schema is not None else {}),
         )
         if result.error is not None:
             logger.error(f"Local LLM call failed: {result.error}", exc_info=result.error)

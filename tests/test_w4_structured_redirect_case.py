@@ -122,7 +122,7 @@ def test_the_case_shares_the_anchored_edit_budget_and_says_so_in_its_evidence():
 
 
 def test_the_policy_version_was_bumped_for_the_new_case():
-    assert mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/9"
+    assert mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/10"   # /10: schema_constrained_json (tests/test_planner_schema_constrained_output_001.py)
     stale = _record()
     stale["policy_version"] = "kriya-qualification/8"
     assert mq.assess(_fp(), ("plain_completion",), settings=_settings(), record=stale).status == mq.STALE

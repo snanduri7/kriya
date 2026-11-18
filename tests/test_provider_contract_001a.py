@@ -646,7 +646,7 @@ def test_every_role_requires_the_over_context_refusal():
     config = AppConfig()
     for role in mq.ROLES:
         assert "over_context_refusal" in mq.required_capabilities(config, role, config.llm.model)
-    assert mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/9"
+    assert mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/10"
 
 
 # === A: an unproven setting is never labelled effective ==================================================

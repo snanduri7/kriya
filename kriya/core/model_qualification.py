@@ -144,7 +144,15 @@ from kriya.platform.filesystem_semantics import PathRelation, path_relation
 # deterministic locator, INVALID_EDIT_PROTOCOL for a malformed explicit line) is
 # unchanged; the record states whether the capability was DEMONSTRATED. Every
 # /8 record is STALE; /8 records stay as historical evidence.
-QUALIFICATION_POLICY_VERSION = "kriya-qualification/9"
+# /10 (PLANNER-SCHEMA-CONSTRAINED-OUTPUT-001, owner ruling 2026-11-18): the enforce Planner now sends its canonical
+# output schema as the response schema to a runtime that constrains output at decode time (MEASURED, Stage B run
+# 20261118T085918-19ebb3f8: under plain JSON mode the qualified primary answered ``execution_method: "verification"``
+# three times, twice after the exact validation error). No case measured whether an exact runtime really ENFORCES a
+# schema. ``schema_constrained_json`` does: it asks for a value outside a closed set and passes only when the answer
+# stays inside it. Required for the planner role on a runtime that declares ``json_schema_output`` (the only place
+# the Planner sends a schema), UNAVAILABLE elsewhere. Every /9 record is STALE; /9 records stay as historical
+# evidence.
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/10"
 QUALIFICATION_SCHEMA_VERSION = 2
 QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
 
@@ -212,6 +220,7 @@ CAPABILITIES: Tuple[str, ...] = (
     "plain_completion",
     "finish_reason_stop",
     "structured_json",
+    "schema_constrained_json",
     "multiline_json",
     "native_tool_calls",
     "multiple_tool_calls",
@@ -287,6 +296,16 @@ class CaseResult:
     elapsed_seconds: float = 0.0
 
 
+def runtime_constrains_json_schema(config: Any, model: str) -> bool:
+    """Whether the inference runtime ``model``'s binding selects under ``config`` declares decode-time JSON-schema
+    enforcement (``RuntimeCapabilities.json_schema_output``) - the same fact ``LLMClient.constrains_json_schema``
+    answers at dispatch, read from configuration alone. A model with no binding resolves to the default runtime."""
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.model_runtime import binding_object
+
+    return bool(runtime_for_binding(binding_object(config, model)).capabilities.json_schema_output)
+
+
 def required_capabilities(config: Any, role: str, model: str) -> Tuple[str, ...]:
     """What Kriya will use with ``model`` in ``role``: the base protocol
     cases, the role's own, and every protocol the resolved capability
@@ -299,6 +318,8 @@ def required_capabilities(config: Any, role: str, model: str) -> Tuple[str, ...]
         required += ["native_tool_calls", "multiple_tool_calls", "tool_argument_integrity"]
     if caps.json_mode:
         required.append("structured_json")
+    if role == "planner" and runtime_constrains_json_schema(config, model):
+        required.append("schema_constrained_json")   # /10: the Planner sends its canonical schema exactly where this is true
     if caps.reliable_multiline_json:
         required.append("multiline_json")
     if caps.streaming:
@@ -1007,6 +1028,40 @@ async def case_structured_json(llm, model, ctx):
     return CaseResult("", PASS if ok else FAIL, {"parsed": parsed, **_completion_evidence(r)})
 
 
+# The closed set the measured Planner failure violated, as the smallest schema that states it.
+SCHEMA_CASE_ALLOWED = ("model", "tool")
+SCHEMA_CASE_FORBIDDEN = "verification"
+SCHEMA_CASE_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {"execution_method": {"type": "string", "enum": list(SCHEMA_CASE_ALLOWED)}},
+    "required": ["execution_method"],
+    "additionalProperties": False,
+}
+
+
+@_case("schema_constrained_json")
+async def case_schema_constrained_json(llm, model, ctx):
+    """/10: does the exact runtime ENFORCE a response schema at decode time? The prompt asks for a value outside the
+    schema's closed set; PASS only when the complete answer is a JSON object holding exactly the one key with a value
+    inside the set. A runtime that does not declare schema enforcement is UNAVAILABLE (never sent a schema, never PASS)."""
+    if not llm.constrains_json_schema(model):
+        return CaseResult("", UNAVAILABLE, {"reason": "the runtime of this binding does not declare decode-time JSON-schema enforcement; not measured"})
+    r = await llm.complete_result(
+        "You output JSON only.",
+        f'Return a JSON object with the key "execution_method" set to "{SCHEMA_CASE_FORBIDDEN}".',
+        json_mode=True, model_override=model, response_schema=SCHEMA_CASE_SCHEMA,
+        max_tokens_override=_case_budget(ctx, "schema_constrained_json", budget_of="structured_json"),   # same family: one tiny JSON object
+    )
+    try:
+        parsed = json.loads(r.content)
+    except (ValueError, TypeError):
+        parsed = None
+    ok = (r.status.value == "OK" and isinstance(parsed, dict) and set(parsed) == {"execution_method"}
+          and parsed["execution_method"] in SCHEMA_CASE_ALLOWED)
+    return CaseResult("", PASS if ok else FAIL, {"parsed": parsed, "asked_for": SCHEMA_CASE_FORBIDDEN, "allowed": list(SCHEMA_CASE_ALLOWED),
+                                                 **_completion_evidence(r)})
+
+
 _MULTILINE_EXPECTED = 'def greet(name):\n    message = f"Hello, {name}!"\n    return message\n'
 
 
@@ -1667,7 +1722,7 @@ async def _over_context_refusal(llm, model, ctx, opened: List[Any]):
 
 
 ALL_CASES: Tuple[CaseFn, ...] = (
-    case_plain_completion, case_finish_reason_stop, case_structured_json, case_multiline_json,
+    case_plain_completion, case_finish_reason_stop, case_structured_json, case_schema_constrained_json, case_multiline_json,
     case_native_tool_calls, case_multiple_tool_calls, case_tool_argument_integrity, case_streaming_assembly,
     case_output_truncation, case_reasoning_behavior, case_full_file_raw_content, case_anchored_edit_protocol,
     case_structured_redirect, case_malformed_output_recovery, case_timeout_semantics, case_cancellation_semantics,

@@ -57,7 +57,7 @@ from kriya.tools.tool import ToolEffectBoundary
 from kriya.workflow.accepted_candidate import capture_unit, replayable_units, snapshot_document
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.outcome import workspace_commit_failure_fields
-from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
+from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType, planner_output_json_schema
 from kriya.workflow.recovery_plan import (
     RECOVERY_MAY_CHANGE_ALL_UNCHANGED,
     RELATIONSHIP_ARTIFACT_OWNER_NOT_COMPLETED,
@@ -891,6 +891,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             system_prompt_override=deps.AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
             json_mode=True,
             candidate_prompt=authoritative_planner_prompts,
+            response_schema=planner_output_json_schema(),   # PLANNER-SCHEMA-CONSTRAINED-OUTPUT-001: enforced at decode time where the candidate's runtime can
         )
         # MODEL-EVIDENCE-HARDENING-001: the model that answered (escalation
         # may have used a chain model); each response's typed outcome is
@@ -1415,6 +1416,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 system_prompt_override=deps.AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
                 json_mode=True,
                 candidate_prompt=repair_prompts,
+                response_schema=planner_output_json_schema(),   # the repair answers under the same canonical schema
             )
             plan_response_model = deps.planner_response_model(deps.workflow_engine.planner)
 

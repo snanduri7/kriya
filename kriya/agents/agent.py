@@ -191,6 +191,7 @@ async def call_with_escalation(
     max_tokens_override: Optional[int] = None,
     role: Optional[str] = None,
     require_complete: bool = False,
+    response_schema: Optional[Dict[str, Any]] = None,
 ) -> str:
     """See _call_with_escalation; ``role`` attributes every call it makes to
     that agent role (PRD-018 per-role metrics)."""
@@ -199,7 +200,18 @@ async def call_with_escalation(
             llm, system_prompt, prompt, candidates, json_mode=json_mode, stream_callback=stream_callback,
             is_failure=is_failure, temperature_override=temperature_override,
             max_tokens_override=max_tokens_override, require_complete=require_complete,
+            response_schema=response_schema,
         )
+
+
+def _schema_request(llm: LLMClient, model: Optional[str], response_schema: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """PLANNER-SCHEMA-CONSTRAINED-OUTPUT-001: the ``response_schema`` keyword of ONE candidate's call. The caller's canonical schema travels only to a candidate whose
+    runtime constrains output to it at decode time (``LLMClient.constrains_json_schema``, asked for that exact model: the primary and each chain entry may sit on
+    different runtimes); every other candidate, and every call made without a schema, keeps its exact request (JSON mode only)."""
+    if response_schema is None:
+        return {}
+    constrains = getattr(llm, "constrains_json_schema", None)
+    return {"response_schema": response_schema} if callable(constrains) and constrains(model) is True else {}
 
 
 async def _call_with_escalation(
@@ -213,6 +225,7 @@ async def _call_with_escalation(
     temperature_override: Optional[float] = None,
     max_tokens_override: Optional[int] = None,
     require_complete: bool = False,
+    response_schema: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Tries each candidate in order - a role's own configured model, then its own
     escalation chain (kriya/config/config.py::AgentModelConfig) - via llm.complete(),
@@ -250,6 +263,7 @@ async def _call_with_escalation(
                     temperature_override=temperature_override,
                     **({"max_tokens_override": max_tokens_override} if max_tokens_override is not None else {}),
                     **complete_kwargs,
+                    **_schema_request(llm, None, response_schema),
                 )
             else:
                 candidate_max_tokens = candidate_output_tokens(llm.config, cand, max_tokens_override)
@@ -263,6 +277,7 @@ async def _call_with_escalation(
                     reasoning_override=cand.reasoning,
                     extra_body_override=cand.extra_body,
                     **complete_kwargs,
+                    **_schema_request(llm, cand.model, response_schema),
                 )
         except InferenceDeadlineError:
             raise  # the run's deadline binds every candidate alike
@@ -416,6 +431,7 @@ class BaseAgent(ABC):
         json_mode: bool = False,
         metrics_role: Optional[str] = None,
         candidate_prompt: Optional[Callable[[Optional[Any]], str]] = None,
+        response_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Execute a text completion request, escalating through this role's chain
         only on a hard call failure (connection/timeout/HTTP/egress error) - a
@@ -433,6 +449,8 @@ class BaseAgent(ABC):
             temperature_override=temperature_override,
             max_tokens_override=role_output_override(self, max_tokens_override),
             require_complete=self.REQUIRE_COMPLETE_OUTPUT,
+            # PLANNER-SCHEMA-CONSTRAINED-OUTPUT-001: a role's canonical output schema, sent per candidate only where its runtime enforces it.
+            **({"response_schema": response_schema} if response_schema is not None else {}),
         )
 
 
