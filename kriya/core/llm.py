@@ -139,6 +139,18 @@ def dispatched_bytes(messages: List[Dict[str, Any]], tools: Optional[List[Dict[s
     return consumption_bytes(dispatch_text(messages, tools))
 
 
+def failure_status(runtime: InferenceRuntimePort, error: BaseException) -> Any:
+    """The one mapping of a provider/transport failure to its normalized
+    status: TIMEOUT when ``runtime`` classifies it a timeout, else
+    BACKEND_ERROR. Shared by both completion paths and by the qualification
+    probe of endpoint error semantics, so what qualification measures is the
+    classification a run applies."""
+    from kriya.core.completion import CompletionStatus
+
+    return (CompletionStatus.TIMEOUT if runtime.classify_error(error) is RuntimeErrorKind.TIMEOUT
+            else CompletionStatus.BACKEND_ERROR)
+
+
 def _common_prefix_length(a: str, b: str) -> int:
     """Length of the longest common prefix (binary search over C-level slice
     comparisons)."""
@@ -1095,8 +1107,7 @@ class LLMClient:
             self._finish(result, started=start_time, budget=budget)
             raise
         except Exception as e:
-            result.status = (CompletionStatus.TIMEOUT if self._runtime(model).classify_error(e) is RuntimeErrorKind.TIMEOUT
-                             else CompletionStatus.BACKEND_ERROR)
+            result.status = failure_status(self._runtime(model), e)
             result.backend_status = "error"
             result.backend_error = f"{type(e).__name__}: {e}"[:500]
             result.error = e
@@ -1344,8 +1355,7 @@ class LLMClient:
             self._finish(result, started=start_time, budget=budget)
             raise
         except Exception as e:
-            result.status = (CompletionStatus.TIMEOUT if self._runtime(model).classify_error(e) is RuntimeErrorKind.TIMEOUT
-                             else CompletionStatus.BACKEND_ERROR)
+            result.status = failure_status(self._runtime(model), e)
             result.backend_status = "error"
             result.backend_error = f"{type(e).__name__}: {e}"[:500]
             result.error = e

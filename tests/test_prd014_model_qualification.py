@@ -98,9 +98,8 @@ CASES = [
     (mq.case_malformed_output_recovery,
      [_result('Here you go.\n```json\n["a.py", "b.py", "c.py"]\n```')],
      [_result("Here you go: a.py, b.py and c.py")]),
-    (mq.case_endpoint_error_semantics,
-     [_result(status=CompletionStatus.BACKEND_ERROR, error=RuntimeError("404 model not found"))],
-     [_result("hello")]),
+    # endpoint_error_semantics does not go through the client (a scripted one hid that the real client refuses
+    # its unbound probe name): tests/test_qualification_endpoint_error_probe_001.py runs it on the real transport.
 ]
 
 

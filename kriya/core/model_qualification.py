@@ -1463,13 +1463,99 @@ async def case_cancellation_semantics(llm, model, ctx):
                        "settle_seconds": settle_seconds, "endpoint_healthy_after": healthy.status.value})
 
 
+# QUALIFICATION-ENDPOINT-ERROR-PROBE-001 (owner ruling 2026-11-18). The one
+# model identifier Kriya ever puts on the wire without a binding: a name no
+# provider serves, sent by ``_probe_unserved_model`` alone to measure how the
+# endpoint of the binding under qualification answers an unknown model. It is
+# code-owned: never configuration, never a caller's argument, never a
+# candidate binding. Since S1 (C-09) ``LLMClient`` refuses every unbound name
+# before provider contact (``require_binding``, no exception), so the case
+# could not reach the provider through it (MEASURED: both production pins
+# failed this case with MODEL_BINDING_UNKNOWN, requalification 2026-11-18).
+_UNSERVED_MODEL_PROBE = "kriya-qualification-no-such-model:0"
+
+
+def _qualified_wire_body(ctx: Dict[str, Any], runtime: Any, window: Optional[int]) -> Optional[Dict[str, Any]]:
+    """PROVIDER-CONTRACT-001: the wire body a production request of the
+    binding under qualification carries (the adapter's own plan of the
+    qualified extra_body, with the qualified window where the runtime takes
+    one per request) - for the cases that talk to the endpoint directly."""
+    extra_body = runtime.request_plan(ctx.get("extra_body") or None, temperature=None,
+                                      reasoning_flag=bool(ctx.get("reasoning")),
+                                      requested_context_window=window).wire_body or None
+    if window is not None and runtime.capabilities.per_request_context_window:
+        extra_body = runtime.with_context_window(extra_body, window)
+    return extra_body
+
+
+async def _probe_unserved_model(ctx: Dict[str, Any]) -> CaseResult:
+    """One request naming ``_UNSERVED_MODEL_PROBE`` on the provider connection
+    of the binding under qualification, through that binding's runtime adapter
+    (the seam of the capacity cases). It takes no model name. Endpoint, key
+    and transport are the resolved binding's (``ctx``: the runtime adapter and
+    the probe-client factory built from that binding); nothing is resolved
+    again and nothing falls back to the primary or a default adapter - an
+    unresolved binding is a FAIL before any provider contact.
+
+    PASS only when the provider refuses the request as a request (its unknown
+    model answer: ``RuntimeErrorKind.REQUEST``) and the run-time classifier
+    (``llm.failure_status``) calls that BACKEND_ERROR. An answer, a timeout,
+    an unreachable endpoint, an authentication or rate-limit refusal or a
+    server error is a FAIL: none of them is the endpoint's unknown-model
+    semantics."""
+    from kriya.core.inference_runtime import RuntimeErrorKind
+    from kriya.core.llm import failure_status, is_local_url
+
+    runtime, factory, base_url = ctx.get("runtime"), ctx.get("client_factory"), ctx.get("base_url")
+    if runtime is None or factory is None or not base_url:
+        missing = [name for name, value in (("runtime", runtime), ("client_factory", factory), ("base_url", base_url))
+                   if not value]
+        return CaseResult("", FAIL, {"reason": "the binding under qualification is not resolved; nothing was sent",
+                                     "missing": missing})
+    if not is_local_url(base_url):
+        # Straight to the endpoint (not through LLMClient's egress check), so
+        # a non-local endpoint is refused here, as the capacity cases do.
+        return CaseResult("", UNAVAILABLE, {"reason": "endpoint error semantics are only probed on a local endpoint",
+                                            "endpoint": safe_endpoint(base_url)})
+    window = ctx.get("context_window")
+    extra_body = _qualified_wire_body(ctx, runtime, int(window) if window else None)
+    evidence: Dict[str, Any] = {"probe_model": _UNSERVED_MODEL_PROBE, "endpoint": safe_endpoint(base_url),
+                                "adapter": runtime.name}
+    # None: the binding's configured transport timeouts, unchanged.
+    probe = factory(None)
+    try:
+        # Not policy: the model does not exist, so nothing is generated; the
+        # output budget and temperature are irrelevant to a refused request.
+        response = await runtime.complete(probe.client, ChatRequest(
+            model=_UNSERVED_MODEL_PROBE,
+            messages=[{"role": "system", "content": "You are a helpful assistant."},
+                      {"role": "user", "content": "Hello"}],
+            temperature=0.0, max_tokens=16, extra_body=extra_body,
+        ))
+    except Exception as error:
+        kind = runtime.classify_error(error)
+        status = failure_status(runtime, error)
+        evidence.update({"answered": False, "status": status.value, "error_kind": kind.value,
+                         "backend_error": f"{type(error).__name__}: {error}"[:500]})
+        # REQUEST implies BACKEND_ERROR under today's classifier; both are
+        # required so a changed classifier cannot pass this case silently.
+        ok = status.value == "BACKEND_ERROR" and kind is RuntimeErrorKind.REQUEST
+        return CaseResult("", PASS if ok else FAIL, evidence)
+    finally:
+        await _close_probe(probe)
+    # Answered: the endpoint served a model nobody named.
+    evidence.update({"answered": True, "status": "OK", "content": response.content[:200],
+                     "finish_reason": response.finish_reason})
+    return CaseResult("", FAIL, evidence)
+
+
 @_case("endpoint_error_semantics")
 async def case_endpoint_error_semantics(llm, model, ctx):
-    # Not policy: the model does not exist, so nothing is generated.
-    r = await llm.complete_result("You are a helpful assistant.", "Hello",
-                                  model_override="kriya-qualification-no-such-model:0", max_tokens_override=16)
-    ok = r.status.value == "BACKEND_ERROR" and r.error is not None and r.content == ""
-    return CaseResult("", PASS if ok else FAIL, {"status": r.status.value, "backend_error": r.backend_error})
+    """How the endpoint of the binding under qualification answers a model it
+    does not serve. Neither ``llm`` nor ``model`` is used: the probe names its
+    own reserved model and travels on the resolved binding in ``ctx``."""
+    del llm, model
+    return await _probe_unserved_model(ctx)
 
 
 @_case("endpoint_restart_semantics")
@@ -1588,11 +1674,7 @@ async def _context_capacity(llm, model, ctx, opened: List[Any]):
     runtime = ctx.get("runtime") or runtime_adapter()
     # PROVIDER-CONTRACT-001: exactly what a production request carries (the
     # adapter's wire body), never provider options it would ignore.
-    extra_body = runtime.request_plan(ctx.get("extra_body") or None, temperature=None,
-                                      reasoning_flag=bool(ctx.get("reasoning")),
-                                      requested_context_window=int(window)).wire_body or None
-    if runtime.capabilities.per_request_context_window:
-        extra_body = runtime.with_context_window(extra_body, int(window))
+    extra_body = _qualified_wire_body(ctx, runtime, int(window))
 
     async def send(messages, max_tokens):
         # Through the model's runtime adapter (INF-001), straight to the
@@ -1685,11 +1767,7 @@ async def _over_context_refusal(llm, model, ctx, opened: List[Any]):
         opened.append(factory(_policy(ctx).cases.context_capacity.request_timeout_seconds))
     client = opened[-1].client if opened else llm.client
     runtime = ctx.get("runtime") or runtime_adapter()
-    extra_body = runtime.request_plan(ctx.get("extra_body") or None, temperature=None,
-                                      reasoning_flag=bool(ctx.get("reasoning")),
-                                      requested_context_window=int(window)).wire_body or None
-    if runtime.capabilities.per_request_context_window:
-        extra_body = runtime.with_context_window(extra_body, int(window))
+    extra_body = _qualified_wire_body(ctx, runtime, int(window))
 
     async def send(messages):
         return await runtime.complete(client, ChatRequest(
@@ -1777,12 +1855,7 @@ async def run_qualification(
     with a different window."""
     from kriya.core.inference_settings import role_inference_settings
     from kriya.core.llm import LLMClient
-    from kriya.core.model_capabilities import capabilities_for_model
-    from kriya.core.model_runtime import (
-        _binding_for,
-        requested_context_window,
-        resolve_configured_model_runtime,
-    )
+    from kriya.core.model_runtime import _binding_for, resolve_configured_model_runtime
 
     model = model or config.llm.model
     settings = settings or role_inference_settings(config, "developer", model)
@@ -1800,28 +1873,11 @@ async def run_qualification(
     # (it calls the binding in order to qualify it).
     llm = llm or LLMClient(config, purpose="qualification")
 
-    default_factory = qualification_client_factory(config, model)
-
-    from kriya.agents.response_protocol import developer_response_protocol, response_protocol_identity
+    from kriya.agents.response_protocol import response_protocol_identity
 
     policy = qualification_policy_of(config)
-    ctx: Dict[str, Any] = {
-        "policy": policy,
-        # The protocol cases speak the configured Developer response protocol.
-        "response_protocol": developer_response_protocol(config),
-        # Capability-aware budgets follow the identity qualified, never a name.
-        "reasoning": bool(settings.reasoning),
-        "runtime": runtime,
-        "native_tool_calls_enabled": capabilities_for_model(config, model).native_tool_calls,
-        "client_factory": client_factory or default_factory,
-        # qualification_config put the requested window into extra_body.
-        "extra_body": config.llm.extra_body,
-        "base_url": (_binding_for(config, model).get("base_url") or config.llm.base_url),
-        "api_key": (_binding_for(config, model).get("api_key") or config.llm.api_key),
-        "context_window": budget_window(
-            requested_context_window(config.llm.extra_body, config.llm.context_window, runtime),
-            fingerprint.effective_context_window),
-    }
+    ctx = case_context(config, model, settings=settings, runtime=runtime, fingerprint=fingerprint,
+                       client_factory=client_factory)
     guard = QualificationIdentityGuard(
         fingerprint, identity_observer or (lambda: resolve_configured_model_runtime(config, model, fresh=True)))
     _require_stable_identity(model, guard, START)
@@ -1847,6 +1903,39 @@ async def run_qualification(
                         identity_stability=guard.evidence())
 
 
+def case_context(config: Any, model: str, *, settings: InferenceSettings, runtime: Any,
+                 fingerprint: ModelRuntimeFingerprint,
+                 client_factory: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
+    """What every case of one qualification run is given: the resolved
+    binding under qualification (its runtime adapter, endpoint, key, wire
+    settings, window and a factory of probe clients for that endpoint) and
+    the policy. ``config`` is the run's ``qualification_config``. Built here,
+    once, for ``run_qualification`` (and for the tests that run the cases
+    through the real client)."""
+    from kriya.agents.response_protocol import developer_response_protocol
+    from kriya.core.model_capabilities import capabilities_for_model
+    from kriya.core.model_runtime import _binding_for, requested_context_window
+
+    binding = _binding_for(config, model)
+    return {
+        "policy": qualification_policy_of(config),
+        # The protocol cases speak the configured Developer response protocol.
+        "response_protocol": developer_response_protocol(config),
+        # Capability-aware budgets follow the identity qualified, never a name.
+        "reasoning": bool(settings.reasoning),
+        "runtime": runtime,
+        "native_tool_calls_enabled": capabilities_for_model(config, model).native_tool_calls,
+        "client_factory": client_factory or qualification_client_factory(config, model),
+        # qualification_config put the requested window into extra_body.
+        "extra_body": config.llm.extra_body,
+        "base_url": (binding.get("base_url") or config.llm.base_url),
+        "api_key": (binding.get("api_key") or config.llm.api_key),
+        "context_window": budget_window(
+            requested_context_window(config.llm.extra_body, config.llm.context_window, runtime),
+            fingerprint.effective_context_window),
+    }
+
+
 def _require_stable_identity(model: str, guard: QualificationIdentityGuard, boundary: str,
                              capability: Optional[str] = None) -> None:
     """The one place a qualification run consults the identity guard."""
@@ -1854,25 +1943,27 @@ def _require_stable_identity(model: str, guard: QualificationIdentityGuard, boun
         raise QualificationArtifactChangedError(model, guard.evidence())
 
 
-def qualification_client_factory(config: Any, model: str) -> Callable[[float], Any]:
+def qualification_client_factory(config: Any, model: str) -> Callable[[Optional[float]], Any]:
     """A factory of probe clients for ``model``'s own endpoint and key with
-    a given timeout (the timeout and capacity cases). The timeout is the
-    probe's ``llm.transport`` policy - the one owner of every request's
-    timeout (LLMClient sends it per request, which overrides any timeout set
-    on the SDK client) - and the client is Kriya's own (direct transport, no
-    SDK retry)."""
+    a given timeout (the timeout and capacity cases), or with the configured
+    transport timeouts unchanged (None: the endpoint-error probe). The
+    timeout is the probe's ``llm.transport`` policy - the one owner of every
+    request's timeout (LLMClient sends it per request, which overrides any
+    timeout set on the SDK client) - and the client is Kriya's own (direct
+    transport, no SDK retry)."""
     from kriya.core.llm import LLMClient
     from kriya.core.model_runtime import _binding_for
 
     binding = _binding_for(config, model)
 
-    def factory(timeout: float) -> Any:
+    def factory(timeout: Optional[float]) -> Any:
         probe_config = config.model_copy(deep=True)
         probe_config.llm.base_url = binding.get("base_url") or config.llm.base_url
         probe_config.llm.api_key = binding.get("api_key") or config.llm.api_key
-        transport = probe_config.llm.transport
-        transport.connect_timeout_seconds = transport.read_timeout_seconds = timeout
-        transport.write_timeout_seconds = transport.pool_timeout_seconds = timeout
+        if timeout is not None:
+            transport = probe_config.llm.transport
+            transport.connect_timeout_seconds = transport.read_timeout_seconds = timeout
+            transport.write_timeout_seconds = transport.pool_timeout_seconds = timeout
         return LLMClient(probe_config, purpose="qualification")
 
     return factory
