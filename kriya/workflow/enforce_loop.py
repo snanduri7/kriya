@@ -3309,6 +3309,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # not from a blanket "this owner already ran once" guard.
             dependent_verification_facts: Dict[str, str] = {}     # owner id -> the deterministic facts of its last disproved repair
             owners_disproved_in_episode: set = set()              # owners whose current result this episode moved to NEEDS_REVIEW
+            # OWNER-ELIGIBILITY-AFTER-CHANGED-FAILURE-001 (Stage B run 8): owners whose repair, in the LAST recovery cycle of this
+            # verification unit, was followed by a consumer rerun that failed DIFFERENTLY. This unit's local state only: never
+            # persisted, never a stage state, and consumed by the verification-owner episode that follows.
+            changed_failure_owners: set = set()
             for _owner_recovery_cycle in range(deps._MAX_PLAN_SCOPE_REVISION_ATTEMPTS):
                 # General Obligation-Centric Recovery Execution (2026-08-30):
                 # generalizes MA8.1's owner-recovery loop from exactly-one-
@@ -3887,6 +3891,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 consumer_invoked_this_cycle = False
                 verifier_replayed = False                              # the consumer step replayed its carried verifier
                 previous_dependent_failure: Optional[str] = None       # identity of the dependent failure before that step
+                changed_failure_owners.clear()                         # only the cycle whose consumer rerun ends the episode qualifies anyone
                 plan_recovery_accepted: Optional[bool] = None
                 # Every reopened owner was MAY_CHANGE and none changed a recovery target: nothing new exists for
                 # the consumer to be retried against, and the original failure stands. A typed stop - never a
@@ -4183,6 +4188,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     break
                 if consumer_invoked_this_cycle:
                     current_dependent_failure = _dependent_failure_identity(call_result)
+                    changed_failure_owners.update(changed_failure_reopen_owners(
+                        invoked_group_records, previous_dependent_failure, current_dependent_failure))
                     for record in invoked_group_records:
                         if not record["owner_reran"]:
                             continue
@@ -4265,8 +4272,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # owner with a completed TOOL dependent is ineligible and never invoked (R4 preflight). No budget of
                 # its own: an owner the run's generation budget stops returns no typed unchanged stop, so nothing
                 # follows it.
-                reopen_completed = [sid for sid, stage_state in approved_stage_states.items()
-                                    if stage_state == deps.SubtaskStatus.COMPLETED.value]
+                # OWNER-ELIGIBILITY-AFTER-CHANGED-FAILURE-001: plus the owners whose repair the consumer rerun answered with a
+                # DIFFERENT deterministic failure. Their stage state stays needs_review; the resolver's order is untouched.
+                reopen_completed = verification_owner_reopen_ids(
+                    approved_stage_states, changed_failure_owners, deps.SubtaskStatus.COMPLETED.value)
+                episode_changed_failure_owners = sorted(changed_failure_owners)
+                changed_failure_owners.clear()               # consumed by this episode: nothing carries to another failure or unit
+                if episode_changed_failure_owners:
+                    deps.logger.warning(
+                        "VERIFICATION_OWNER_RECOVERY_CHANGED_FAILURE_OWNERS verification=%s owners=%s - their repair was followed by "
+                        "a different deterministic failure; they stay needs_review and are eligible for this episode.",
+                        subtask.id, episode_changed_failure_owners)
                 episode_considered: List[str] = []           # invoked or ineligible: never considered twice
                 episode_blocked: Dict[str, List[str]] = {}   # ineligible owner -> its completed TOOL dependents
                 episode_invoked: List[str] = []
@@ -4425,6 +4441,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     "unchanged_owners": [entry["owner"] for entry in episode_unchanged],
                     "accepted_owner": episode_accepted,
                     **({"blocked_owners": dict(episode_blocked)} if episode_blocked else {}),
+                    **({"changed_failure_owners": episode_changed_failure_owners} if episode_changed_failure_owners else {}),
                     "owner_recovery_passed": episode_accepted is not None,
                 })
             subtask_call_results.append(call_result)
@@ -5203,6 +5220,29 @@ VERIFICATION_OWNER_EPISODE_ACCEPTED = "VERIFICATION_OWNER_EPISODE_ACCEPTED"
 VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED = "VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED"
 VERIFICATION_OWNER_EPISODE_OWNER_STOPPED = "VERIFICATION_OWNER_EPISODE_OWNER_STOPPED"
 VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER = "VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER"
+
+
+def changed_failure_reopen_owners(invoked_group_records: Sequence[Mapping[str, Any]], previous_failure: Optional[str],
+                                  current_failure: Optional[str]) -> List[str]:
+    """OWNER-ELIGIBILITY-AFTER-CHANGED-FAILURE-001 (Stage B run 8, 20261118T161538-f3d8b246: s5 repaired the missing bean, the consumer
+    rerun then failed on equals=false, and s5 - now needs_review - was skipped by the verification-owner reopen, which tried s3, s4 and s2).
+
+    The owners of one recovery cycle that stay eligible for the verification-owner episode that follows it: those that actually RERAN in
+    the cycle (a carried-forward VERIFY owner or an unchanged MAY_CHANGE participant did not), when the dependent consumer reran and its
+    deterministic failure identity (verifier_replay.failure_identity: gate type + the gate's own output, never model text) is known both
+    before and after and differs. A repair followed by a different failure was not refused for the failure it was reopened for. Same
+    identity, or either identity unknown: nobody."""
+    if previous_failure is None or current_failure is None or previous_failure == current_failure:
+        return []
+    return [record["owner_id"] for record in invoked_group_records if record.get("owner_reran")]
+
+
+def verification_owner_reopen_ids(stage_states: Mapping[str, Any], changed_failure_owners: Any, completed_value: str) -> List[str]:
+    """The ids the verification-owner reopen may consider: the COMPLETED stages, plus the owners ``changed_failure_reopen_owners`` named
+    for this episode. Eligibility only - no state changes, and the order of the reopen stays the resolver's
+    (plan_revision.nearest_mutating_upstream_owner reads this as a set)."""
+    eligible = [stage_id for stage_id, stage_state in stage_states.items() if stage_state == completed_value]
+    return eligible + [owner_id for owner_id in sorted(changed_failure_owners or ()) if owner_id not in eligible]
 # A recovery was refused BEFORE its owner was reopened because the owner's change would invalidate a completed TOOL
 # execution, which is never run again. The TOOL stays completed, the owner unchanged, the original failure stands.
 TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE = "TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE"
