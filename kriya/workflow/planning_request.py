@@ -57,7 +57,14 @@ from kriya.workflow.obligations import (
     ObligationRecord,
     ObligationStatus,
 )
-from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, ExecutionRole, FileAction, Subtask
+from kriya.workflow.plan_schema import (
+    EngineeringPlan,
+    ExecutionMethod,
+    ExecutionRole,
+    FileAction,
+    Subtask,
+    render_planner_example,
+)
 from kriya.workflow.triage import ChangeKind
 
 
@@ -380,22 +387,36 @@ def build_subtask_plan_text(subtask: Subtask) -> str:
     return f"Implement: {subtask.description}"
 
 
+# PLANNER-WIRE-SCHEMA-ORDER-001: the CONTENT of the two example objects the authoritative Planner prompt shows. Their key order is not stated here - it is
+# plan_schema's canonical order, applied by ``render_planner_example``, the same order the wire schema declares - so the shape the model is shown is always a shape
+# the schema-enforcing decoder lets it write.
+PLANNER_EXAMPLE_PLAN: Dict[str, Any] = {
+    "subtasks": [{
+        "id": "s1", "description": "...", "execution_method": "model", "execution_role": "implementation", "depends_on": [],
+        "planned_files": [{
+            "path": "...", "action": "create|modify|delete", "environment_requirements": ["..."], "requires_capabilities": ["..."],
+            "preserved_references": ["..."],
+        }],
+        "acceptance_criteria_ids": ["ac1"],
+        "verification": [{
+            "type": "tool", "description": "...", "tool_name": "compile", "verifier_kind": "compile", "requires_runtime_execution": False,
+        }],
+        "provides": ["..."], "requires": [], "relevant_global_invariant_ids": ["gi1"],
+    }],
+    "acceptance_criteria": [{"id": "ac1", "description": "...", "method": "judgment"}],
+    "extension_points": [],
+    "refactor_baseline": None,
+    "global_invariants": [{"id": "gi1", "statement": "..."}],
+}
+PLANNER_EXAMPLE_RELATIONSHIP: Dict[str, Any] = {
+    "id": "ir1", "kind": "uses", "relationship_statement": "...", "producer_subtask_ids": ["s3"], "consumer_subtask_ids": ["s2"],
+}
+
 AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "You are Kriya's authoritative structured Planner. Return exactly one valid JSON object and "
     "nothing else: no Markdown, code fences, prose, or rationale. Decompose the request into the "
     "smallest safe set of bounded implementation subtasks. Use this top-level shape: "
-    '{"global_invariants": [{"id": "gi1", "statement": "..."}], "subtasks": [{"id": "s1", '
-    '"description": "...", "execution_method": "model", "execution_role": "implementation", '
-    '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete", '
-    '"environment_requirements": ["..."], "requires_capabilities": ["..."], '
-    '"preserved_references": ["..."]}], '
-    '"provides": ["..."], "requires": [], "relevant_global_invariant_ids": ["gi1"], "verification": '
-    '[{"type": "tool", "description": "...", "tool_name": "compile", '
-    '"verifier_kind": "compile", '
-    '"requires_runtime_execution": false}], '
-    '"acceptance_criteria_ids": ["ac1"]}], "acceptance_criteria": '
-    '[{"id": "ac1", "description": "...", "method": "judgment"}], '
-    '"extension_points": [], "refactor_baseline": null}. '
+    + render_planner_example("PlannerStructuredOutput", PLANNER_EXAMPLE_PLAN) + ". "
     "Each global invariant has a short stable id and a human-readable statement; a subtask "
     "references it via relevant_global_invariant_ids using that exact id, never by restating or "
     "paraphrasing the statement text - a subtask relevant to only PART of a compound invariant "
@@ -456,9 +477,9 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "separate enough that invoking the tested path in-process cannot kill the test process itself. "
     "When two subtasks' outputs are meant to compose into ONE behavior - one subtask's file is "
     "meant to be called, imported, or otherwise directly used by another's, not merely scheduled "
-    "before it - add an object to a top-level integration_relationships list: {\"id\": \"ir1\", "
-    "\"kind\": \"uses\", \"producer_subtask_ids\": [\"s3\"], \"consumer_subtask_ids\": [\"s2\"], "
-    "\"relationship_statement\": \"...\"} (kind is one of uses/provides_to/configures/implements/"
+    "before it - add an object to a top-level integration_relationships list: "
+    + render_planner_example("IntegrationRelationship", PLANNER_EXAMPLE_RELATIONSHIP)
+    + " (kind is one of uses/provides_to/configures/implements/"
     "verifies/depends_on). This is a STRONGER claim than depends_on/provides/requires (which only "
     "order execution and name a producer) - only add it when the goal actually requires the "
     "consumer's own generated code to reference the producer's artifact, e.g. two subtasks would "

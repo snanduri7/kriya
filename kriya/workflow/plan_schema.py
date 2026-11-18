@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
 
@@ -857,13 +857,143 @@ class PlannerStructuredOutput(BaseModel):
     integration_relationships: List[IntegrationRelationship] = Field(default_factory=list)
 
 
+# PLANNER-WIRE-SCHEMA-ORDER-001 (owner ruling 2026-11-18): the ONE canonical ordered shape of the authoritative Planner's answer. Both the wire schema
+# (``planner_output_json_schema``) and the prompt's example objects (``render_planner_example``) take their key order from this table; neither states an order of its own.
+#
+# MEASURED (primary production pin, native runtime; Stage B run 20261118T102702-eb370f85 and ~/kriya-stage-b/planner-fix/order_rule_probe_run1.json): a decoder that
+# enforces a schema writes an object's REQUIRED keys first, in declared order, then its optional keys in declared order, and an optional key it has passed can never be
+# written afterwards. The schema generated from the model classes declared ``subtasks`` before ``global_invariants`` and required neither, so a model that began with
+# ``global_invariants`` (the prompt's own example does) could no longer write ``subtasks``: three schema-valid plans without a single subtask, no candidate.
+#
+# So, in every object: the required keys come first (the declared order is then the written order under either reading of "declared order"), and the order is the one
+# the prompt's example shows. Every key of every object the Planner may write is listed; an unlisted or unknown key fails the schema build (a new model field is
+# ordered here or nothing is sent).
+PLANNER_CANONICAL_KEY_ORDER: Dict[str, Tuple[str, ...]] = {
+    "PlannerStructuredOutput": (
+        "global_invariants", "subtasks", "acceptance_criteria", "extension_points", "refactor_baseline", "integration_relationships",
+    ),
+    "GlobalInvariant": ("id", "statement"),
+    "Subtask": (
+        "id", "description", "execution_method", "execution_role", "tool_name", "tool_arguments", "depends_on", "planned_files", "provides", "requires",
+        "relevant_global_invariant_ids", "verification", "acceptance_criteria_ids", "requirement_ids", "ownership_justification", "mutation_targets",
+    ),
+    "PlannedFile": ("path", "action", "reason", "environment_requirements", "requires_capabilities", "preserved_references"),
+    "VerificationMethod": ("type", "description", "tool_name", "verifier_kind", "requires_runtime_execution"),
+    "AcceptanceCriterion": ("id", "description", "method", "tool_name"),
+    "IntegrationRelationship": (
+        "id", "kind", "producer_subtask_ids", "consumer_subtask_ids", "relationship_statement", "participating_artifacts", "acceptance_condition", "alternatives",
+        "selected_alternative",
+    ),
+    "MutationTarget": ("target_id", "file", "action", "requirement_ids"),
+}
+
+# Keys the WIRE requires although the parsing model gives them a default. Each one is already mandatory in the plan contract, independently of any decoder:
+#   subtasks              - a plan without a subtask is no plan (EngineeringPlan._non_empty_subtasks; STRUCTURED_PLAN_EMPTY);
+#   global_invariants     - every authoritative validation requires them (validate_plan(require_semantic_contracts=True) -> PLAN_GLOBAL_INVARIANTS_MISSING), and
+#                           only the authoritative Planner is sent this schema;
+#   producer/consumer ids - IntegrationRelationship._non_empty_ids refuses an empty list of either.
+# The parsing model itself is unchanged (the prose Planner's "a missing block degrades" contract stays), and the parser and plan validators still judge every answer.
+PLANNER_WIRE_REQUIRED: Dict[str, Tuple[str, ...]] = {
+    "PlannerStructuredOutput": ("global_invariants", "subtasks"),
+    "IntegrationRelationship": ("producer_subtask_ids", "consumer_subtask_ids"),
+}
+
+
+class PlannerWireShapeError(ValueError):
+    """The canonical ordered shape and the model classes disagree; nothing is sent or rendered from a shape that is not exactly the model's."""
+
+
+def _wire_object(name: str, generated: Dict[str, Any]) -> Dict[str, Any]:
+    """One object of the generated schema, its keys re-declared in canonical order and its required keys first."""
+    order = PLANNER_CANONICAL_KEY_ORDER.get(name)
+    properties = generated["properties"]
+    if order is None or len(set(order)) != len(order) or set(order) != set(properties):
+        raise PlannerWireShapeError(
+            f"planner wire shape: {name} declares keys {sorted(properties)} but the canonical order lists {sorted(order or ())}"
+        )
+    own_required = set(generated.get("required", ()))
+    extra_required = set(PLANNER_WIRE_REQUIRED.get(name, ()))
+    if not extra_required <= set(order):
+        raise PlannerWireShapeError(f"planner wire shape: {name} requires unknown keys {sorted(extra_required - set(order))}")
+    required = [key for key in order if key in own_required or key in extra_required]
+    if list(order[:len(required)]) != required:
+        raise PlannerWireShapeError(f"planner wire shape: {name} required keys {required} are not the first keys of its canonical order {list(order)}")
+    wired = {key: value for key, value in generated.items() if key not in ("properties", "required")}
+    wired["properties"] = {key: properties[key] for key in order}
+    wired["required"] = required
+    return wired
+
+
 def planner_output_json_schema() -> Dict[str, Any]:
     """PLANNER-SCHEMA-CONSTRAINED-OUTPUT-001: the canonical JSON schema of the authoritative Planner's output - ``PlannerStructuredOutput``'s own, generated by the model
     class that validates the answer, never a second hand-written copy. The enforce Planner request sends it as the response schema to every candidate whose runtime
     constrains output at decode time, so a value outside a closed set (MEASURED, Stage B run 20261118T085918-19ebb3f8: ``execution_method: "verification"`` three
     times, twice after the exact validation error was fed back) cannot be produced at all. It is a necessary condition only: ``parse_planner_structured_output`` and
-    the plan validators still judge every answer."""
-    return PlannerStructuredOutput.model_json_schema()
+    the plan validators still judge every answer.
+
+    PLANNER-WIRE-SCHEMA-ORDER-001: every type, enum and constraint is the generated one; only each object's key ORDER (``PLANNER_CANONICAL_KEY_ORDER``) and the
+    contract-mandatory keys the parsing model defaults (``PLANNER_WIRE_REQUIRED``) are set here. Raises ``PlannerWireShapeError`` when the canonical shape does not
+    cover the model exactly."""
+    generated = PlannerStructuredOutput.model_json_schema()
+    definitions = generated.get("$defs", {})
+    unknown = sorted((set(PLANNER_CANONICAL_KEY_ORDER) | set(PLANNER_WIRE_REQUIRED)) - set(definitions) - {generated["title"]})
+    if unknown:
+        raise PlannerWireShapeError(f"planner wire shape: the canonical order names objects the model does not have: {unknown}")
+    schema = _wire_object(generated["title"], {key: value for key, value in generated.items() if key != "$defs"})
+    schema["$defs"] = {
+        name: _wire_object(name, definition) if "properties" in definition else definition
+        for name, definition in definitions.items()
+    }
+    return schema
+
+
+def _referenced_object(property_schema: Any, definitions: Dict[str, Any]) -> Optional[str]:
+    """The name of the object type a property holds (directly, as list items, or as one arm of a union), or None for a scalar/enum/free-form value."""
+    if not isinstance(property_schema, dict):
+        return None
+    reference = property_schema.get("$ref")
+    if isinstance(reference, str):
+        name = reference.rsplit("/", 1)[-1]
+        return name if "properties" in definitions.get(name, {}) else None
+    for nested in [property_schema.get("items"), *(property_schema.get("anyOf") or [])]:
+        name = _referenced_object(nested, definitions)
+        if name is not None:
+            return name
+    return None
+
+
+def order_planner_object(object_name: str, value: Dict[str, Any]) -> Dict[str, Any]:
+    """``value`` (one Planner object, possibly partial, keys in any order) with its keys, and those of every object nested in it, in the canonical order. A key the
+    object type does not have raises ``PlannerWireShapeError``."""
+    schema = planner_output_json_schema()
+    definitions = schema["$defs"]
+
+    def ordered(name: str, item: Dict[str, Any]) -> Dict[str, Any]:
+        properties = schema["properties"] if name == schema["title"] else definitions[name]["properties"]
+        stray = sorted(set(item) - set(properties))
+        if stray:
+            raise PlannerWireShapeError(f"planner wire shape: {name} has no keys {stray}")
+        result: Dict[str, Any] = {}
+        for key in properties:
+            if key not in item:
+                continue
+            child = _referenced_object(properties[key], definitions)
+            current = item[key]
+            if child is not None and isinstance(current, dict):
+                current = ordered(child, current)
+            elif child is not None and isinstance(current, list):
+                current = [ordered(child, entry) if isinstance(entry, dict) else entry for entry in current]
+            result[key] = current
+        return result
+
+    if object_name != schema["title"] and "properties" not in definitions.get(object_name, {}):
+        raise PlannerWireShapeError(f"planner wire shape: no object named {object_name}")
+    return ordered(object_name, value)
+
+
+def render_planner_example(object_name: str, value: Dict[str, Any]) -> str:
+    """The example text of one Planner object for a prompt: ``value``'s content, in the canonical key order - the order the wire schema lets it be written in."""
+    return json.dumps(order_planner_object(object_name, value))
 
 
 def build_engineering_plan_from_planner_output(

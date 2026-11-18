@@ -1,0 +1,33 @@
+{
+  "global_invariants": [
+    {
+      "id": "gi1",
+      "statement": "The application must be built with Java 17 and use Maven as the build tool."
+    },
+    {
+      "id": "gi2",
+      "statement": "Apache Ignite 2.18.0 must be used with Spring XML configuration for an embedded node."
+    },
+    {
+      "id": "gi3",
+      "statement": "The Protocol class and ProtocolParser must implement the specified wire format with a 9-byte big-endian header followed by body bytes."
+    },
+    {
+      "id": "gi4",
+      "statement": "All Spring and Ignite resources must be properly closed to ensure normal application exit."
+    }
+  ],
+  "integration_relationships": [
+    {
+      "id": "ir1",
+      "kind": "uses",
+      "relationship_statement": "The application uses the Spring XML configuration approach to start an embedded Apache Ignite node.",
+      "producer_subtask_ids": [
+        "s2"
+      ],
+      "consumer_subtask_ids": [
+        "s4"
+      ]
+    }
+  ]
+}

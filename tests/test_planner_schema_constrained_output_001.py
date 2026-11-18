@@ -46,8 +46,12 @@ def native_server():
 # ---------------------------------------------------------------- one schema owner
 
 def test_the_planner_schema_is_the_validating_models_own_schema_never_a_copy():
-    schema = planner_output_json_schema()
-    assert schema == PlannerStructuredOutput.model_json_schema()
+    schema, generated = planner_output_json_schema(), PlannerStructuredOutput.model_json_schema()
+    # PLANNER-WIRE-SCHEMA-ORDER-001: only the key order and the contract-mandatory keys are set on the wire (tests/test_planner_wire_schema_order_001.py);
+    # every property, type and closed vocabulary is still the generated one.
+    assert schema["properties"] == generated["properties"] and set(schema["$defs"]) == set(generated["$defs"])
+    for name, definition in generated["$defs"].items():
+        assert schema["$defs"][name].get("properties") == definition.get("properties") and schema["$defs"][name].get("enum") == definition.get("enum")
     assert schema["$defs"]["ExecutionMethod"]["enum"] == [member.value for member in ExecutionMethod] == ["model", "tool"]
     assert schema["$defs"]["Subtask"]["properties"]["execution_method"] == {"$ref": "#/$defs/ExecutionMethod"}
 
@@ -108,7 +112,7 @@ def test_the_exact_canonical_schema_travels_to_ollama_as_format(native_server):
     assert answer == '{"subtasks": []}'
     [(path, body)] = native_server.requests
     assert path == "/api/chat"
-    assert body["format"] == PlannerStructuredOutput.model_json_schema()       # the whole schema, unmodified - not "json", not a subset
+    assert body["format"] == planner_output_json_schema()       # the whole schema, unmodified - not "json", not a subset
     assert body["truncate"] is False and body["messages"][0]["content"] == "You are the structured Planner."
 
 
