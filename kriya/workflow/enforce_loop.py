@@ -3405,6 +3405,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     exec_plan.id, list(exec_plan.group_order),
                 )
                 invoked_group_records: List[Dict[str, Any]] = []
+                promoted_scope_conflict: Optional[Dict[str, Any]] = None    # a reopened owner's own typed conflict, to continue on
+                promoted_from_owner: Optional[str] = None
                 plan_locally_accepted = True
                 # MAY_CHANGE bookkeeping of this cycle: groups whose owner was legitimately unchanged, and groups
                 # that count as recovery progress (an accepted MUST_CHANGE / changed MAY_CHANGE owner, or a VERIFY
@@ -3858,6 +3860,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             _restore_invalidation(invalidation)
                             record_invalidated: List[str] = []
                             invoked_group_records[-1]["invalidated"] = record_invalidated
+                            # OWNER-RECOVERY-NESTED-SCOPE-CONFLICT-DISCARDED-001: only here - the owner kept no byte and wrote
+                            # nothing undeclared - and only when it is the one owner this cycle ran (an owner that retained an
+                            # unaccepted change, or a cycle in which another owner already changed, stays the stop it was).
+                            if sum(1 for record in invoked_group_records if record["owner_reran"]) == 1:
+                                promoted_scope_conflict = promoted_owner_scope_conflict(
+                                    owner_result, owner_id, required_owner_files, scope_conflict, deps._plan_scope_conflict_files)
+                                promoted_from_owner = owner_id if promoted_scope_conflict is not None else None
                         plan_locally_accepted = False
                         break
                     # Group locally accepted - fold its real, on-disk output
@@ -4210,6 +4219,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # new scope_conflict to continue on, matching the
                     # original single-owner "not owner_local_accepted"
                     # branch's own unconditional break.
+                    if promoted_scope_conflict is not None and promoted_from_owner is not None:
+                        # OWNER-RECOVERY-NESTED-SCOPE-CONFLICT-DISCARDED-001: the unchanged owner's typed conflict is the newest
+                        # authoritative recovery fact. The owner stays NEEDS_REVIEW (set above) and gets no scope over the
+                        # file; the next cycle's existing resolver decides who owns it (or refuses). It is tracked like every
+                        # owner this episode moved to NEEDS_REVIEW: only a dependent verification that passes against its
+                        # current bytes settles it.
+                        owners_disproved_in_episode.add(promoted_from_owner)
+                        deps.logger.warning(
+                            "OWNER_RECOVERY_SCOPE_CONFLICT_PROMOTED subtask=%s owner=%s required_files=%s - the reopened "
+                            "owner's governed recovery localized the repair outside its authorized files; the recovery "
+                            "continues on that conflict, the owner received no authority over them.",
+                            subtask.id, promoted_from_owner, deps._plan_scope_conflict_files(promoted_scope_conflict),
+                        )
+                        scope_conflict = promoted_scope_conflict
+                        continue
                     break
                 if verifier_repair_stop is not None:
                     # An authorized verifier repair was refused: the verifier is invalid by the operator's decision and there is no
@@ -5254,6 +5278,37 @@ def verification_owner_reopen_ids(stage_states: Mapping[str, Any], changed_failu
     (plan_revision.nearest_mutating_upstream_owner reads this as a set)."""
     eligible = [stage_id for stage_id, stage_state in stage_states.items() if stage_state == completed_value]
     return eligible + [owner_id for owner_id in sorted(changed_failure_owners or ()) if owner_id not in eligible]
+
+
+def promoted_owner_scope_conflict(owner_result: Mapping[str, Any], owner_id: str, authorized_files: Sequence[str],
+                                  originating_conflict: Mapping[str, Any], conflict_files: Any) -> Optional[Dict[str, Any]]:
+    """OWNER-RECOVERY-NESTED-SCOPE-CONFLICT-DISCARDED-001 (Stage B run 9, 20261118T190202-e4da9437: s7's runtime failure reopened s5 for
+    App.java; s5's governed recovery ended on a typed PLAN_SCOPE_DEFECT naming ignite-config.xml, outside its scope; the loop dropped that
+    conflict and the run ended on s7's older App.java conflict).
+
+    The conflict the recovery episode continues on when a reopened owner's own governed recovery returned a typed PLAN_SCOPE_DEFECT that
+    names a file outside the owner's authorized recovery files; None otherwise (no typed conflict, or it names nothing outside the scope).
+    ROUTING comes from the owner's conflict (its files, tier and classification, unchanged: the existing resolver decides the next owner).
+    DIAGNOSIS stays the originating failure's (failure type and raw gate evidence); the owner's reason is appended, never substituted.
+    The caller decides WHEN this may be used (the owner's bytes unchanged, no undeclared write); nothing here grants any write scope."""
+    nested = owner_result.get("plan_scope_conflict") or {}
+    if nested.get("classification") != "PLAN_SCOPE_DEFECT":
+        return None
+    authorized = set(authorized_files)
+    outside = sorted(path for path in conflict_files(nested) if path not in authorized)
+    if not outside:
+        return None
+    reroute = (
+        f"the governed recovery of {owner_id} localized the required repair to {outside}, outside its authorized files "
+        f"{sorted(authorized)} ({nested.get('failure_type') or 'unknown'}): {nested.get('reason') or 'no reason recorded'}"
+    )
+    originating_reason = originating_conflict.get("reason")
+    return {
+        **nested,
+        "failure_type": originating_conflict.get("failure_type") or nested.get("failure_type"),
+        "raw_evidence": originating_conflict.get("raw_evidence") or nested.get("raw_evidence") or "",
+        "reason": f"{originating_reason}; {reroute}" if originating_reason else reroute,
+    }
 # A recovery was refused BEFORE its owner was reopened because the owner's change would invalidate a completed TOOL
 # execution, which is never run again. The TOOL stays completed, the owner unchanged, the original failure stands.
 TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE = "TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE"
