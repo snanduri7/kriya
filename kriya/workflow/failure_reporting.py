@@ -154,6 +154,8 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     # PRD-016: the prompt plus the minimum output cannot fit the served window.
     "context_budget_unsatisfiable": FailureCategory.RESOURCE,
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,
+    # C-09 / MODEL-CANDIDATE-UNAVAILABLE-001: production admission refused the identity the attempt would dispatch.
+    "model_binding_not_qualified": FailureCategory.RESOURCE,
     # PRD-017: a fallback model that cannot serve the attempt it was chosen for.
     "fallback_incompatible": FailureCategory.RESOURCE,
     # CONTEXT-EDIT-PROTOCOL-001: no feasible mutation operation, before inference.

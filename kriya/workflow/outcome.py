@@ -188,6 +188,8 @@ def terminal_failure_category(state: RunState) -> str:
         else "containment_setup_failed" if is_containment_setup_failed_stop
         else "regression_unattributed" if is_regression_unattributed_stop
         else "fallback_model_incompatible" if is_fallback_incompatible_stop
+        # MODEL-CANDIDATE-UNAVAILABLE-001: every model candidate of the unit was refused before any provider request.
+        else "model_candidate_unavailable" if (state.environment_failure or "").startswith("MODEL_CANDIDATE_UNAVAILABLE:")
         else "context_edit_protocol_unsatisfiable" if is_edit_protocol_stop
         else "provider_contract_violation" if is_provider_contract_stop
         else "retry_identity_not_qualified" if is_retry_identity_stop

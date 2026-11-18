@@ -94,7 +94,7 @@ FAMILY_OPENING_FAILURE_TYPES = frozenset({
 NON_OPENING_FAILURE_TYPES = frozenset({
     "no_progress_retry", "verifier_replay_refused",
     "context_budget_unsatisfiable", "context_edit_protocol_unsatisfiable", "fallback_incompatible", "general_error", "internal_framework_error",
-    "output_budget_unsatisfiable", "plan_scope_conflict", "provider_contract", "retry_identity_not_qualified", "test_verification_infrastructure_failure",
+    "model_binding_not_qualified", "output_budget_unsatisfiable", "plan_scope_conflict", "provider_contract", "retry_identity_not_qualified", "test_verification_infrastructure_failure",
     "time_budget_exhausted", "verification_infrastructure_failure", "work_ceiling_exhausted", "workspace_commit", "containment_setup_failed",
 }) | DELIVERY_FAILURE_TYPES
 

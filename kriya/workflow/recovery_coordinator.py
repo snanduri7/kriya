@@ -81,6 +81,12 @@ class ClassifiedAttemptFailure:
     internal_framework_bug: bool
     containment_setup_failure: bool
     unrecoverable_denial_reason: Optional[str] = None
+    # MODEL-CANDIDATE-UNAVAILABLE-001: the attempt ended on a refusal made BEFORE any provider request, about the
+    # model candidate itself and not about the candidate change - production admission (MODEL_BINDING_NOT_QUALIFIED) or
+    # a request that cannot fit the candidate's window (CONTEXT_/OUTPUT_BUDGET_UNSATISFIABLE). The reason code, and the
+    # refused model when the refusal names it (None: the model the attempt's Developer call was built for).
+    candidate_refusal_reason: Optional[str] = None
+    candidate_refusal_model: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +146,19 @@ def classify_attempt_exception(
         if unclassified and isinstance(exc, ContextBudgetUnsatisfiableError)
         else None
     )
+    # C-09 / MODEL-CANDIDATE-UNAVAILABLE-001: production admission refused the identity this attempt would have
+    # dispatched. Typed with the refusal's own details (it used to be a general_error, retried like a model failure).
+    from kriya.core.model_admission import ModelAdmissionError
+
+    admission_failure = (
+        Failure(
+            type="model_binding_not_qualified", message=str(exc), raw_output=str(exc), source="orchestrator",
+            diagnostics={"reason_code": exc.reason_code, **exc.details},
+        )
+        if unclassified and isinstance(exc, ModelAdmissionError)
+        else None
+    )
+    candidate_refusal = budget_failure or admission_failure
     # PROVIDER-CONTRACT-001: the provider does not apply what Kriya relies
     # on (an unapplied or unknown setting, a served window below the
     # requested one, a silently truncated prompt). Resending the same
@@ -172,6 +191,7 @@ def classify_attempt_exception(
         attached_failure
         or scope_denial_failure
         or budget_failure
+        or admission_failure
         or contract_failure
         or deadline_failure
         or Failure(
@@ -202,6 +222,9 @@ def classify_attempt_exception(
         internal_framework_bug=bool(internal_framework_bug),
         containment_setup_failure=bool(containment_setup_failure),
         unrecoverable_denial_reason=exc.result.reason_code if unrecoverable_scope_denial else None,
+        candidate_refusal_reason=(candidate_refusal.diagnostics or {}).get("reason_code") if candidate_refusal else None,
+        candidate_refusal_model=(
+            (exc.details.get("model") if admission_failure else getattr(exc, "model", None)) if candidate_refusal else None),
     )
 
 
@@ -387,6 +410,10 @@ def _record_recovery_decision(state: GenerationState, classified: ClassifiedAtte
             "unrecoverable_denial_reason": classified.unrecoverable_denial_reason,
             "internal_framework_bug": classified.internal_framework_bug,
             "containment_setup_failure": classified.containment_setup_failure,
+            **({"candidate_refusal": {"reason_code": classified.candidate_refusal_reason,
+                                      "model": classified.candidate_refusal_model,
+                                      "unavailable_candidates": dict(state.unavailable_candidates)}}
+               if classified.candidate_refusal_reason else {}),
             "stop_loop": decision.stop_loop, "action": decision.action.value if decision.action else None,
             "budgets_exhausted": decision.budgets_exhausted,
             "retry_decision": None if retry is None else {

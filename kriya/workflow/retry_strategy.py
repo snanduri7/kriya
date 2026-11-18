@@ -73,7 +73,7 @@ from kriya.workflow.file_resolution import (
 )
 from kriya.workflow.live_lookup import _lookup_external_references, lookup_query_event
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
-from kriya.workflow.model_transition import fallback_routing_for_context
+from kriya.workflow.model_transition import MODEL_CANDIDATE_UNAVAILABLE, fallback_routing_for_context
 from kriya.workflow.open_findings import (
     DELIVERY_FAILURE_TYPES,
     may_open_failure_family,
@@ -636,6 +636,64 @@ def _grounded_locations(worktree_path: str, failure: Any, paths: Sequence[str]) 
     return located
 
 
+def _record_candidate_unavailable(state: GenerationState, ctx, classified: ClassifiedAttemptFailure) -> Optional[str]:
+    """MODEL-CANDIDATE-UNAVAILABLE-001 (Stage B run 4, F3: three identical MODEL_BINDING_NOT_QUALIFIED refusals in
+    170 ms, each charged as a full-set attempt, after two context refusals charged the same way; the unit's budgets
+    were exhausted with no Developer request sent). The one writer of a model candidate's unavailability.
+
+    An attempt that ended on a pre-provider refusal of its model candidate (``classified.candidate_refusal_reason``)
+    marks that candidate unavailable for this unit invocation with the refusal's own reason code. Returns
+    "primary" or "fallback" (None for every other failure): the retry policy then charges no retry family for
+    it and never offers that candidate the request again - a refused llm_chain entry joins
+    ``incompatible_fallbacks`` (the skip list selection, triage and routing already read), the primary sets
+    ``primary_candidate_unavailable`` (retry_policy routes the next attempt to the fallback). When no eligible
+    candidate remains, or a candidate already marked unavailable was refused again, the unit stops here with the
+    typed MODEL_CANDIDATE_UNAVAILABLE message carrying every candidate's reason; no further request is built.
+    The work ledger's grant of the attempt (S8) is not read or changed: it stays charged."""
+    reason = classified.candidate_refusal_reason
+    if reason is None:
+        return None
+    primary = ctx.kernel.config.llm.model
+    model = classified.candidate_refusal_model or state.last_model_override or primary
+    role = "primary" if (model or "").casefold() == (primary or "").casefold() else "fallback"
+    repeated = model in state.unavailable_candidates
+    state.unavailable_candidates[model] = reason
+    if role == "primary":
+        state.primary_candidate_unavailable = reason
+    else:
+        state.incompatible_fallbacks.setdefault(model, [f"{reason}: refused before any provider request"])
+    # A fallback that can still SERVE (routing's ``selected``), not merely one that is configured: ``available``
+    # deliberately keeps a run-wide incompatible fallback present so that selecting it ends the run typed (PRD-017).
+    # With the primary available the existing ladder decides what follows a refused fallback, exactly as it does
+    # for a fallback found unqualified before its call: another fallback, a primary-only family, or PRD-017's typed
+    # FALLBACK_MODEL_INCOMPATIBLE terminal at the next selection (which carries this refusal's reason).
+    fallback_available = fallback_routing_for_context(state, ctx).selected is not None
+    eligible_remains = not repeated and (state.primary_candidate_unavailable is None or fallback_available)
+    details = {
+        "reason_code": reason, "model": model, "candidate": role, "repeated_refusal": repeated,
+        "unavailable_candidates": dict(state.unavailable_candidates),
+        "primary_available": state.primary_candidate_unavailable is None, "fallback_available": fallback_available,
+        "terminal": not eligible_remains, "retry_family_charged": False,
+    }
+    message = (f"Model candidate {model} ({role}) is unavailable for this unit: {reason} (refused before any provider "
+               "request; no retry attempt is charged). "
+               + ("The attempt advances to another eligible candidate." if eligible_remains
+                  else "No eligible candidate remains."))
+    if not eligible_remains and not state.environment_failure:
+        state.environment_failure = (
+            f"{MODEL_CANDIDATE_UNAVAILABLE}: no eligible model candidate remains for this unit - "
+            + "; ".join(f"{name}: {code}" for name, code in state.unavailable_candidates.items())
+            + f". Every refusal was made before any provider request; nothing was sent to a model. Last refusal: "
+            f"{classified.failure.message}")
+        state.stop_reason_evidence = StopReasonEvidence(reason, state.environment_failure)
+    state.record_event(RunEvent(
+        kind="model.candidate_unavailable", attempt=state.attempt_number, source="retry_strategy",
+        authority=EventAuthority.AUTHORITATIVE, message=message, details=details,
+    ))
+    (logger.error if not eligible_remains else logger.warning)("MODEL_CANDIDATE_UNAVAILABLE %s", message)
+    return role
+
+
 async def _record_attempt_failure(
     state: GenerationState, ctx, e: Exception, classified: ClassifiedAttemptFailure,
 ) -> None:
@@ -831,6 +889,7 @@ async def _record_attempt_failure(
     )
     if failure.type == "regression_unattributed" and state.environment_failure is not None:
         state.stop_reason_evidence = StopReasonEvidence(REGRESSION_UNATTRIBUTED, state.environment_failure)
+    candidate_unavailable = _record_candidate_unavailable(state, ctx, classified)
     if is_unrecoverable_scope_denial and state.unrecoverable_scope_denial_count >= 1:
         # PRV-17 preflight correction (2026-09-03): stop on the FIRST
         # deterministically unrecoverable denial, not the second - once
@@ -1105,6 +1164,11 @@ async def _record_attempt_failure(
     if is_incomplete_generation:
         state.last_missing_files = e.missing_files
         state.last_implicated_files = None
+    elif candidate_unavailable is not None:
+        # MODEL-CANDIDATE-UNAVAILABLE-001: Kriya refused its own request before any provider saw it. Nothing about
+        # the candidate change was observed, so there is nothing to attribute to a file: no triage model call, and
+        # the targets the last real failure grounded stay what they were.
+        pass
     else:
         # attribute_failure() (kriya/workflow/attribution.py) is the single
         # decision point for "which file(s) is this failure about" - replaces
@@ -1716,6 +1780,7 @@ async def _record_attempt_failure(
         failure_family_changed=failure_family_changed,
         terminal_policy_denial=state.unrecoverable_scope_denial_count > 0,
         environment_verdict=failure.type in ENVIRONMENT_VERDICT_FAILURE_TYPES,  # R-13: nothing about the candidate was observed
+        candidate_unavailable=candidate_unavailable,  # nothing was sent: no retry family is charged
     )
     # S8 (C-07): the unit's family history and scoped charges are durably recorded with every charged failure, so the unit's next invocation - in this run or in a
     # run that resumes its work ledger - continues them (run_lifecycle.open_run_state) instead of starting from a full allowance.

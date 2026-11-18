@@ -509,6 +509,13 @@ class GenerationState:
     # profile without QUALIFIED, no prompt room) -> their reasons. Fallback
     # selection skips them in configured order (attribution.resolve_fallback_model).
     incompatible_fallbacks: Dict[str, List[str]] = field(default_factory=dict)
+    # MODEL-CANDIDATE-UNAVAILABLE-001 (Stage B run 4, F3): model candidates refused BEFORE any provider request in
+    # this unit invocation (production admission, a prompt that cannot fit) -> the refusal's reason code. A candidate
+    # here is never offered the same request again: the attempt advances once to another eligible candidate or the
+    # unit stops with the typed reason. A refused llm_chain entry is also in incompatible_fallbacks (the one skip list
+    # fallback selection, triage and routing read); the primary has its own flag because nothing else can skip it.
+    unavailable_candidates: Dict[str, str] = field(default_factory=dict)
+    primary_candidate_unavailable: Optional[str] = None
     # PRD-021: grounded ownership findings for this run's planned new files
     # (kriya/workflow/ownership_findings.py) - advisory evidence for the
     # Developer and the Reviewer, never a gate.

@@ -41,6 +41,9 @@ FALLBACK_MODEL_INCOMPATIBLE = "FALLBACK_MODEL_INCOMPATIBLE"
 # MODEL-EVIDENCE-HARDENING-001: a production Developer retry whose
 # retry-temperature inference identity is not QUALIFIED (refused before any request).
 RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED = "RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED"
+# MODEL-CANDIDATE-UNAVAILABLE-001: no eligible model candidate remains for the unit - every remaining one was refused
+# before any provider request (the message carries each candidate's own reason code).
+MODEL_CANDIDATE_UNAVAILABLE = "MODEL_CANDIDATE_UNAVAILABLE"
 
 # Edit protocols that can only return whole files (model_capabilities).
 FULL_FILE_ONLY_PROTOCOLS = frozenset({"full_file", "full_file_text"})

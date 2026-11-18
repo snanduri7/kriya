@@ -60,6 +60,7 @@ def decide_retry_action(
     api_contract_recovery_max_attempts: int = API_CONTRACT_RECOVERY_MAX_ATTEMPTS,
     api_contract_restored: bool = False,
     fallback_attempts_used: int = 0,
+    primary_unavailable: bool = False,
 ) -> RetryDecision:
     if environment_failure:
         return RetryDecision(RetryAction.STOP_ENVIRONMENT, environment_failure)
@@ -113,6 +114,22 @@ def decide_retry_action(
     )
     if reserved is not None:
         return reserved
+    if primary_unavailable:
+        # MODEL-CANDIDATE-UNAVAILABLE-001: the primary was refused before any provider request in this unit
+        # invocation, so the primary-only families (targeted, missing-files) are not offered the same request again.
+        # The attempt advances to the fallback - fallback-targeted when the failure is grounded, else the escalated
+        # full-set attempt (attempt.py selects a fallback for it whatever the full-set count) - under the fallback's
+        # ordinary budgets; with no fallback able to serve it, nothing remains (the recording step has already made
+        # that the typed MODEL_CANDIDATE_UNAVAILABLE stop; this is the same answer for any other reader).
+        if not has_fallback_model:
+            return RetryDecision(RetryAction.STOP_EXHAUSTED,
+                                 "no eligible model candidate remains: the primary is unavailable and no fallback can serve the attempt")
+        if has_implicated_files and not fallback_targeted_attempted:
+            return RetryDecision(RetryAction.FALLBACK_TARGETED,
+                                 "primary candidate unavailable: one bounded fallback-model repair remains")
+        if retry_count < max_retries:
+            return RetryDecision(RetryAction.FULL_SET, "primary candidate unavailable: the attempt advances to the fallback")
+        return RetryDecision(RetryAction.STOP_EXHAUSTED, "all applicable retry budgets are exhausted")
     # fallback_targeted_requested only ever disqualifies TARGETED below (an
     # authoritative locator outranks another attempt by the SAME, already-
     # rejecting model) - it does NOT jump the queue ahead of MISSING_FILES.
@@ -198,6 +215,7 @@ def _state_inputs(state, *, max_retries: int, targeted_max_retries: int, has_fal
         api_contract_recovery_count=state.budgets.api_contract_recovery_count,
         api_contract_restored=api_contract_restored(state),
         fallback_attempts_used=state.budgets.fallback_attempts_used,
+        primary_unavailable=bool(getattr(state, "primary_candidate_unavailable", None)),
         max_total_attempts=max_total_attempts_for(
             state, max_retries=max_retries, targeted_max_retries=targeted_max_retries,
             has_fallback_model=has_fallback_model,
@@ -375,7 +393,8 @@ def force_strategy_transition(
 
 def charge_failed_attempt(budgets, *, attempt_mode: Optional[str], plan_scope_conflict: bool,
                           failure_family_changed: bool, terminal_policy_denial: bool = False,
-                          environment_verdict: bool = False) -> None:
+                          environment_verdict: bool = False,
+                          candidate_unavailable: Optional[str] = None) -> None:
     """Charge one failed attempt to the budget of the family it ran in, and
     to no other. A plan-scope conflict exits to the authoritative controller
     (a plan transition, not a retry) and charges nothing; a targeted or
@@ -385,7 +404,19 @@ def charge_failed_attempt(budgets, *, attempt_mode: Optional[str], plan_scope_co
     (B4) is a refusal of an authority decision, not a model failure the budget
     pays to repeat: it charges nothing (the loop stops on it). An environment
     verdict (R-13: the verification tool or its container never started) observed
-    nothing about the candidate: it charges nothing either."""
+    nothing about the candidate: it charges nothing either.
+
+    MODEL-CANDIDATE-UNAVAILABLE-001: ``candidate_unavailable`` ("primary" or "fallback") is an attempt that ended on a
+    refusal of its model candidate before any provider request. It never reached the stage a retry family counts -
+    a model's answer to the request - so it charges no family; and what the attempt reserved of the fallback's own
+    allowances at selection (the reserved-allowance count, the one-shot fallback-targeted flag) is the fallback's
+    again, for the next eligible fallback. The work ledger's grant of the attempt is not touched here or anywhere."""
+    if candidate_unavailable is not None:
+        if candidate_unavailable == "fallback":
+            budgets.fallback_attempts_used = max(0, budgets.fallback_attempts_used - 1)
+            if attempt_mode == RetryAction.FALLBACK_TARGETED.value:
+                budgets.fallback_targeted_attempted = False
+        return
     if plan_scope_conflict or terminal_policy_denial or environment_verdict:
         return
     if attempt_mode == RetryAction.API_CONTRACT_RECOVERY.value:

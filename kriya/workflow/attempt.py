@@ -3186,8 +3186,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         extra_body_override = None
 
         active_prompt_window = allocation_window(ctx.kernel.config)
-        fallback = _select_developer_fallback(state, ctx, state.budgets.retry_count,
-                                              targets=ctx.architect_files, allow_primary=True)
+        # MODEL-CANDIDATE-UNAVAILABLE-001: with the primary refused before any provider request in this invocation,
+        # this full-set attempt is the fallback's whatever the full-set count (an unsent attempt charged none), and
+        # it never falls back to the primary: no fallback left is the typed terminal the selection already raises.
+        primary_unavailable = bool(state.primary_candidate_unavailable)
+        fallback = _select_developer_fallback(
+            state, ctx, max(state.budgets.retry_count, 1) if primary_unavailable else state.budgets.retry_count,
+            targets=ctx.architect_files, allow_primary=not primary_unavailable)
         if fallback is not None:
             state.budgets.fallback_attempts_used += 1
             model_override = fallback.model

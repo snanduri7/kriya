@@ -46,6 +46,7 @@ _REAL_FAILURE_TYPES = {
     "work_ceiling_exhausted": FailureCategory.RESOURCE,   # S8 (C-07/C-08): the work ledger's refusal (attempt.py, enforce_loop.py)
     "context_budget_unsatisfiable": FailureCategory.RESOURCE,
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,
+    "model_binding_not_qualified": FailureCategory.RESOURCE,   # MODEL-CANDIDATE-UNAVAILABLE-001: a production admission refusal
     # PRD-017: a fallback model that cannot serve the attempt.
     "fallback_incompatible": FailureCategory.RESOURCE,
     # CONTEXT-EDIT-PROTOCOL-001: no feasible mutation operation, before inference.

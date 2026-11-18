@@ -42,6 +42,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_backend_final_closure_005_partial_no_change.py': ('S', 'M'),
  'tests/test_backend_final_closure_005_verification_owner_reopen.py': ('S', 'M'),
  'tests/test_recovery_may_change_characterization.py': ('S', 'M'),  # the same real-workflow reopen harness
+ 'tests/test_stage_b_run4_recovery_reproducer.py': ('S', 'M'),  # the same real-workflow reopen harness (Stage B run 4)
  'tests/test_enforce_unit_advisory_review_acceptance_001.py': ('S', 'M'),  # R2: the real-unit enforce harness and the direct chaos run
  'tests/test_enforce_recovery_convergence_001.py': ('S', 'M'),  # R4: the real-unit dependent-reverification run
  'tests/test_backend_readiness_004_authority_request.py': ('N', 'F'),
