@@ -148,6 +148,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, 'extract_target_test'): P(4, 'kriya.workflow.file_resolution', ((A, 1),), ()),
     # E8 (guard): 2 -> 2: the executing gates' load moved (GateDeps, one load in attempt._gate_deps); the other stays.
     (A, 'find_runnable_test_files'): P(3, 'kriya.workflow.file_resolution', ((A, 2),), ()),
+    # MODEL-CANDIDATE-UNAVAILABLE-001 (row missed at 67e7764): the work grant counted at its attempt.py lookup by tests/test_model_candidate_unavailable_001.py
+    # and tests/test_stage_b_run4_recovery_reproducer.py (2 sites; the grant itself is untouched).
+    (A, 'grant_developer_attempt'): P(2, 'kriya.control.run_coordinator', ((A, 1),), ()),
     (A, 'normalize_written_filepath'): P(1, 'kriya.workflow.file_resolution', ((A, 1),), ()),
     (A, 'run_attempt'): P(10, A, (('kriya.workflow.best_of_n', 1),), (W,)),
     (A, 'run_managed_service_verification'): P(17, 'kriya.tools.service_runtime', ((A, 1),), ()),
@@ -163,7 +166,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
-    (W, 'WorkflowEngine.run_generation_workflow'): P(26, W, None, ()),  # +3: tests/test_verifier_semantic_loop_001.py (the reproducer's re-invocation; the scene's result capture)
+    (W, 'WorkflowEngine.run_generation_workflow'): P(27, W, None, ()),  # +1: tests/test_stage_b_run4_recovery_reproducer.py (missed at 67e7764)  # +3: tests/test_verifier_semantic_loop_001.py (the reproducer's re-invocation; the scene's result capture)
     (W, '_direct_terminal_writes'): P(1, W, ((W, 4),), ()),
     (W, '_ensure_repository_indexed'): P(2, W, ((W, 1),), ()),
     (W, '_gate_outcome_proven'): P(1, W, ((W, 2),), ()),
@@ -253,7 +256,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # PlanningDeps.assess_planned_edit (one load in workflow_controller._planning_deps); the sites above are the dynamic proof.
     (C, 'assess_planned_edit'): P(3, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
     (C, 'blocking_requirements'): P(1, 'kriya.workflow.requirements', ((C, 1),), ()),
-    (C, 'build_engineering_plan_from_planner_output'): P(75, 'kriya.workflow.plan_schema', ((C, 2),), ()),
+    (C, 'build_engineering_plan_from_planner_output'): P(76, 'kriya.workflow.plan_schema', ((C, 2),), ()),
     (C, 'build_planning_structural_evidence'): P(3, C, (('kriya.workflow.ownership_findings', 1), (C, 1)), ()),
     (C, 'canonicalize_planned_file_actions'): P(1, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     # E11 characterization: +1 site (tests/test_e11_owner_modules.py: one unit grounding per unit, through this name).
@@ -269,7 +272,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS'): P(1, C, ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py).
     (C, 'model_capacities'): P(13, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
-    (C, 'parse_planner_structured_output'): P(80, 'kriya.agents.contracts', ((C, 2),), ()),
+    (C, 'parse_planner_structured_output'): P(81, 'kriya.agents.contracts', ((C, 2),), ()),
     (C, 'record_plan_created'): P(1, 'kriya.workflow.subtask_telemetry', ((C, 2),), ()),
     (C, 'remove_git_worktree'): P(10, 'kriya.workflow.worktree', ((C, 1),), ()),
     (C, 'resolve_migration_resolution'): P(4, 'kriya.workflow.migration', ((C, 1),), ()),
@@ -480,8 +483,10 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # VERIFIER-SEMANTIC-AUTHORITY-001 (WS3-C slice 2): W 106 -> 109, three run_generation_workflow sites in tests/test_verifier_semantic_loop_001.py.
     # C-05 (S3): A 110 -> 111, one new row (AttemptContext.__init__: the one harness stand-in in tests/conftest.py for hand-built contexts).
     # S6 closer parity (tests/test_s6_enforce_closer_parity.py: the run base of the terminal creation evidence, no new row): W 109 -> 112, three _run_committed_paths sites.
-    assert totals == {A: 111, W: 112, C: 406}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
-    assert len(PATCH_POINTS) == 136  # pre-certification 2026-11-17: +1 row (C.WorkflowController.execute, the conftest approval stand-in); S3: +1 row (A.AttemptContext.__init__, the conftest stand-in); W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
+    # Stage B run 4 tests (67e7764, the table was not updated then): A 111 -> 113 (new row grant_developer_attempt, 2 sites), W 112 -> 113 (run_generation_workflow),
+    # C 406 -> 408 (build_engineering_plan_from_planner_output, parse_planner_structured_output), all in tests/test_stage_b_run4_recovery_reproducer.py and tests/test_model_candidate_unavailable_001.py.
+    assert totals == {A: 113, W: 113, C: 408}  # Wave 7 PRD-032 D12: W 100 -> 101 (run_generation_workflow), C 387 -> 389 (build_engineering_plan_from_planner_output, parse_planner_structured_output): one new test, tests/test_prd032_chaos_recovery.py, patches these documented seams like the shared enforce harnesses (no architecture change, no new row); Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    assert len(PATCH_POINTS) == 137  # Stage B run 4: +1 row (A.grant_developer_attempt); pre-certification 2026-11-17: +1 row (C.WorkflowController.execute, the conftest approval stand-in); S3: +1 row (A.AttemptContext.__init__, the conftest stand-in); W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)
