@@ -1078,8 +1078,13 @@ def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt:
         cursor = end
     fitted.append(prompt[cursor:])
     segments.append((prompt[cursor:], None, None))
+    # CONTEXT-REFUSAL-EVIDENCE-001: what no fit can remove (the system prompt and the mandatory text) and what the
+    # request counts after its reductions, in the dispatch check's own units - when the first exceeds the capacity
+    # every optional section was left out and the dispatch check decides (output trimmed, or a typed refusal).
+    mandatory_tokens = capacity.count(system_prompt) + capacity.count("".join(mandatory))
+    fitted_tokens = capacity.count(system_prompt) + capacity.count("".join(fitted))
     _record_developer_sections("".join(fitted), segments, sections, capacity, request_tokens, fitted=True,
-                               unlocated=unlocated)
+                               unlocated=unlocated, mandatory_tokens=mandatory_tokens, fitted_tokens=fitted_tokens)
     return "".join(fitted), {
         "request": "developer", "capacity_tokens": capacity.tokens,
         "sections": {spans[index][2].kind: {**fit.to_dict(), "reduced": fit.value != spans[index][2].text}
@@ -1089,7 +1094,8 @@ def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt:
 
 
 def _record_developer_sections(prompt: str, segments, sections: Sequence[OptionalSection], capacity: RequestCapacity,
-                               request_tokens: int, *, fitted: bool, unlocated: Sequence[str] = ()) -> None:
+                               request_tokens: int, *, fitted: bool, unlocated: Sequence[str] = (),
+                               mandatory_tokens: Optional[int] = None, fitted_tokens: Optional[int] = None) -> None:
     """LR-R1-M1 ``prompt.sections`` for one Developer request: the ordered
     segments of the user message as sent (mandatory text and optional
     sections), each with its offset, length, digest and outcome, so the kept
@@ -1120,6 +1126,12 @@ def _record_developer_sections(prompt: str, segments, sections: Sequence[Optiona
         "fitter": "fit_developer_request", "request": "developer", "fitted": fitted,
         "capacity_tokens": capacity.tokens, "request_tokens": request_tokens, "segments": recorded,
         "optional_sections_unchanged": optional, "unlocated_sections": list(unlocated),
+        # Only for a request that did not fit unchanged (the record of one that did is as it always was). Reductions
+        # attempted = the non-mandatory segments above with their outcomes; then the irreducible estimate, the
+        # result, and whether that result is within the capacity ("fitted" alone only says a fit was attempted).
+        **({} if mandatory_tokens is None or fitted_tokens is None else {
+            "mandatory_tokens": mandatory_tokens, "fitted_tokens": fitted_tokens,
+            "within_capacity": fitted_tokens <= capacity.tokens}),
     })
 
 

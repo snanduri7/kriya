@@ -794,11 +794,18 @@ def admit_run(config: Any, *, workspace_root: Optional[str] = None) -> Dict[str,
 
 
 def admit_dispatch(config: Any, *, role: str, model: str, fingerprint: ModelRuntimeFingerprint,
-                   settings: InferenceSettings, admitted: set) -> None:
+                   settings: InferenceSettings, admitted: set, runtime_name: Optional[str] = None) -> None:
     """Dispatch-time admission of the exact identity of one request.
     ``admitted`` is the caller's own memo of identities already admitted
     (an exact runtime digest, a settings digest, a role); a non-exact
-    runtime is never memoized and never admitted."""
+    runtime is never memoized and never admitted.
+
+    DISPATCH-SETTINGS-IDENTITY-001: a refusal carries the resolved settings
+    its digest was computed from (``InferenceSettings.identity_fields``:
+    version, temperature, reasoning flag, wire body, server-only settings),
+    the adapter and the requested window, so a digest that matches no record
+    is explained by the refusal itself. Sampling and protocol settings only:
+    an endpoint, key or header is never part of them."""
     if not admission_enforced(config):
         return
     key = (fingerprint.digest if fingerprint.exact else "", settings.digest, role)
@@ -815,6 +822,8 @@ def admit_dispatch(config: Any, *, role: str, model: str, fingerprint: ModelRunt
         "runtime_fingerprint": fingerprint.digest if fingerprint.exact else None,
         "inference_settings_digest": settings.digest, "qualification_policy_digest": policy_digest,
         "reasons": list(assessment.reasons),
+        "inference_settings": settings.identity_fields(), "inference_runtime": runtime_name,
+        "requested_context_window": fingerprint.configured_context_window,
     }
     raise ModelAdmissionError(
         f"{MODEL_BINDING_NOT_QUALIFIED}: the production runtime profile dispatches only a QUALIFIED identity; "

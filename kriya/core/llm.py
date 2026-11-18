@@ -561,7 +561,7 @@ class LLMClient:
         if self.purpose != PURPOSE_RUN:
             return
         admit_dispatch(self.config, role=current_model_role(), model=model, fingerprint=fingerprint,
-                       settings=settings, admitted=self._admitted)
+                       settings=settings, admitted=self._admitted, runtime_name=self._runtime(model).name)
 
     def _dispatch_client(self, base_url: str, api_key: str, *, overridden: bool) -> AsyncOpenAI:
         """The transport of a call to (base_url, api_key): the primary's own
@@ -693,6 +693,8 @@ class LLMClient:
         except Exception as refusal:
             if note and getattr(refusal, "decision", None) is not None:
                 refusal.decision = replace(refusal.decision, tier_note=note)
+            # MODEL-CANDIDATE-UNAVAILABLE-001: which candidate the budget refused (the decision names none).
+            refusal.model = model
             raise
         return replace(decision, tier_note=note, context_state=state.to_dict(), reasoning_reserve_source=reasoning_source)
 
@@ -968,6 +970,13 @@ class LLMClient:
             extra_body = extra_body_override or None
         else:
             extra_body = own["extra_body"]
+        # DISPATCH-SETTINGS-IDENTITY-001: the settings identity is computed
+        # from the binding's own (or the caller's overriding) settings - the
+        # input qualification enumerates (binding_inference_settings) - never
+        # from the body below, where a declared context_window has been
+        # translated into the runtime's request option. The window is runtime
+        # identity (the fingerprint), not an inference setting.
+        settings_body = extra_body
         # FALLBACK-CONTEXT-WINDOW-001: the request carries the window the
         # budget below plans against (the binding's declared context_window,
         # unless extra_body sets the provider option itself).
@@ -998,7 +1007,7 @@ class LLMClient:
                                    is_reasoning=is_reasoning, declared_window=own["context_window"],
                                    fingerprint=fingerprint)
         # The executed inference identity (the settings the provider receives).
-        settings = request_settings(temperature=temperature, reasoning=is_reasoning, extra_body=extra_body,
+        settings = request_settings(temperature=temperature, reasoning=is_reasoning, extra_body=settings_body,
                                     runtime=runtime)
         self._admit(model, fingerprint, settings)
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
@@ -1298,6 +1307,13 @@ class LLMClient:
             extra_body = extra_body_override or None
         else:
             extra_body = own["extra_body"]
+        # DISPATCH-SETTINGS-IDENTITY-001: the settings identity is computed
+        # from the binding's own (or the caller's overriding) settings - the
+        # input qualification enumerates (binding_inference_settings) - never
+        # from the body below, where a declared context_window has been
+        # translated into the runtime's request option. The window is runtime
+        # identity (the fingerprint), not an inference setting.
+        settings_body = extra_body
         # FALLBACK-CONTEXT-WINDOW-001: the request carries the window the
         # budget below plans against (the binding's declared context_window,
         # unless extra_body sets the provider option itself).
@@ -1316,7 +1332,7 @@ class LLMClient:
         # The executed inference identity, with the binding's reasoning flag
         # as the role identity records it (this path applies no reasoning
         # floor of its own).
-        settings = request_settings(temperature=temperature, reasoning=bool(own["reasoning"]), extra_body=extra_body,
+        settings = request_settings(temperature=temperature, reasoning=bool(own["reasoning"]), extra_body=settings_body,
                                     runtime=runtime)
         self._admit(model, fingerprint, settings)
         served = (await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)).window

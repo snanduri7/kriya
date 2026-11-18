@@ -72,10 +72,16 @@ class ContextBudgetUnsatisfiableError(RuntimeError):
     def __init__(self, decision: "DispatchBudget"):
         self.decision = decision
         self.reason_code = CONTEXT_BUDGET_UNSATISFIABLE
+        margin = getattr(decision, "safety_margin", 0)   # a decision built without one states none
         super().__init__(
             f"{CONTEXT_BUDGET_UNSATISFIABLE}: the request needs about {decision.prompt_tokens} prompt tokens "
             f"({decision.counting_method}) plus at least {decision.min_output_tokens} output tokens"
             f"{' and ' + str(decision.reasoning_allowance) + ' reasoning tokens' if decision.reasoning_allowance else ''}"
+            # CONTEXT-REFUSAL-EVIDENCE-001 (Stage B run 4, F1): the dispatch safety margin is part of the
+            # arithmetic (31601 + 1024 fits 32768; 31601 + 1024 + 256 does not), so the refusal states it.
+            + (f" and a {margin}-token dispatch safety margin "
+               f"({decision.prompt_tokens + decision.min_output_tokens + decision.reasoning_allowance + margin}"
+               " tokens in all)" if margin else "")
             + (f", but the largest allowed context window is {decision.context_window} "
                f"({decision.qualification_source}; preferred {decision.preferred_context_window}). "
                if getattr(decision, "context_expanded", False) else

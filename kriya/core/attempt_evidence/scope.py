@@ -634,6 +634,16 @@ def record_undispatched_call(error: BaseException, messages: Any, tools: Any = N
     try:
         payload = {"dispatched": False, "refusal_type": type(error).__name__, "refusal": str(error)[:500],
                    "reason_code": getattr(error, "reason_code", None)}
+        # DISPATCH-SETTINGS-IDENTITY-001 / CONTEXT-REFUSAL-EVIDENCE-001: the refusal's own structured decision, so
+        # it is reproducible from the record - an admission refusal's resolved settings and identity
+        # (ModelAdmissionError.details), a budget refusal's arithmetic (DispatchBudget.to_dict: resolved window,
+        # prompt estimate, output reserve, safety margin, tiers considered). Neither carries a key or an endpoint.
+        details = getattr(error, "details", None)
+        decision = getattr(error, "decision", None)
+        if isinstance(details, dict):
+            payload["refusal_details"] = dict(details)
+        elif decision is not None and callable(getattr(decision, "to_dict", None)):
+            payload["refusal_details"] = {"budget": decision.to_dict()}
     except Exception:  # never replaces the run's own exception
         payload = {"dispatched": False, "refusal_type": type(error).__name__, "refusal": None, "reason_code": None}
     emit("model.request", payload, content={"messages": messages, "tools": tools})
