@@ -1129,7 +1129,8 @@ async def settle_generated_verifiers(ctx: StageContext, run: DevelopmentRun, *, 
         authority=EventAuthority.AUTHORITATIVE, message=message,
         details={"seam": "pass_before_apply" if final else "pass_before_terminal_regression", "path": path,
                  "action": "needs_review" if ruling.stop is not None else "regenerate_verifier",
-                 "reason_code": ruling.stop.reason_code if ruling.stop is not None else None},
+                 "reason_code": ruling.stop.reason_code if ruling.stop is not None else None,
+                 "operator_rationale": ruling.rationale if ruling.stop is None else None},
     ))
     state.terminal_regression_succeeded = False
     failure = Failure(type=failure_type, message=message, raw_output=message, likely_files=[path] if path else [], attempt=state.attempt_number)

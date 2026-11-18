@@ -544,6 +544,12 @@ async def _run_developer_generation_as_developer(
         ctx.kernel.config, deps._chain_binding(ctx, kwargs.get("model_override")),
         kwargs.pop("optional_sections", None) or (),
     )
+    # VERIFIER-REGENERATION-BLIND-001: only the generation that IS a verifier's one in-flight regeneration (its targets are exactly that path)
+    # carries the policy owner's request: the person's rationale, and no "no change" outcome. Every other generation gets nothing.
+    semantics = getattr(ctx, "verifier_semantic", None)
+    regeneration = semantics.regeneration_request(kwargs.get("known_target_files")) if semantics is not None else None
+    if regeneration is not None:
+        kwargs["verifier_regeneration"] = regeneration
     if "expected_output_by_file" not in kwargs:
         # A target whose capability excludes the full file is always asked
         # for an anchored patch, to which the Developer applies no

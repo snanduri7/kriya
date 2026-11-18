@@ -3096,12 +3096,17 @@ def _verifier_semantic_decision(subject: Any, yes: bool) -> Any:
     from kriya.policy.approval import (
         APPROVAL_DECISION_NOT_RECORDED,
         APPROVAL_LAUNCH_CANNOT_ASK,
+        EXPECTATION_INVALID,
         REVIEW_PHASE_FAILING,
         VERIFIER_SEMANTIC_DECISIONS,
         VERIFIER_SEMANTIC_NOT_ASKED,
         VERIFIER_SEMANTIC_NOTICE,
         VERIFIER_SEMANTIC_QUESTION,
+        VERIFIER_SEMANTIC_RATIONALE_MAX_CHARS,
+        VERIFIER_SEMANTIC_RATIONALE_MISSING,
+        VERIFIER_SEMANTIC_RATIONALE_QUESTION,
         VerifierSemanticDecision,
+        verifier_semantic_rationale,
     )
 
     awaiting = request_verifier_semantic_review(subject)
@@ -3135,7 +3140,19 @@ def _verifier_semantic_decision(subject: Any, yes: bool) -> Any:
     word = typed.strip() if isinstance(typed, str) else ""
     if word not in VERIFIER_SEMANTIC_DECISIONS:
         return VerifierSemanticDecision.none(APPROVAL_DECISION_NOT_RECORDED)
-    return VerifierSemanticDecision.decided_as(word, subject.fingerprint)
+    if word != EXPECTATION_INVALID:
+        return VerifierSemanticDecision.decided_as(word, subject.fingerprint)
+    # VERIFIER-REGENERATION-BLIND-001: expectation_invalid permits ONE regeneration, which needs to know what to correct. One focused follow-up;
+    # a blank, over-long or multi-line answer is NO decision (never a blind regeneration, and nothing is written in the person's place).
+    try:
+        reason = click.prompt(f"\n{VERIFIER_SEMANTIC_RATIONALE_QUESTION}\nRationale (one line, at most {VERIFIER_SEMANTIC_RATIONALE_MAX_CHARS} characters)",
+                              default="", show_default=False)
+    except (click.Abort, EOFError, KeyboardInterrupt):
+        reason = ""
+    rationale = verifier_semantic_rationale(reason)
+    if rationale is None:
+        return VerifierSemanticDecision.none(VERIFIER_SEMANTIC_RATIONALE_MISSING)
+    return VerifierSemanticDecision.decided_as(word, subject.fingerprint, rationale)
 
 
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,

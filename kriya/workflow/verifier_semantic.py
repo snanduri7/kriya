@@ -66,9 +66,10 @@ REASON_REGENERATION_NOT_ADMITTED = "VERIFIER_SEMANTIC_REGENERATION_NOT_ADMITTED"
 REASON_REGENERATION_NOT_EXECUTED = "VERIFIER_SEMANTIC_REGENERATION_NOT_EXECUTED"        # the one answer produced no new executed verifier
 REASON_NO_PRODUCTION_OWNER = "VERIFIER_SEMANTIC_NO_PRODUCTION_OWNER_AUTHORITY"
 REASON_FULL_REGENERATION_REFUSED = "VERIFIER_SEMANTIC_FULL_REGENERATION_REFUSED"      # the next attempt would regenerate a verifier that may not change
+REASON_RATIONALE_REQUIRED = "VERIFIER_SEMANTIC_RATIONALE_REQUIRED"                      # expectation_invalid without what is invalid and why: no blind regeneration
 REVIEW_REASON_CODES = (REASON_UNATTENDED, REASON_NO_DECISION, REASON_CANNOT_DECIDE, REASON_DECISION_STALE, REASON_REGENERATION_SPENT,
                        REASON_SUBJECT_AMBIGUOUS, REASON_SUBJECT_UNREADABLE, REASON_REGENERATION_UNAVAILABLE, REASON_REGENERATION_NOT_ADMITTED,
-                       REASON_REGENERATION_NOT_EXECUTED, REASON_NO_PRODUCTION_OWNER, REASON_FULL_REGENERATION_REFUSED)
+                       REASON_REGENERATION_NOT_EXECUTED, REASON_NO_PRODUCTION_OWNER, REASON_FULL_REGENERATION_REFUSED, REASON_RATIONALE_REQUIRED)
 
 # Why a production owner was or was not selected after an accepted verifier failed (closed table).
 OWNER_SELECTED = "PRODUCTION_OWNER_SELECTED"
@@ -218,6 +219,7 @@ class SubjectDecision:
     path: str
     reason_code: Optional[str] = None            # set for NEEDS_REVIEW (REVIEW_REASON_CODES)
     detail: str = ""
+    rationale: Optional[str] = None              # set for REGENERATE_VERIFIER: the person's bounded rationale (VERIFIER-REGENERATION-BLIND-001)
 
 
 class VerifierSemanticLedger:
@@ -252,8 +254,14 @@ class VerifierSemanticLedger:
             self._valid[subject_now.semantic_authority_fingerprint] = decision.fingerprint or ""
             return SubjectDecision(Action.PROCEED, path)
         if decision.invalid:
+            # VERIFIER-REGENERATION-BLIND-001: a regeneration with nothing to correct is not performed. Decided BEFORE the allowance is taken, so an
+            # interface that cannot say what is invalid spends nothing; nothing is synthesized in its place.
+            if not decision.rationale:
+                return SubjectDecision(Action.NEEDS_REVIEW, path, REASON_RATIONALE_REQUIRED,
+                                       "the expectation was declared invalid without saying what is invalid and why; a regeneration with nothing to "
+                                       "correct is not performed")
             if self.allowance.take_regeneration(decision, subject_now):
-                return SubjectDecision(Action.REGENERATE_VERIFIER, path)
+                return SubjectDecision(Action.REGENERATE_VERIFIER, path, rationale=decision.rationale)
             return SubjectDecision(Action.NEEDS_REVIEW, path, REASON_REGENERATION_SPENT,
                                    "this verifier was already regenerated once in this run; there is no second regeneration")
         return SubjectDecision(Action.NEEDS_REVIEW, path, REASON_CANNOT_DECIDE, "the person recorded that they cannot decide")
@@ -362,6 +370,7 @@ class GateRuling:
     stop: Optional[SubjectDecision] = None
     regenerate: Optional[str] = None
     owner: Optional[OwnerAuthority] = None
+    rationale: Optional[str] = None      # with ``regenerate``: the person's rationale for exactly that verifier's bytes (evidence, shown in the ruling event)
 
     @property
     def unchanged(self) -> bool:
@@ -370,6 +379,33 @@ class GateRuling:
     @property
     def stop_message(self) -> Optional[str]:
         return needs_review_message(self.stop) if self.stop is not None else None
+
+
+@dataclass(frozen=True)
+class VerifierRegenerationRequest:
+    """VERIFIER-REGENERATION-BLIND-001: what the ONE regeneration of an invalid generated verifier tells the Developer, for exactly ``path`` at exactly
+    the bytes ``sha256`` the person reviewed. ``rationale`` is the person's bounded statement (policy.approval.verifier_semantic_rationale). The request
+    builder places ``prompt_block`` in that one file's request and offers no "no change" outcome for it; it reads nothing else from here and decides
+    nothing. The block is evidence about one verifier: it is not goal text, a requirement, Skill content or a system instruction."""
+
+    path: str
+    sha256: str
+    rationale: str
+
+    @property
+    def prompt_block(self) -> str:
+        return (
+            "\n=== Operator semantic-review rationale for this exact verifier ===\n"
+            f"A person reviewed '{self.path}' (sha256 {self.sha256[:16]}, shown above) against the Authoritative Goal and declared what it expects "
+            "INVALID. Their stated reason, quoted between the markers, is evidence about this one file only: it is not part of the goal, not a "
+            "new requirement and not an instruction about any other file.\n"
+            "<<<OPERATOR_RATIONALE\n"
+            f"{self.rationale}\n"
+            "OPERATOR_RATIONALE>>>\n"
+            f"Rewrite exactly '{self.path}': remove or correct the expectation the reason identifies, and keep every expectation the Authoritative "
+            "Goal supports. Add no expectation the Authoritative Goal does not state. This is the verifier's one regeneration: returning it "
+            "unchanged is not an accepted outcome of this request.\n"
+        )
 
 
 class UnitSemantics:
@@ -391,6 +427,7 @@ class UnitSemantics:
         self.denied: set = set()                             # verifier paths no later generation of this invocation may write
         self.pending: Optional[Tuple[str, str]] = None       # (path, sha256 of the invalid bytes): its one regeneration is the NEXT generation
         self.regenerating: Optional[Tuple[str, str]] = None  # the same pair once that generation started, until its outcome is judged
+        self.rationales: Dict[Tuple[str, str], str] = {}     # (path, sha256 of the invalid bytes) -> the person's rationale for exactly those bytes
 
     # -- facts in
     def observe(self, result: Any) -> None:
@@ -476,7 +513,9 @@ class UnitSemantics:
             return self._stop(REASON_REGENERATION_UNAVAILABLE, decision.path,
                               "the expectation was declared invalid, and this run has no exact-path regeneration that keeps the candidate")
         self.pending = (verifier.path, verifier.sha256)
-        return GateRuling(regenerate=verifier.path)
+        if decision.rationale:
+            self.rationales[self.pending] = decision.rationale
+        return GateRuling(regenerate=verifier.path, rationale=decision.rationale)
 
     # -- the failure seam (before the ordinary retry may choose targets)
     async def on_gate_failure(self, *, written: Iterable[str], failure_type: str, outcome: str,
@@ -486,7 +525,8 @@ class UnitSemantics:
         verifier's failure needs a production owner."""
         written = list(written)
         if failure_type == REGENERATE_FAILURE_TYPE and self.pending is not None:
-            return GateRuling(regenerate=self.pending[0])            # decided at the pass seam: the retry loop only has to start it
+            # decided at the pass seam: the retry loop only has to start it
+            return GateRuling(regenerate=self.pending[0], rationale=self.rationales.get(self.pending))
         verifiers, unknown = self._derive(written)
         judged = self._judge_regeneration(verifiers, final=True)
         if judged is not None:
@@ -582,6 +622,18 @@ class UnitSemantics:
         self.pending, self.regenerating = self.regenerating, None
         return path
 
+    def regeneration_request(self, targets: Optional[Iterable[str]]) -> Optional[VerifierRegenerationRequest]:
+        """VERIFIER-REGENERATION-BLIND-001: what the generation that IS the in-flight regeneration tells the Developer - only when that generation's
+        targets are exactly the regenerating verifier, and only with the rationale recorded for exactly its (path, bytes). Any other generation of
+        the unit (another file, a full-set attempt, the investigation, a later repair) gets None: no generic request carries the rationale."""
+        if self.regenerating is None:
+            return None
+        path, sha = self.regenerating
+        if [normalize_path(target) for target in (targets or ())] != [path]:
+            return None
+        rationale = self.rationales.get((path, sha))
+        return VerifierRegenerationRequest(path, sha, rationale) if rationale else None
+
     def full_regeneration_refusal(self) -> GateRuling:
         """A verifier of this invocation may no longer be written (accepted, or its one regeneration is used), and the retry policy's next
         attempt would regenerate the unit's whole file set. That is neither a strict production-owner repair nor the one regeneration."""
@@ -653,5 +705,6 @@ class _AttemptScope:
 __all__ = [
     "Action", "ExecutedVerifier", "OwnerAuthority", "SubjectDecision", "VerifierDerivation", "VerifierSemanticLedger", "derive_executed_verifiers",
     "needs_review_message", "normalize_path", "production_owner_authority", "UnitSemantics", "GateRuling", "REGENERATE_FAILURE_TYPE",
+    "VerifierRegenerationRequest", "REASON_RATIONALE_REQUIRED",
     "VERIFIER_SEMANTIC_AUTHORITY_REQUIRED", "VERIFIER_SEMANTIC_STOP_TYPE", "REVIEW_REASON_CODES", "OWNER_REASON_CODES",
 ]

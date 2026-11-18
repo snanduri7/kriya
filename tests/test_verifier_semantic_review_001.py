@@ -455,8 +455,10 @@ def test_valid_and_cannot_decide_permit_no_regeneration_and_carry_no_owner_or_mu
     allowance, subject = VerifierSemanticAllowance(), _subject()
     decision = VerifierSemanticDecision.decided_as(word, subject.fingerprint)
     assert allowance.take_regeneration(decision, subject) is False and not allowance.regeneration_spent(subject)
-    # a decision is a word bound to a fingerprint and nothing else: it has no field that could name a defect owner, a file or a repair target
-    assert {f.name for f in VerifierSemanticDecision.__dataclass_fields__.values()} == {"decision", "fingerprint", "no_decision_reason"}
+    # a decision is a word bound to a fingerprint, plus - for expectation_invalid only (VERIFIER-REGENERATION-BLIND-001, owner contract 2026-11-18) - the
+    # person's bounded rationale. It still has no field that could name a defect owner, a file or a repair target, and these two words carry no rationale.
+    assert {f.name for f in VerifierSemanticDecision.__dataclass_fields__.values()} == {"decision", "fingerprint", "no_decision_reason", "rationale"}
+    assert decision.rationale is None
 
 
 def test_a_stale_invalid_decision_or_a_non_decision_takes_nothing():
@@ -498,7 +500,7 @@ def test_a_launch_that_cannot_hold_the_review_and_an_unattended_yes_run_decide_n
 
 
 @pytest.mark.parametrize("typed,expected", [
-    ("expectation_valid", EXPECTATION_VALID), (" expectation_invalid \n", EXPECTATION_INVALID), ("cannot_decide", CANNOT_DECIDE),
+    ("expectation_valid", EXPECTATION_VALID), (" cannot_decide \n", CANNOT_DECIDE),     # expectation_invalid: tests/test_verifier_regeneration_blind_001.py
     ("", None), ("y", None), ("approve", None), ("reject", None), ("valid", None), ("EXPECTATION_VALID", None),
 ])
 def test_the_terminal_prompt_takes_only_the_three_exact_words(monkeypatch, capsys, typed, expected):

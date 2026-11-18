@@ -537,6 +537,25 @@ REVIEW_PHASE_PASSING, REVIEW_PHASE_FAILING = "passing_verifier", "failing_verifi
 VERIFIER_SEMANTIC_PHASES = (REVIEW_PHASE_PASSING, REVIEW_PHASE_FAILING)
 VERIFIER_SEMANTIC_MAX_ITEMS = 64          # criteria + invariants shown on one review
 VERIFIER_SEMANTIC_NOT_ASKED = "VERIFIER_SEMANTIC_NOT_ASKED"   # no typed channel, or the subject cannot be shown exactly: nobody was asked
+# VERIFIER-REGENERATION-BLIND-001 (owner ruling 2026-11-18, Stage B run 6): an ``expectation_invalid`` decision says WHAT is invalid and why. Without
+# it the one regeneration it permits has nothing to correct (MEASURED: the model answered "no change needed"). One line, bounded, the person's words.
+VERIFIER_SEMANTIC_RATIONALE_QUESTION = "What expectation of this verifier is invalid, and why, under the canonical contract?"
+VERIFIER_SEMANTIC_RATIONALE_MAX_CHARS = 600
+VERIFIER_SEMANTIC_RATIONALE_MISSING = "VERIFIER_SEMANTIC_RATIONALE_MISSING"   # expectation_invalid was typed and no usable rationale followed: no decision
+
+
+def verifier_semantic_rationale(text: Any) -> Optional[str]:
+    """The bounded rationale of an ``expectation_invalid`` decision, or None when ``text`` is not one: not a string, empty after trimming, longer
+    than VERIFIER_SEMANTIC_RATIONALE_MAX_CHARS, holding a line break or another control character, or text the one redaction owner would change.
+    Nothing is repaired, shortened or guessed: a rationale is the person's own line or it is absent."""
+    if not isinstance(text, str):
+        return None
+    value = text.strip()
+    if not value or len(value) > VERIFIER_SEMANTIC_RATIONALE_MAX_CHARS:
+        return None
+    if any(ord(char) < 32 or ord(char) == 127 for char in value) or redact_value(value) != value:
+        return None
+    return value
 
 
 @dataclass(frozen=True)
@@ -620,25 +639,33 @@ def verifier_semantic_reviewable(subject: VerifierSemanticSubject) -> bool:
 class VerifierSemanticDecision:
     """A person's semantic decision, bound to the subject fingerprint it was made for - or NO decision. ``decision`` is one of VERIFIER_SEMANTIC_DECISIONS exactly
     when ``fingerprint`` is set. No decision (``decision`` None: not asked, declined to answer, expired, channel unavailable, not durably recorded) is NOT
-    ``cannot_decide``: that word is a real, recorded answer. It has no truth value: read ``.valid`` / ``.invalid`` / ``.cannot_decide`` / ``.decided``."""
+    ``cannot_decide``: that word is a real, recorded answer. It has no truth value: read ``.valid`` / ``.invalid`` / ``.cannot_decide`` / ``.decided``.
+
+    ``rationale`` (VERIFIER-REGENERATION-BLIND-001): the person's bounded statement of what is invalid and why, carried ONLY by an
+    ``expectation_invalid`` decision and bound, like the word, to ``fingerprint``. It is human semantic-review evidence about that exact verifier: never
+    goal text, a requirement, Skill content or an authority of its own. An ``expectation_invalid`` decision from an interface that cannot supply one
+    carries None, and then permits no regeneration (the policy owner stops for review). The other two words never carry one."""
 
     decision: Optional[str]
     fingerprint: Optional[str]
     no_decision_reason: Optional[str] = None
+    rationale: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.decision is None:
-            if self.fingerprint is not None or not self.no_decision_reason:
-                raise ValueError("a verifier semantic non-decision carries no fingerprint and must say why nobody decided")
+            if self.fingerprint is not None or not self.no_decision_reason or self.rationale is not None:
+                raise ValueError("a verifier semantic non-decision carries no fingerprint and no rationale, and must say why nobody decided")
         elif self.decision not in VERIFIER_SEMANTIC_DECISIONS or not self.fingerprint or self.no_decision_reason is not None:
             raise ValueError(f"verifier semantic decision {self.decision!r} is not a bound decision of the closed table")
+        elif self.rationale is not None and (self.decision != EXPECTATION_INVALID or verifier_semantic_rationale(self.rationale) != self.rationale):
+            raise ValueError("only an expectation_invalid decision carries a rationale, and only a bounded one (verifier_semantic_rationale)")
 
     def __bool__(self) -> bool:
         raise TypeError("a VerifierSemanticDecision has no truth value; read .valid / .invalid / .cannot_decide / .decided")
 
     @classmethod
-    def decided_as(cls, decision: str, fingerprint: str) -> "VerifierSemanticDecision":
-        return cls(decision, fingerprint)
+    def decided_as(cls, decision: str, fingerprint: str, rationale: Optional[str] = None) -> "VerifierSemanticDecision":
+        return cls(decision, fingerprint, None, rationale)
 
     @classmethod
     def none(cls, reason: str) -> "VerifierSemanticDecision":

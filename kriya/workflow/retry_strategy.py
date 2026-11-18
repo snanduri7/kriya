@@ -550,7 +550,8 @@ async def _generated_verifier_ruling(state: GenerationState, ctx, failure: Failu
                  "action": ("needs_review" if ruling.stop is not None else "regenerate_verifier" if ruling.regenerate else "repair_production_owner"),
                  "reason_code": ruling.stop.reason_code if ruling.stop is not None else None,
                  "owner_id": ruling.owner.owner_id if ruling.owner is not None else None,
-                 "owner_files": list(ruling.owner.files) if ruling.owner is not None else []},
+                 "owner_files": list(ruling.owner.files) if ruling.owner is not None else [],
+                 "operator_rationale": ruling.rationale if ruling.regenerate else None},
     ))
     return ruling
 

@@ -25,6 +25,12 @@ from kriya.workflow.workflow import WorkflowEngine
 LIB, TEST = "shop.py", "tests/test_shop.py"
 GOAL = "page_size() is the number of items on one page: 20."
 LIB_20, LIB_10 = "def page_size():\n    return 20\n", "def page_size():\n    return 10\n"
+# VERIFIER-REGENERATION-BLIND-001: an expectation_invalid decision says what is invalid and why (the scripted person's default line)
+RATIONALE = "the expected page size is not the one the contract states"
+
+
+def _decide(word: str, fingerprint: str) -> VerifierSemanticDecision:
+    return VerifierSemanticDecision.decided_as(word, fingerprint, RATIONALE if word == "expectation_invalid" else None)
 
 
 def _test(expected: int, marker: str = "V0") -> str:
@@ -118,7 +124,9 @@ class Scene:
     def _semantic(self, subject: VerifierSemanticSubject) -> Any:
         self.subjects.append(subject)
         word = self.semantic.pop(0) if len(self.semantic) > 1 else (self.semantic[0] if self.semantic else None)
-        return VerifierSemanticDecision.decided_as(word, subject.fingerprint) if word else VerifierSemanticDecision.none("declined")
+        if isinstance(word, VerifierSemanticDecision) or callable(word):      # a scripted decision of its own (e.g. one with no rationale)
+            return word(subject) if callable(word) else word
+        return _decide(word, subject.fingerprint) if word else VerifierSemanticDecision.none("declined")
 
     def _tests(self, validator: Any) -> Dict[str, Any]:
         tree = Path(validator.workspace_path)
@@ -522,7 +530,7 @@ def _direct_unit(answer: str) -> Any:
 
     def review(subject: VerifierSemanticSubject) -> Any:
         subjects.append(subject)
-        return VerifierSemanticDecision.decided_as(answer, subject.fingerprint)
+        return _decide(answer, subject.fingerprint)
 
     files = {TEST: _test(10).encode(), LIB: LIB_20.encode()}
     unit = vs.unit_semantics(None, run_id="run-1", unit_id=None, goal=GOAL, structured_plan=None, allowlist_scope=False, attended=True,
@@ -587,7 +595,7 @@ def test_the_typed_stop_is_one_category_and_relabels_nothing_else():
 
 def _unit(files: Dict[str, bytes], answer: Optional[str] = None, **over: Any) -> Any:
     def review(subject: VerifierSemanticSubject) -> Any:
-        return VerifierSemanticDecision.decided_as(answer, subject.fingerprint)
+        return _decide(answer, subject.fingerprint)
 
     callback = TypedApprovalCallback(lambda files, reason: True, lambda subject: None, None, review) if answer else None
     return vs.UnitSemantics(ledger=vs.VerifierSemanticLedger(), run_id="r", plan_hash="p", unit_id="s1", goal=GOAL, regenerable=True,

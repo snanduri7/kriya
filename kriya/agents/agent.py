@@ -1342,6 +1342,7 @@ class DeveloperAgent(BaseAgent):
         expected_output_by_file: Optional[Dict[str, Any]] = None,
         request_fit: Optional[Any] = None,
         edit_operations: Optional[Dict[str, Iterable[str]]] = None,
+        verifier_regeneration: Optional[Any] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
@@ -1562,6 +1563,9 @@ class DeveloperAgent(BaseAgent):
             apply_fix_analysis = bool(prior_error_context) and file_is_implicated
 
             requested_operation = (operation_by_file or {}).get(filepath)
+            # VERIFIER-REGENERATION-BLIND-001: set only for the exact file a person's expectation_invalid decision regenerates
+            semantic_regeneration = (verifier_regeneration if verifier_regeneration is not None
+                                     and getattr(verifier_regeneration, "path", None) == filepath else None)
             if requested_operation is None:
                 requested_operation = default_operation
             requested_operation_value = getattr(
@@ -1767,12 +1771,14 @@ class DeveloperAgent(BaseAgent):
                        if full_file_offered else
                        "A whole-file replacement is not available for this file: its complete current source "
                        "was not shown, so copy SEARCH text only from exact source shown above. ")
-                    + f"If, after your analysis, THIS SPECIFIC FILE genuinely requires no code change to "
-                    f"{_no_change_topic} (for example, this file only calls into or references another file "
-                    "where the actual work belongs), instead write the line \"NO CHANGE NEEDED:\" followed by "
-                    "one sentence explaining why, and do NOT write a SEARCH:/REPLACE:"
-                    + ("/FILE CONTENT:" if full_file_offered else "") + " block "
-                    "at all - do not invent an edit just to have one.\n"
+                    + ("" if semantic_regeneration is not None else
+                       f"If, after your analysis, THIS SPECIFIC FILE genuinely requires no code change to "
+                       f"{_no_change_topic} (for example, this file only calls into or references another file "
+                       "where the actual work belongs), instead write the line \"NO CHANGE NEEDED:\" followed by "
+                       "one sentence explaining why, and do NOT write a SEARCH:/REPLACE:"
+                       + ("/FILE CONTENT:" if full_file_offered else "") + " block "
+                       "at all - do not invent an edit just to have one.")
+                    + "\n"
                 )
             elif apply_fix_analysis:
                 fix_analysis_instruction = (
@@ -1931,8 +1937,10 @@ class DeveloperAgent(BaseAgent):
                     + structured_contract(
                         filepath, analysis_required=repair_outcomes, allow_edit=prefer_anchored_edit,
                         allow_file=(not prefer_anchored_edit) or full_file_offered,
-                        allow_no_change=repair_outcomes,
-                        allow_redirect=repair_outcomes,
+                        # VERIFIER-REGENERATION-BLIND-001: a verifier's one semantic regeneration offers neither "no change" nor a
+                        # redirect to another file; every other repair request keeps both.
+                        allow_no_change=repair_outcomes and semantic_regeneration is None,
+                        allow_redirect=repair_outcomes and semantic_regeneration is None,
                     )
                 )
                 generation_directive = (
@@ -1955,6 +1963,8 @@ class DeveloperAgent(BaseAgent):
                 f"{authority_reminder}"
                 f"{source_context_block}"
                 f"{fix_analysis_instruction}"
+                # the policy owner's own block (verifier_semantic.VerifierRegenerationRequest), placed verbatim, last, for this file only
+                f"{semantic_regeneration.prompt_block if semantic_regeneration is not None else ''}"
             )
             file_prompt = prompt_head + sibling_section + prompt_tail
             if request_fit is not None:
@@ -2228,6 +2238,7 @@ class DeveloperAgent(BaseAgent):
         expected_output_by_file: Optional[Dict[str, Any]] = None,
         request_fit: Optional[Any] = None,
         edit_operations: Optional[Dict[str, Iterable[str]]] = None,
+        verifier_regeneration: Optional[Any] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -2288,6 +2299,8 @@ class DeveloperAgent(BaseAgent):
                 extra_fix_instruction, files_with_current_content, sibling_content_budget,
                 operation_by_file, default_operation, generation_protocol, expected_output_by_file,
                 request_fit, edit_operations,
+                # VERIFIER-REGENERATION-BLIND-001: only a known-target generation can be a verifier's one regeneration
+                verifier_regeneration=verifier_regeneration,
             )
 
         try:

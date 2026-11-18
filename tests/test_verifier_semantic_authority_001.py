@@ -154,8 +154,11 @@ def _subject(**changes) -> VerifierSemanticSubject:
     return VerifierSemanticSubject(**fields)
 
 
+RATIONALE = "the expected count is not the one the contract states"   # VERIFIER-REGENERATION-BLIND-001: expectation_invalid says what and why
+
+
 def _decided(word, subject):
-    return VerifierSemanticDecision.decided_as(word, subject.fingerprint)
+    return VerifierSemanticDecision.decided_as(word, subject.fingerprint, RATIONALE if word == EXPECTATION_INVALID else None)
 
 
 def test_the_semantic_authority_fingerprint_excludes_the_review_event_and_binds_the_exact_semantic_content():
@@ -215,7 +218,7 @@ def test_unattended_without_authority_is_needs_review_and_nobody_is_asked():
 
 def test_invalid_spends_the_one_regeneration_of_that_file_and_never_a_second():
     ledger, v0 = VerifierSemanticLedger(), _subject()
-    assert ledger.after_decision(v0, _decided(EXPECTATION_INVALID, v0)) == vs.SubjectDecision(Action.REGENERATE_VERIFIER, PATH)
+    assert ledger.after_decision(v0, _decided(EXPECTATION_INVALID, v0)) == vs.SubjectDecision(Action.REGENERATE_VERIFIER, PATH, rationale=RATIONALE)
     assert not ledger.expectation_valid(v0)                                           # INVALID never establishes validity
     v1 = _subject(source=JAVA_TEST.decode().replace("counts", "tallies"), failure_identity="f9" * 32)
     assert v1.subject_key == v0.subject_key and v1.semantic_authority_fingerprint != v0.semantic_authority_fingerprint
@@ -253,7 +256,7 @@ def test_everything_but_a_bound_valid_or_invalid_decision_changes_nothing_and_is
 
 
 def test_the_closed_reason_tables():
-    assert len(set(vs.REVIEW_REASON_CODES)) == len(vs.REVIEW_REASON_CODES) == 12   # slice 2: -1 (the compile-phase rule), +4 (regeneration, full set)
+    assert len(set(vs.REVIEW_REASON_CODES)) == len(vs.REVIEW_REASON_CODES) == 13   # VERIFIER-REGENERATION-BLIND-001: +1 (RATIONALE_REQUIRED); slice 2: -1 (the compile-phase rule), +4 (regeneration, full set)
     assert len(set(vs.OWNER_REASON_CODES)) == len(vs.OWNER_REASON_CODES) == 9   # +1: a locator that matches more than one workspace member
     assert [a.value for a in Action] == ["proceed", "ask", "regenerate_verifier", "needs_review"]
 

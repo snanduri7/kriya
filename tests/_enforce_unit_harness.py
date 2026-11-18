@@ -102,7 +102,9 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
             text_or_pair = source() if callable(source) else source
             if isinstance(text_or_pair, tuple):     # (another path, content): the scripted model answers for a file it was not asked for
                 path, text_or_pair = text_or_pair
-            if isinstance(text_or_pair, list):      # [(search, replace), ...]: the scripted model answers with anchored edits, not a whole file
+            if text_or_pair is None:                # the scripted model answers "no change needed" for the file it was asked for
+                content = sentinel(path, analysis="no change.", no_change=True)
+            elif isinstance(text_or_pair, list):    # [(search, replace), ...]: the scripted model answers with anchored edits, not a whole file
                 content = sentinel(path, analysis="edit.", edits=text_or_pair)
             else:
                 content = sentinel(path, analysis="edit.", content=text_or_pair)
