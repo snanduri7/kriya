@@ -29,6 +29,19 @@ _VERIFICATION_MARKER_RE = re.compile(
 )
 
 
+# RUNTIME-FAILURE-IDENTITY-001: the key under which a finite-command runtime-verification failure carries its canonical identity, in
+# ``Failure.diagnostics`` and in a unit result's ``last_failure`` (runtime_verification writes it, outcome transports it, the enforce loop
+# reads it). It lives here because this module is the leaf all three already may import.
+RUNTIME_FAILURE_IDENTITY_KEY = "runtime_failure_identity"
+
+
+def verification_markers(output: str) -> Tuple[Tuple[str, str], ...]:
+    """Every ``[VERIFICATION] PASS`` / ``[VERIFICATION] FAIL: <reason>`` line of ``output`` as (verdict, reason), in order of occurrence;
+    the reason is the program's own text, trimmed ("" when none). The ONE parse of the marker convention: ``extract_contract_verdict``
+    interprets this and nothing else reads the pattern."""
+    return tuple((match.group(1), (match.group(2) or "").strip()) for match in _VERIFICATION_MARKER_RE.finditer(output))
+
+
 def extract_contract_verdict(output: str) -> Optional[Dict[str, Any]]:
     """Scans ALL occurrences of the marker, not just the first - a goal whose
     Runtime Verification runs multiple sequential commands (e.g. "add a task,
@@ -41,13 +54,13 @@ def extract_contract_verdict(output: str) -> Optional[Dict[str, Any]]:
     trust without guessing; the retry loop's existing extract_implicated_files()
     fallback (bare basename-in-text matching) still gets a chance against the
     reason text and full captured output either way."""
-    matches = list(_VERIFICATION_MARKER_RE.finditer(output))
+    matches = verification_markers(output)
     if not matches:
         return None
 
-    fails = [m for m in matches if m.group(1) == "FAIL"]
+    fails = [reason for verdict, reason in matches if verdict == "FAIL"]
     if fails:
-        reasons = "; ".join((m.group(2) or "").strip() or "no reason given" for m in fails)
+        reasons = "; ".join(reason or "no reason given" for reason in fails)
         return {
             "passed": False,
             "reasoning": (

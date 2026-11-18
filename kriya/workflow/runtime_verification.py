@@ -51,9 +51,10 @@ attempt.py, OI-46; tests patch the validator class at its source).
 """
 import dataclasses
 import hashlib
+import json
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
 
 from kriya.config.authority import is_human_in_the_loop
 from kriya.policy.approval import (
@@ -92,7 +93,12 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.runtime_observation import candidate_files_digest
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
-from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
+from kriya.workflow.verification_contract import (
+    RUNTIME_FAILURE_IDENTITY_KEY,
+    ContractVerdictState,
+    classify_contract_verdict,
+    verification_markers,
+)
 from kriya.workflow.worktree import (
     candidate_has_canonical_membership,
     candidate_member_files,
@@ -459,6 +465,46 @@ def _note_optional_runtime_check_unobserved(deps: RuntimeDeps, state: RunState, 
     ))
 
 
+# The gate types of a finite-command application run. A finite command that is itself a test or a build fails as ``test`` / ``compile``
+# and keeps its legacy identity, like every other test and compile failure.
+_FINITE_RUNTIME_FAILURE_TYPES = ("run_verification", "run_verification_hung")
+MANAGED_SERVICE_PROBE_AUTHORITY = "managed_service_probe"
+RUNTIME_FAILURE_IDENTITY_SCHEMA = "kriya.runtime_failure_identity/1"
+
+
+def finite_runtime_failure_identity(failure_outcome: Mapping[str, Any]) -> Optional[str]:
+    """RUNTIME-FAILURE-IDENTITY-001 (Stage B run 8). The canonical identity of a graded finite-command runtime-verification failure, or None
+    when this is not one (another gate type, a managed-service probe, or no executed step was recorded): then the legacy identity applies.
+
+    MEASURED: the legacy identity hashes the last 4,000 characters of the run's output with the grader's reasoning appended, so the same
+    failure a second later (log time stamps) is "another" failure, and a model-graded failure's identity contains model text.
+
+    Only deterministic facts this gate already owns: the gate type; who graded (contract / process_exit / llm - the authority, never its
+    words); and, per executed step in order, the command that actually ran, its exit code, whether it timed out, and the program's own
+    ``[VERIFICATION]`` verdict lines as parsed by verification_contract (verdict and reason). Never the output as a whole, a time stamp, a
+    duration, the grader's reasoning, likely files or an attribution. Two crashes with no verdict line and the same exit facts are the SAME
+    identity here: nothing reads free crash text to tell them apart."""
+    if failure_outcome.get("type") not in _FINITE_RUNTIME_FAILURE_TYPES:
+        return None
+    if failure_outcome.get("graded_by") == MANAGED_SERVICE_PROBE_AUTHORITY:
+        return None
+    steps = [step for step in failure_outcome.get("steps") or () if isinstance(step, Mapping)]
+    if not steps:
+        return None
+    payload = {
+        "schema": RUNTIME_FAILURE_IDENTITY_SCHEMA,
+        "gate": failure_outcome.get("type"),
+        "authority": failure_outcome.get("graded_by"),
+        "steps": [{
+            "command": [str(part) for part in step.get("command") or ()],
+            "exit_code": step.get("exit_code"),
+            "timed_out": bool(step.get("timed_out")),
+            "markers": [list(marker) for stream in ("stdout", "stderr") for marker in verification_markers(str(step.get(stream) or ""))],
+        } for step in steps],
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
 def _fail_graded_runtime_check(deps: RuntimeDeps, state: RunState, ctx: AttemptCtx, failure: Any, failure_outcome: Dict[str, Any]) -> None:
     """The ONE exit of an application check that RAN and was GRADED failed (owner ruling 17, 2026-11-15; S6, C-02). The authority is the
     run's own ``ctx.runtime_verification_required`` (the goal's declared verification contract, never the check's text or the judge's
@@ -469,6 +515,11 @@ def _fail_graded_runtime_check(deps: RuntimeDeps, state: RunState, ctx: AttemptC
       or open or close a requirement. It is recorded as a ``runtime_verification.advisory_failure`` event (commands, grader, bounded
       output) and the attempt continues to its other gates; it is not a gate outcome, so it is neither a pass nor a failure of the
       candidate, and no run recipe or observed output is derived from it."""
+    # RUNTIME-FAILURE-IDENTITY-001: both finite-command paths leave here with their executed steps in the outcome, so the identity is taken
+    # once, from the same facts, and cannot drift between them. Existing diagnostics are kept.
+    identity = finite_runtime_failure_identity(failure_outcome)
+    if identity is not None:
+        failure.diagnostics = {**(failure.diagnostics or {}), RUNTIME_FAILURE_IDENTITY_KEY: identity}
     if ctx.runtime_verification_required:
         state.record_gate_outcome(failure_outcome)
         raise QualityGateFailure(failure)

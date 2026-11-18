@@ -33,6 +33,19 @@ from kriya.workflow.requirements import (
 from kriya.workflow.run_recipe import derive_verified_run_recipe
 from kriya.workflow.runtime_observation import observed_run_output
 from kriya.workflow.stage_context import RunState, StageDeps
+from kriya.workflow.verification_contract import RUNTIME_FAILURE_IDENTITY_KEY
+
+
+def last_failure_export(failure: Any) -> Optional[Dict[str, Any]]:
+    """A unit result's ``last_failure``: the failure's type, its message and the gate's output (both bounded), plus - additive, only
+    when the gate attached one to ``Failure.diagnostics`` - the canonical runtime failure identity. None when there is no failure."""
+    if failure is None:
+        return None
+    exported = {"type": failure.type, "message": str(failure.message or "")[-2000:], "raw_output": str(failure.raw_output or "")[-4000:]}
+    identity = (getattr(failure, "diagnostics", None) or {}).get(RUNTIME_FAILURE_IDENTITY_KEY)
+    if identity:
+        exported[RUNTIME_FAILURE_IDENTITY_KEY] = identity
+    return exported
 
 # PRD-032: the environment_failure prefix of a terminal commit that did not
 # commit (failure_category ``workspace_commit_failed``).
@@ -316,13 +329,11 @@ def completed_result(
         # PRD-026 / LR-R1-P4: which no-progress terminal ended the run (None otherwise) - the enforce
         # controller keys its one bounded upstream-owner reopen on VERIFICATION_RETRY_NO_CHANGE_POSSIBLE.
         "no_progress_reason": state.no_progress_reason if not quality_passed else None,
-        # The unit's own last deterministic failure (type, message, the gate's output, bounded) - the evidence
-        # a reopened upstream owner receives. Never model text: Failure.raw_output is the validator's output.
-        "last_failure": (
-            {"type": state.last_failure.type, "message": str(state.last_failure.message or "")[-2000:],
-             "raw_output": str(state.last_failure.raw_output or "")[-4000:]}
-            if state.last_failure is not None and not quality_passed else None
-        ),
+        # The unit's own last failure (type, message, the gate's output, bounded) - the evidence a reopened upstream owner
+        # receives. ``raw_output`` is the gate's captured output; for a runtime-verification failure it ALSO carries the grader's
+        # reasoning line, which is model text when the grade was the model's (RUNTIME-FAILURE-IDENTITY-001: it is evidence to show,
+        # not an identity). The canonical deterministic identity, when the gate supplied one, travels beside it.
+        "last_failure": last_failure_export(state.last_failure) if not quality_passed else None,
         # Verifier replay: the stopping unit's exact staged candidate, only when the caller asked for it and only as an in-memory
         # object (the enforce loop removes this key from the result before anything can serialize it).
         **({"refused_candidate": state.refused_candidate}

@@ -71,6 +71,7 @@ from kriya.workflow.resume_support import (
     TOOL_STARTED_NOT_DURABLE,
 )
 from kriya.workflow.subtask_executor import plannable_tool_names
+from kriya.workflow.verification_contract import RUNTIME_FAILURE_IDENTITY_KEY
 from kriya.workflow.verifier_repair import (
     REFUSED_AUTHORIZATION_STALE,
     UNAVAILABLE_ALREADY_ASKED,
@@ -2159,8 +2160,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             return handle, None
 
         def _dependent_failure_identity(unit_result: Mapping[str, Any]) -> Optional[str]:
-            last = unit_result.get("last_failure") or {}
-            return failure_identity(last.get("type"), last.get("raw_output")) if last else None
+            return dependent_failure_identity(unit_result)
 
         def _drop_pre_repair_owner(consumer_id: str) -> None:
             """The consumer's recovery episode is over (settled, refused or exhausted): its O0 goes with it."""
@@ -5220,6 +5220,17 @@ VERIFICATION_OWNER_EPISODE_ACCEPTED = "VERIFICATION_OWNER_EPISODE_ACCEPTED"
 VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED = "VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED"
 VERIFICATION_OWNER_EPISODE_OWNER_STOPPED = "VERIFICATION_OWNER_EPISODE_OWNER_STOPPED"
 VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER = "VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER"
+
+
+def dependent_failure_identity(unit_result: Mapping[str, Any]) -> Optional[str]:
+    """The identity of a unit result's last failure, for EVERY reader in the loop (owner eligibility after a changed failure, the
+    dependent-verification facts, the reopening and replay identities of a verifier repair). RUNTIME-FAILURE-IDENTITY-001: the
+    canonical identity the gate supplied when there is one (a finite-command runtime verification); otherwise the legacy identity,
+    unchanged - verifier_replay.failure_identity over the failure type and the gate's bounded output. None when there is no failure."""
+    last = unit_result.get("last_failure") or {}
+    if not last:
+        return None
+    return last.get(RUNTIME_FAILURE_IDENTITY_KEY) or failure_identity(last.get("type"), last.get("raw_output"))
 
 
 def changed_failure_reopen_owners(invoked_group_records: Sequence[Mapping[str, Any]], previous_failure: Optional[str],
