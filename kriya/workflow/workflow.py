@@ -1312,7 +1312,12 @@ def run_contract_baseline(engine: Any, contract: Any, requirement_set: Any, work
     from kriya.tools import test_execution
     from kriya.workflow.acceptance_jvm import run_java_acceptance
     from kriya.workflow.acceptance_oracle import judge_acceptance, run_acceptance
-    from kriya.workflow.authority_bundle import AUTHORITY_RUNS_DIR, bound_authority_bundle, run_authority_bundle
+    from kriya.workflow.authority_bundle import (
+        AUTHORITY_RUNS_DIR,
+        bound_authority_bundle,
+        greenfield_baseline_run,
+        run_authority_bundle,
+    )
     from kriya.workflow.contract_baseline import run_baseline_authorities, suite_verdict_from_report
     from kriya.workflow.example_oracle import bound_derived_examples
 
@@ -1364,8 +1369,10 @@ def run_contract_baseline(engine: Any, contract: Any, requirement_set: Any, work
     try:
         return run_baseline_authorities(
             contract, requirement_set, base_revision=base_revision,
-            run_bundle=(lambda: run_authority_bundle(bundle, workspace_path, state_root=state_root, validator_factory=validator_for))
-            if bundle is not None else None,
+            # GREENFIELD-AUTHORITY-BASE-001: a greenfield authority has no existing project to judge - its baseline is the typed INDETERMINATE, nothing is executed.
+            run_bundle=(greenfield_baseline_run if bundle is not None and bundle.is_greenfield and base_revision is None
+                        else (lambda: run_authority_bundle(bundle, workspace_path, state_root=state_root, validator_factory=validator_for))
+                        if bundle is not None else None),
             bundle_digest=bundle.digest if bundle is not None else None,
             judge_acceptance=judge(acceptance) if acceptance is not None else None,
             acceptance_digest=acceptance.digest if acceptance is not None else None,
@@ -1544,7 +1551,7 @@ def _closer_deps() -> "closers.CloserDeps":
         compute_workspace_content_hash=compute_workspace_content_hash, captured_baseline=captured_baseline,
         attribute_suite_result=attribute_suite_result, post_environment_identity=post_environment_identity,
         load_baseline_environment_identity=_load_baseline_environment_identity,
-        load_authority_bundle=_load_authority_bundle,
+        load_authority_bundle=_load_authority_bundle, project_language=_project_language,
     )
 
 

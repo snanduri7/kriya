@@ -1467,6 +1467,16 @@ asset, a candidate changed during the run, an unavailable toolchain or containme
 closes nothing. A PASS closes the covered claims as operator sufficiency (`human_accepted`, never "verified"); a
 FAIL is deterministic counter-evidence (`violated`). The bundle's bytes never reach a prompt (`visibility: hidden`).
 
+**A project that does not exist yet (greenfield).** An empty folder has no HEAD and no language to bind, so declare it: write
+`"base_revision": "GREENFIELD_NO_BASE_REVISION"` and the language and build tool you expect in `toolchain`. Such a manifest binds only
+a folder with no Git repository and no content of its own (Kriya's `kriya.yaml`, its `.kriya` directory and a desktop's `.DS_Store`
+do not count); a repository, with or without a commit, or a folder that already holds files is refused (`AUTHORITY_BASE_MISMATCH`),
+and a manifest with a commit id, an empty or a missing base never binds a folder without a HEAD - greenfield is never assumed.
+Nothing runs at baseline (there is nothing to judge). Before the oracle may close a requirement Kriya checks that the run really
+started from its own empty first commit and that the generated project is of the declared language; otherwise the requirement stays
+open (`AUTHORITY_BASE_MISMATCH`, `AUTHORITY_TOOLCHAIN_MISMATCH`). A second run in the same folder is no longer greenfield: it needs
+a manifest bound to the commit that folder is now at.
+
 #### Resuming an interrupted run
 `generate` (and `fix`, below) checkpoint after each stage - Plan, Design, and Developer output that's already passed Quality Gates - to `.kriya/checkpoints/` in your workspace. If a run gets killed or crashes partway through, re-run the *exact same command* (same goal, same workspace, same config) with `--resume` to pick up the most recent checkpoint of a plain `generate`/`fix` run (a milestone's checkpoint is never picked up here - see §3.4.1), or `--resume-id <id>` for a specific one (the `id` is printed if the run finishes without quality gates passing):
 ```bash

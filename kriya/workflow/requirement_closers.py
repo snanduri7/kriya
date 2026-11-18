@@ -41,6 +41,9 @@ class CloserDeps:
     post_environment_identity: Callable[..., Any]
     load_baseline_environment_identity: Callable[[], Callable[..., Any]]   # lazy kriya.workflow.baseline_policy import
     load_authority_bundle: Callable[[], Tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]]  # lazy AUTHORITY
+    # GREENFIELD-AUTHORITY-BASE-001: workflow._project_language, the one project-language detector (manifests, then sources). The default answers "unknown", so a
+    # CloserDeps built without it can never let a greenfield authority close anything.
+    project_language: Callable[[Iterable[str]], Optional[str]] = field(default=lambda _paths: None)
 
 
 def _candidate_test_files(candidate_root: str) -> List[str]:
@@ -385,12 +388,43 @@ def close_requirements_with_authority_bundle_evidence(
         built.tree_binding = tree_binding
         return built
 
+    base_revision = _oracle_base_revision(deps, candidate_root, workspace_path)
     return close_requirements_with_authority_bundle(
         ledger, requirement_set, bundle, contract,
         execute=lambda: run_authority_bundle(bundle, candidate_root, state_root=state_root, validator_factory=validator_for),
         source="requirement_closure.external_acceptance_command", revision=revision,
-        base_revision=_oracle_base_revision(deps, candidate_root, workspace_path),
+        base_revision=base_revision,
+        greenfield_base_proven=lambda: _base_is_empty_bootstrap_commit(workspace_path, base_revision),
+        candidate_language=lambda: _candidate_project_language(deps, candidate_root),
     )
+
+
+def _base_is_empty_bootstrap_commit(workspace_path: str, base_revision: Optional[str]) -> bool:
+    """GREENFIELD-AUTHORITY-BASE-001: whether the run's base is a greenfield bootstrap - a commit with NO parent whose tree is EMPTY (what
+    ``worktree._bootstrap_greenfield_repository`` creates with ``commit --allow-empty`` in an empty folder), read from Git itself, never from a commit message or
+    an author. An unreadable base, a base with a parent or a base that holds any file is False: the greenfield authority then closes nothing."""
+    from kriya.repository.git import GIT_READ_FAILURES
+    from kriya.workflow.worktree import git_read_lines
+
+    if not base_revision:
+        return False
+    try:
+        lineage = git_read_lines(workspace_path, "rev-list", "--parents", "-n", "1", base_revision)
+        tree = git_read_lines(workspace_path, "ls-tree", base_revision)
+    except GIT_READ_FAILURES:
+        return False
+    return len(lineage) == 1 and lineage[0].split() == [base_revision] and not tree
+
+
+def _candidate_project_language(deps: CloserDeps, candidate_root: str) -> Optional[str]:
+    """GREENFIELD-AUTHORITY-BASE-001: the language of the generated candidate, from the existing project-language detector over the candidate's canonical bound
+    tree (the exact membership the oracle is given); None when that membership cannot be read - unknown, so the authority refuses."""
+    from kriya.repository.bound_tree import BoundTreeError, bound_tree_paths
+
+    try:
+        return deps.project_language(sorted(bound_tree_paths(candidate_root)))
+    except BoundTreeError:
+        return None
 
 
 def close_requirements_by_api_preservation(

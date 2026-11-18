@@ -101,6 +101,14 @@ _COVER_FIELDS = frozenset({"requirement_id", "requirement_text_sha256", "claim",
 _COVERABLE_CLAIMS = frozenset({BEHAVIOR, API_PRESERVATION, DOCUMENTATION_CLAIM, REGRESSION_PRESERVATION})
 _LANGUAGES = frozenset({"python", "java"})
 _BUILD_TOOLS = frozenset({"maven", "gradle", "pip", "none"})
+# GREENFIELD-AUTHORITY-BASE-001 (owner ruling 2026-11-18): the TYPED identity of "no existing base" - the literal an operator writes in the manifest's existing
+# ``base_revision`` field to declare that the authority was made for a project that does not exist yet. It is never inferred: a missing HEAD, ``None``, an empty
+# string or a failed detection is NOT greenfield (those keep refusing AUTHORITY_BASE_MISMATCH). It is not a commit id, so the manifest's bytes - the bundle digest -
+# differ from every concrete-base manifest's. A greenfield manifest binds only a workspace the repository layer proves is an empty non-Git folder
+# (``_workspace_is_proven_greenfield``), declares the EXPECTED language in its sealed ``toolchain`` (an empty folder has none to detect), is never executed at
+# baseline (there is no project to judge) and closes a requirement only after the run's base is proven to be Kriya's own empty bootstrap commit and the
+# generated candidate's detected language equals the declared one (``close_requirements_with_authority_bundle``).
+GREENFIELD_BASE_REVISION = "GREENFIELD_NO_BASE_REVISION"
 
 AUTHORITY_INVALID = "AUTHORITY_INVALID"
 AUTHORITY_GOAL_MISMATCH = "AUTHORITY_GOAL_MISMATCH"
@@ -185,6 +193,11 @@ class AuthorityBundle:
     covers: Mapping[str, Tuple[CoverageEntry, ...]]  # requirement id -> its coverage entries, one per claim
     original_oracle: Mapping[str, Any] = field(default_factory=dict)
 
+    @property
+    def is_greenfield(self) -> bool:
+        """Whether the operator declared this authority for a project that does not exist yet (GREENFIELD-AUTHORITY-BASE-001)."""
+        return self.base_revision == GREENFIELD_BASE_REVISION
+
     def coverage_entry(self, requirement_id: str, claim: str) -> Optional[CoverageEntry]:
         return next((c for c in self.covers.get(requirement_id, ()) if c.claim == claim), None)
 
@@ -251,6 +264,30 @@ def _run_prepare(validator: Any, bundle: AuthorityBundle, export: str, cache: Op
     )
 
 
+def _workspace_is_proven_greenfield(workspace: str) -> bool:
+    """GREENFIELD-AUTHORITY-BASE-001: the repository layer's own facts prove ``workspace`` is a greenfield - a directory with NO Git repository
+    (``workspace_root_class`` answers ``NO_GIT_REPOSITORY``; a repository of any kind, with or without a commit, is not one) that holds no user entry
+    (``admit_workspace_for_mutation``: nothing but Kriya's own ``.kriya``, the canonical ``kriya.yaml`` and a desktop shell's metadata files). Anything the
+    repository layer cannot answer (``BoundTreeError``) is False: a failed detection is never greenfield."""
+    from kriya.repository.bound_tree import NO_GIT_REPOSITORY, admit_workspace_for_mutation, workspace_root_class
+
+    try:
+        if not os.path.isdir(workspace) or workspace_root_class(workspace) != NO_GIT_REPOSITORY:
+            return False
+        admit_workspace_for_mutation(workspace)
+    except BoundTreeError:
+        return False
+    return True
+
+
+def greenfield_baseline_run() -> AuthorityRun:
+    """GREENFIELD-AUTHORITY-BASE-001: the baseline "run" of a greenfield authority. There is no existing project to judge, so nothing is executed and nothing
+    is established: INDETERMINATE (never PASS, never FAIL, never an environment outcome) - every covered claim stays unsatisfied at baseline and the run goes on
+    to generate the project the authority will judge."""
+    return AuthorityRun(verdict=VERDICT_INDETERMINATE, reason_code=AUTHORITY_INDETERMINATE,
+                        reason="greenfield authority: no project exists at baseline, so the oracle was not executed and established nothing")
+
+
 def load_authority_bundle(
     path: str, requirement_set: RequirementSet, goal: str, *, state_root: str, workspace: str,
     base_revision: Optional[str], project_language: Optional[str],
@@ -285,14 +322,23 @@ def load_authority_bundle(
         raise _refuse(AUTHORITY_GOAL_MISMATCH, "the authority was made for another goal")
     if manifest["requirement_set_sha256"] != requirement_set.digest:
         raise _refuse(AUTHORITY_REQUIREMENT_SET_MISMATCH, "the authority was made for another requirement set")
-    if not base_revision or manifest["base_revision"] != base_revision:
+    greenfield = manifest["base_revision"] == GREENFIELD_BASE_REVISION
+    if greenfield:
+        # GREENFIELD-AUTHORITY-BASE-001: the manifest DECLARES "no existing base"; it binds only when the workspace is proven to have none - no revision, no
+        # detected project and the repository layer's own empty-non-Git-folder fact. A greenfield manifest never authorizes a brownfield workspace.
+        if base_revision or project_language or not _workspace_is_proven_greenfield(workspace):
+            raise _refuse(AUTHORITY_BASE_MISMATCH, f"the authority declares a greenfield project ({GREENFIELD_BASE_REVISION}: no existing base), but the "
+                                                   f"workspace is not a proven empty folder without a Git repository (base revision {base_revision!r}, "
+                                                   f"project language {project_language!r})")
+    elif not base_revision or manifest["base_revision"] != base_revision:
         raise _refuse(AUTHORITY_BASE_MISMATCH, f"the authority binds base revision {manifest['base_revision']!r}, the "
                                                f"workspace is at {base_revision!r}")
     toolchain = manifest["toolchain"]
     if (not isinstance(toolchain, dict) or set(toolchain) != {"language", "build_tool"}
             or toolchain["language"] not in _LANGUAGES or toolchain["build_tool"] not in _BUILD_TOOLS):
         raise _refuse(AUTHORITY_INVALID, "toolchain must be {language: python|java, build_tool: maven|gradle|pip|none}")
-    if toolchain["language"] != project_language:
+    # A greenfield manifest's toolchain is the EXPECTED project identity (nothing exists to detect); the generated candidate is checked against it before any closure.
+    if not greenfield and toolchain["language"] != project_language:
         raise _refuse(AUTHORITY_TOOLCHAIN_MISMATCH, f"the authority needs a {toolchain['language']} toolchain, the "
                                                     f"project is {project_language or 'of unknown language'}")
     if manifest["verdict_protocol"] != "exit_code" or manifest["visibility"] != VISIBILITY_HIDDEN:
@@ -562,6 +608,7 @@ def run_authority_bundle(
 def close_requirements_with_authority_bundle(
     ledger: ObligationLedger, requirements: RequirementSet, bundle: AuthorityBundle, contract: VerificationContract, *,
     execute: Callable[[], AuthorityRun], source: str, revision: Any, base_revision: Optional[str] = None,
+    greenfield_base_proven: Optional[Callable[[], bool]] = None, candidate_language: Optional[Callable[[], Optional[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Judge every requirement the contract bound to this bundle, from one
     run (``execute()``, lazily, only when a bound requirement is open):
@@ -578,7 +625,24 @@ def close_requirements_with_authority_bundle(
                if outcomes.get(rid) in (RequirementOutcome.UNVERIFIED, RequirementOutcome.PENDING)]
     if not pending:
         return []
-    if base_revision is not None and base_revision != bundle.base_revision:
+    if bundle.is_greenfield:
+        # GREENFIELD-AUTHORITY-BASE-001: a greenfield authority judges only the project generated from nothing. Both facts are proven by the caller's
+        # repository evidence, never assumed: the run's base is Kriya's own empty bootstrap commit (``greenfield_base_proven``; absent or False refuses), and the
+        # candidate's DETECTED language is the one the manifest declared (``candidate_language``; absent, unknown or different refuses). Neither runs the oracle.
+        if greenfield_base_proven is None or greenfield_base_proven() is not True:
+            return [{"requirement": rid, "kind": EXTERNAL_ACCEPTANCE_METHOD, "closed": False,
+                     "authority_digest": bundle.digest, "reason_code": AUTHORITY_BASE_MISMATCH,
+                     "reason": f"the authority binds a greenfield base ({GREENFIELD_BASE_REVISION}); the run's base "
+                               f"({str(base_revision)[:12]}) is not proven to be an empty bootstrap commit"}
+                    for rid, _binding in pending]
+        detected = candidate_language() if candidate_language is not None else None
+        if detected != bundle.language:
+            return [{"requirement": rid, "kind": EXTERNAL_ACCEPTANCE_METHOD, "closed": False,
+                     "authority_digest": bundle.digest, "reason_code": AUTHORITY_TOOLCHAIN_MISMATCH,
+                     "reason": f"the authority declares a {bundle.language} project; the generated candidate is "
+                               f"{detected or 'of unknown language'}"}
+                    for rid, _binding in pending]
+    elif base_revision is not None and base_revision != bundle.base_revision:
         # The bundle binds the workspace revision it was made for (review: a
         # milestone's later units move HEAD); another base never consumes it.
         return [{"requirement": rid, "kind": EXTERNAL_ACCEPTANCE_METHOD, "closed": False,
