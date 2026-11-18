@@ -221,8 +221,9 @@ def test_the_resume_of_legacy_ownerless_documents_is_refused_and_adopts_nothing(
     """D2 M4 (owner decision 2026-10-23): the one-time ownership migration is retired. The CLI shape (state reloaded from the plan and the
     sidecar) meets an ownerless sidecar first: typed refusal, no model work, every document byte-identical (nothing was stamped)."""
     _half_completed(workspace, tmp_path)
-    assert sorted(_make_legacy(workspace)) == ["checkpoints/<run id>.json", "control/contracts.json",
-                                               "control/state.json", f"milestones/{GROUP}.json"]
+    assert sorted(_make_legacy(workspace)) == ["checkpoints/<run id>.json", "control/contracts.json", "control/state.json",
+                                               "control/work_ledger.json",   # S8 (C-07): the work ledger is an owned control document too
+                                               f"milestones/{GROUP}.json"]
     before = _kriya_bytes(workspace)
     second = Run(tmp_path, {2: WITH_DIV, INTEGRATION: WITH_DIV})
     with pytest.raises(WorkspaceOwnershipMissing) as refused:

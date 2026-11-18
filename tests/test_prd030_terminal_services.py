@@ -316,8 +316,20 @@ def _verified(request):
         commit_service.terminal_writes(request), request.workspace_path))
 
 
+def _decided(request):
+    """S7 (C-03): the request carrying the approval decision for exactly its batch (policy asked nobody), as ``approve_terminal_mutation``
+    binds it before the commit. Without a decision the commit seam refuses APPROVAL_SUBJECT_MISSING before anything else."""
+    import dataclasses
+
+    from _fake_static_analysis import no_approval_needed
+
+    return dataclasses.replace(request, approval=no_approval_needed(
+        commit_service.terminal_writes(request), request.workspace_path, request.run_id))
+
+
 def test_a_verified_candidate_is_committed_with_its_evidence(tmp_path):
     request, transitions = _commit_request(tmp_path)
+    request = _decided(request)
     result = commit_service.commit_verified_candidate(_verified(request), request)
     assert result.completed and result.failure is None
     assert (tmp_path / "workspace" / "app.py").read_text() == "verified\n"
@@ -380,6 +392,7 @@ def test_a_missing_candidate_file_is_a_structured_unchanged_failure(tmp_path):
 
 def test_a_concurrent_workspace_edit_is_a_structured_unchanged_failure(tmp_path):
     request, _transitions = _commit_request(tmp_path)
+    request = _decided(request)
     report = _verified(request)
     (tmp_path / "workspace" / "app.py").write_text("edited by someone else\n")
     result = commit_service.commit_verified_candidate(report, request)

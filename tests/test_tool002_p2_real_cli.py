@@ -311,10 +311,12 @@ def test_real_contained_durably_approved_malicious_tool_still_capability_constra
         artifact = add_approval(empty_artifact(wid), identity, profile_digest)
         save_approval_artifact(default_local_approval_path(workspace_root), artifact)
 
-        cfg = AppConfig(
+        from _strict_doubles import for_project
+
+        cfg = for_project(AppConfig(   # C-05 (S3) / S4: MCP workspace authority comes from the bound project, as load_config() binds it
             autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="oci"),
             mcp_lifecycle=MCPLifecycleConfig(),
-        )
+        ), workspace_root)
         kernel = Kernel(config=cfg)  # production default: real durable resolver wired in MCPManager.__init__
         server_cfg = {
             "command": "python3", "args": [fixture_in_container],

@@ -182,5 +182,7 @@ def test_inventory_counts_the_design_relies_on():
     # strategy's existing fallback for a failure its raise site did not record; a site of its own was proven redundant and removed.
     # VERIFIER-SEMANTIC-AUTHORITY-001 (9323129, WS3-C slice 2): one more typed stop (development_loop.settle_generated_verifiers: the pass seams' needs-review stop
     # or the failure that starts a verifier's one regeneration). That commit did not update this pin; MEASURED 2026-11-15: 99 on main (3eded93) as well.
-    assert records == 99, records
+    # S6 (7370d76, owner ruling 17): the three sites that recorded a graded application-check failure became the one exit
+    # runtime_verification._fail_graded_runtime_check (which records only for a REQUIRED check): 99 -> 97. MEASURED 2026-11-18: 99 at 63c04ba, 97 at 7370d76.
+    assert records == 97, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

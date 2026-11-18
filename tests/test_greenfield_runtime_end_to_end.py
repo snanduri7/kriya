@@ -91,9 +91,11 @@ def test_demo_00_runs_the_whole_chain_with_one_human_decision_per_subject(tmp_pa
     run, person, canonical, executed_at = _go(tmp_path)
 
     # the person was asked exactly four times, in this order, each with its own subject: three source changes (each with files) and then the runtime commands
-    assert [p["kind"] for p in person.seen] == ["change_approval", "change_approval", "change_approval", "runtime_command"]
+    # S7 (C-03): a plan of several units is put to the person once more as the COMPLETE change, the exact subject the one workspace commit applies
+    assert [p["kind"] for p in person.seen] == ["change_approval", "change_approval", "change_approval", "runtime_command", "change_approval"]
     assert [[f["filepath"] for f in p["files"]] for p in person.seen[:3]] == [[POM], [MAIN], [TEST]]                 # ONE source approval each; never an empty one
-    assert all("files" not in p for p in person.seen[3:])                                                          # the runtime review is not represented as files
+    assert "files" not in person.seen[3]                                                                           # the runtime review is not represented as files
+    assert sorted(f["filepath"] for f in person.seen[4]["files"]) == sorted([POM, MAIN, TEST])                      # the complete change: every file, asked once
     runtime = person.seen[3]
     assert runtime["unit_id"] == "s4"                                                                                # the verification-only unit owns the runtime obligation
     assert runtime["status"] == "PENDING" and runtime["candidate_digest"] == runtime["command_fingerprint"]
@@ -106,7 +108,7 @@ def test_demo_00_runs_the_whole_chain_with_one_human_decision_per_subject(tmp_pa
 
     # the approval is durable and bound; the run succeeded with real recorded execution evidence
     final = load_launch_record(canonical, LID)["pending_approval"]
-    assert final["kind"] == "runtime_command" and final["status"] == "APPROVED"
+    assert final["kind"] == "change_approval" and final["status"] == "APPROVED"   # S7: the last decision of the run is the complete change (the runtime review, person.seen[3], was decided before it)
     assert run.result.legacy_result["status"] == "success"
     assert {r.subtask_id: r.status.value for r in run.result.subtask_results} == {"s1": "completed", "s2": "completed", "s3": "completed", "s4": "completed"}
 
@@ -127,7 +129,8 @@ def test_gap_b_structured_plan_builds_and_tests_each_unit_only_after_that_unit_s
         assert approved, f"a build/test gate ran before any source review was decided: {log_at_build}"
     first_log = run.builds[0][1]
     assert first_log[-2:] == [("pending", "change_approval"), ("deciding", "change_approval")]       # the first build ran right after the first unit's source decision
-    assert [p["kind"] for p in person.seen][-1] == "runtime_command"
+    # S7 (C-03): a plan of several units is put to the person once more as the COMPLETE change, the exact subject the one workspace commit applies - after the runtime review, before the commit
+    assert [p["kind"] for p in person.seen][-2:] == ["runtime_command", "change_approval"]
 
 
 def test_reject_is_the_explicit_refusal_nothing_executes_and_the_run_does_not_claim_success(tmp_path):
@@ -147,7 +150,8 @@ def test_CHARACTERISATION_gap_c_the_structured_plan_leaves_the_same_requirement_
     """Pair of tests/test_greenfield_direct_plan_runtime.py::test_CHARACTERISATION_gap_c_*: the SAME evidence (executed, graded PASS, run success) on the structured plan leaves the same
     pending / NOT_YET_VERIFIED ledger and no requirements_verified. MEASURED 2026-10-15; the brief's premise that this shape closes the ledger is refuted."""
     run, _person, _canonical, _executed_at = _go(tmp_path)
-    assert run.result.legacy_result["status"] == "success" and application_outcome(run.gate_outcomes)["status"] == STATUS_EXECUTED
+    # S6 (C-02): the run with this pending ledger no longer ends "success" - it is applied, its technical gates passed, and it says so
+    assert run.result.legacy_result["status"] == "applied_requirements_open" and application_outcome(run.gate_outcomes)["status"] == STATUS_EXECUTED
     requirements = run.result.legacy_result["requirements"]
     assert requirements["outcomes"] == {"REQ-1": "pending", "REQ-2": "pending"}
     assert {v["reason_code"] for v in requirements["verdicts"].values()} == {"NOT_YET_VERIFIED"}

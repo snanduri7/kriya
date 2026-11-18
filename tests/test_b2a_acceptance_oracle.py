@@ -741,7 +741,10 @@ def test_milestone_path_the_integration_unit_judges_the_plans_acceptance_file(tm
     assert "REQ-1" not in closures  # "Build a two-module project.": no acceptance case
     assert closures["REQ-3"]["closed"] is False
     assert (closures["REQ-2"]["closed"], closures["REQ-2"]["violated"]) == (False, not correct)
-    assert (result.exit_code == 0) is correct, result.output  # VIOLATED blocks under any policy
+    # S6 (C-02): neither run is a success. With the correct file the change is applied and the run says its requirements are open (REQ-1 has no
+    # case, REQ-2/REQ-3 are general rules a passing case only supports); with the contradicted one VIOLATED blocks under any policy.
+    assert result.exit_code != 0, result.output
+    assert ("=== Milestone sequence: applied_requirements_open ===" in result.output) is correct, result.output
 
 
 # ---------------------------------------------------------------- a deleted regression test never drops its claim

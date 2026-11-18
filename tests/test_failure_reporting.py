@@ -43,6 +43,7 @@ _REAL_FAILURE_TYPES = {
     "misdirected_edit": FailureCategory.EDIT_TARGETING,
     "no_op_edit": FailureCategory.EDIT_TARGETING,
     "time_budget_exhausted": FailureCategory.RESOURCE,
+    "work_ceiling_exhausted": FailureCategory.RESOURCE,   # S8 (C-07/C-08): the work ledger's refusal (attempt.py, enforce_loop.py)
     "context_budget_unsatisfiable": FailureCategory.RESOURCE,
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,
     # PRD-017: a fallback model that cannot serve the attempt.

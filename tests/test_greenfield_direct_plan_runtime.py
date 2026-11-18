@@ -192,7 +192,12 @@ def approved_run(tmp_path_factory):
 
 
 def _succeeded(result):
-    return bool(result["quality_gates_passed"] and result["overall_attempt_passed"] and result["candidate_gates_passed"])
+    """The run's TECHNICAL success. S6 (C-02): ``quality_gates_passed`` now also needs a resolved requirement truth, which these runs do
+    not have (their ledger stays pending: test_gap_b_strong_the_ledger_stays_unverified_*); the build, tests and application are what
+    this file is about, and ``technical_gates_passed`` is the product's own statement of exactly that (stated on a result whose requirements
+    are open; a result with a resolved truth states ``quality_gates_passed`` alone)."""
+    technical = result["quality_gates_passed"] or result.get("technical_gates_passed")
+    return bool(technical and result["overall_attempt_passed"] and result["candidate_gates_passed"])
 
 
 def test_the_live_shape_is_one_direct_unit_with_three_files_all_accepted_and_applied(approved_run):
@@ -576,9 +581,11 @@ def test_gap_b_strong_no_self_correction_edits_the_candidate_after_a_failed_buil
     assert not _succeeded(run.result) and _applied(run) == set()
 
 
-def test_gap_b_strong_the_ledger_stays_unverified_and_the_run_is_still_an_honest_success(approved_run):
-    """Gap C owner decision: a successful run is not requirement-ledger closure. Build, tests and the executed application are facts; 'requested behavior verified' is not claimed."""
+def test_gap_b_strong_the_ledger_stays_unverified_and_the_run_says_applied_with_requirements_open(approved_run):
+    """Gap C owner decision: a technically successful run is not requirement-ledger closure. Build, tests and the executed application are facts; 'requested behavior verified' is
+    not claimed. S6 (C-02) made that the RESULT: the run is applied, its technical gates passed, and it is not reported as a success while the ledger is open."""
     assert _succeeded(approved_run.result)
+    assert approved_run.result["quality_gates_passed"] is False and approved_run.result["requirement_truth"]["status"] == "OPEN_REQUIREMENTS"
     assert application_outcome(approved_run.gate_outcomes)["status"] == STATUS_EXECUTED
     assert approved_run.result["requirements"]["outcomes"] == {"REQ-1": "pending", "REQ-2": "pending"}
     assert not approved_run.result.get("requirements_verified")

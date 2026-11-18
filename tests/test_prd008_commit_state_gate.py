@@ -26,6 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
+from _requirement_truth import resolved_truth
 from _strict_doubles import strict_engine
 from click.testing import CliRunner
 
@@ -96,7 +97,8 @@ def _terminal_record(workspace, run_id, transaction_id=None, state=RunLifecycle.
             transaction_id, intent="APPLY_VERIFIED_CANDIDATE", candidate_hash=None,
         ))
         chain.append(chain[-1].settle_commit("COMMITTED"))
-    chain.append(chain[-1].transition(state))
+    truth = {"requirement_truth": resolved_truth()} if state is RunLifecycle.SUCCESS else {}   # S6 (C-02): SUCCESS is a fact of the record
+    chain.append(chain[-1].transition(state, **truth))
     return _save_chain(workspace, chain)
 
 

@@ -64,7 +64,7 @@ async def test_run9_shape_a_budget_stop_builds_no_attribution_request_and_blames
 
 
 def test_the_resource_limit_types_are_a_closed_table_distinct_from_infrastructure():
-    assert RESOURCE_LIMIT_FAILURE_TYPES == frozenset({"time_budget_exhausted"})
+    assert RESOURCE_LIMIT_FAILURE_TYPES == frozenset({"time_budget_exhausted", "work_ceiling_exhausted"})  # S8: the work ledger's refusal is the same class of stop
     assert not RESOURCE_LIMIT_FAILURE_TYPES & INFRASTRUCTURE_STOP_FAILURE_TYPES
     assert classify_failure_attribution("time_budget_exhausted", RUN9_MESSAGE) is FailureAttributionKind.RESOURCE_LIMIT
     assert classify_failure_attribution("containment_setup_failed", "x") is FailureAttributionKind.INFRASTRUCTURE_DEFECT

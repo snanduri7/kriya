@@ -25,6 +25,7 @@ from kriya.workflow.state import GenerationState
 async def _run_with_rerun(tmp_path, input_channel):
     ctx, _developer, run_verifier = _mutating_ctx(tmp_path, RUN_APP, grades=[GRADE_FAILED, GRADE_FAILED])
     run_verifier.judge.return_value = {**run_verifier.judge.return_value, "input_channel": input_channel}
+    ctx.runtime_verification_required = True  # S6 (owner ruling 17): a graded failure is a gate only for a REQUIRED check; the re-run under test follows that gate
     repair = _ScriptedRepair(lambda _worktree: [])  # resolved: the loop ran, so the re-run happens
     original = PolymorphicValidator.run_app_sequence
     stdin_seen = []

@@ -252,11 +252,12 @@ def test_a_non_repetitive_review_that_hits_the_role_ceiling_is_also_refused(tmp_
     assert event["reason_code"] == "OUTPUT_TRUNCATED" and "Observation 3:" not in seen[0]
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is about the review, not the requirement outcome
 def test_a_truncated_final_review_is_the_existing_typed_refusal_not_a_successful_review(tmp_path):
     workspace = git_workspace(tmp_path, {"calc.py": CALC, "test_calc.py": TEST_SUB})
     cfg = chaos_config()
     with RuntimeRegistration(_runtime(lambda request: _truncated(request))):
         result = run_direct(chaos_engine(cfg), GOAL, workspace)
-    assert result["quality_gates_passed"] is False and result["failure_category"] == "final_review_refused"
-    assert result["final_review_refusal"]["reason_code"] == "OUTPUT_TRUNCATED"
+    assert result["quality_gates_passed"] is True and result["failure_category"] is None  # S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a refused review is recorded and shown, the run is judged by its gates
+    assert result["final_review_refusal"]["reason_code"] == "OUTPUT_TRUNCATED"      # typed, reported, and never a performed review
     assert result["candidate_gates_passed"] is True       # what was built is kept and reported, as for any refused review

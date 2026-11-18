@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 import yaml
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
+from _requirement_truth import resolved_truth
 from click.testing import CliRunner
 
 import kriya.repository.commit as commit_module  # M1: the mechanism's own module (patch targets resolve there)
@@ -616,7 +617,7 @@ def test_recover_accepts_an_uncertain_record_and_nothing_already_settled():
     recovered = uncertain.recover({"tx-a": "ROLLED_BACK"}, {})
     assert (recovered.commit_result, recovered.terminal_status) == ("ROLLED_BACK", "FAILURE")
     for settled in (
-        _eligible().settle_commit("COMMITTED").transition(RunLifecycle.SUCCESS),
+        _eligible().settle_commit("COMMITTED").transition(RunLifecycle.SUCCESS, requirement_truth=resolved_truth()),   # S6 (C-02)
         RunRecord.new("r", "ws", None, None).transition(RunLifecycle.FAILURE),
         recovered,
     ):

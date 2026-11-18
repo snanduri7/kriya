@@ -233,6 +233,7 @@ def cmd_mutants(args: argparse.Namespace) -> Dict[str, Any]:
 
 def cmd_guard(args: argparse.Namespace) -> Dict[str, Any]:
     sys.path.insert(0, args.repo)
+    from kriya.skills.skill import SkillEngine
     from kriya.tools.knowledge import KnowledgeCache, KnowledgeGuard, extract_library_versions
 
     goal = Path(args.goal).read_text(encoding="utf-8").strip()
@@ -248,7 +249,12 @@ def cmd_guard(args: argparse.Namespace) -> Dict[str, Any]:
             os.makedirs(memory)
             if release_known:  # what the online guard learns from the registry (or its cache); seeded so no network is used
                 KnowledgeCache(memory, ttl_days=30).set_release_date("java", "org.apache.ignite:ignite-core", "2.18.0", IGNITE_218_RELEASED, "seeded-for-qualification")
-            report = KnowledgeGuard(skills_dir=skills, cutoff_date_str="2023-12-01", offline=offline, memory_dir=memory, cache_ttl_days=30).check_goal(goal, tmp)
+            # C-06 (S4): the guard ASKS the Skills owner whether a loaded skill with a trusted rule covers the library (exactly what
+            # stage_knowledge_guard hands it); a guard given no owner knows of no coverage and reports every library as a gap.
+            engine = SkillEngine(skills, load_global=False, load_cwd=False)
+            engine.discover_and_load()
+            report = KnowledgeGuard(skills_dir=skills, cutoff_date_str="2023-12-01", offline=offline, memory_dir=memory, cache_ttl_days=30,
+                                    coverage=engine.covers_library).check_goal(goal, tmp)
             return {"has_gaps": report.has_gaps, "gaps": [(g["library"], g["version"], g["risk_level"]) for g in report.gaps]}
 
     cases = {

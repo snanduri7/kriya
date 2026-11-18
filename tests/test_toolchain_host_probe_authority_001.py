@@ -236,7 +236,7 @@ def _corrections_ctx(worktree: Path, tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
         worktree_path=str(worktree), workspace_path=str(worktree), protected_relpath=None, allowed_write_relpaths=(),
         write_scope_mode=WriteScopeMode.UNRESTRICTED, established_files=[], structured_plan=None, migration_resolution=None,
-        kernel=SimpleNamespace(config=cfg),
+        kernel=SimpleNamespace(config=cfg), project_authority_relpaths=(),  # C-04 (S4): the write gate reads the run's project-authority paths
     )
 
 

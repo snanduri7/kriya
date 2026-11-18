@@ -185,10 +185,10 @@ def test_c_a_final_review_refusal_is_the_q9_terminal_cause(tmp_path, monkeypatch
 
     refusing = _refusing_reviewer(monkeypatch)
     observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES)
-    assert refusing.refused == 1 and observed.result["failure_category"] == "final_review_refused"
+    assert refusing.refused == 1 and observed.result["failure_category"] is None  # S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a refused review is recorded and shown, the run is judged by its gates
+    assert observed.result["final_review_refusal"]["reason_code"]            # the refusal itself is still reported on the result
     q9 = observed.explained["Q9"]
-    assert q9["terminal_cause"] == {"failure_category": "final_review_refused", "quality_gates_passed": False,
-                                    "unit_outcome": "RETURNED"}
+    assert q9["terminal_cause"] == {"failure_category": None, "quality_gates_passed": True, "unit_outcome": "RETURNED"}
     assert q9["items"][0]["commit_result"] == "COMMITTED"          # what already happened stays visible
 
 

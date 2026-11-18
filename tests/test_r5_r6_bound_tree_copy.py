@@ -267,7 +267,7 @@ def test_the_baseline_authority_export_is_the_bound_tree_plus_the_repositorys_ow
 
     config = AutonomyConfig(contained_execution_required=True, containment_backend="oci")
     with patch.object(PolymorphicValidator, "run_tests", run_tests), patch("kriya.workflow.contract_baseline.run_baseline_authorities", fake_baseline):
-        wf.run_contract_baseline(SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), str(repo), autonomy_cfg=config, config=SimpleNamespace(kriya=SimpleNamespace()))
+        wf.run_contract_baseline(SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), str(repo), autonomy_cfg=config, config=SimpleNamespace(kriya=SimpleNamespace(), paths=SimpleNamespace(state=None)))  # the state directory is resolved from paths.state (unset: the test's KRIYA_STATE_DIR)
     assert "files" in seen, "the export was never built"
     assert seen["git"] is True                              # the documented exception: the base revision is read from the tree's own .git
     assert {path for path in seen["files"] if not path.startswith(".git/")} == _bound(repo)

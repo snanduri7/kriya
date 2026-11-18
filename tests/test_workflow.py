@@ -4184,6 +4184,9 @@ async def test_run_attempt_verification_only_subtask_falls_through_without_a_dir
 
 
 def _runtime_verifier_ctx(tmp_path, *, developer, run_verifier, goal="Run the app and print output", **overrides):
+    # S6 (owner ruling 17): the unit this helper builds exists to run the application, so its check is the REQUIRED one (the run's own
+    # contract says so, which the controller states on the context); an optional check that fails is advisory and raises nothing.
+    overrides.setdefault("runtime_verification_required", True)
     return _minimal_attempt_ctx(
         tmp_path, developer=developer, run_verifier=run_verifier, goal=goal,
         architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
@@ -14022,6 +14025,7 @@ async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer, run_verifier=run_verifier,
         architect_files=["app.py"], expected_files_upfront=["app.py"],
+        runtime_verification_required=True,  # S6 (owner ruling 17): a graded failure is a gate only for a REQUIRED check
     )
 
     with patch(
@@ -14107,6 +14111,7 @@ def _nonzero_app_attempt(tmp_path, *, goal, grade_mock):
     return _minimal_attempt_ctx(
         tmp_path, developer=developer, run_verifier=run_verifier, goal=goal,
         architect_files=["app.py"], expected_files_upfront=["app.py"],
+        runtime_verification_required=True,  # S6 (owner ruling 17): only a REQUIRED application check is a gate; an optional one is advisory
     )
 
 
@@ -14148,6 +14153,9 @@ async def test_prd025_llm_pass_cannot_override_undeclared_nonzero_exit(tmp_path,
     assert outcome["runtime_disposition"]["deterministic_reason"] == "NONZERO_EXIT_AUTHORITATIVE"
     assert outcome["runtime_disposition"]["semantic"] == "PASS"
     assert outcome["runtime_disposition"]["final"] == "FAIL"
+    # WAVE8 result truth, on a live FAILED required gate (the stored goldens hold no failed runtime outcome since S6:
+    # tests/test_wave8_deterministic_result_truth.py): a failed gate never records deterministic_result PASS
+    assert "deterministic_result" in outcome and outcome["deterministic_result"] != "PASS"
 
 
 @pytest.mark.asyncio
@@ -16225,9 +16233,11 @@ async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp
 
     we = WorkflowEngine(kernel, llm)
 
+    # C-06 (S4): a skill whose rules were never verified is not knowledge, so the gate reports the gap; the person accepts the risk
+    # (``knowledge_risk_confirmed``) and the run that then passes its runtime verification is what verifies the skill - the subject here.
     res = await we.run_generation_workflow(
         goal="Run with python app.py; the widgetlib==2.0 skill applies here",
-        workspace_path=str(tmp_path)
+        workspace_path=str(tmp_path), knowledge_risk_confirmed=True,
     )
 
     assert res["quality_gates_passed"] is True
@@ -23503,6 +23513,7 @@ async def test_workflow_multi_skill_gap_prompt_does_not_misattribute_extraction(
     cfg = AppConfig()
     cfg.paths.skills = str(skills_dir)
     cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.mode = "guardrails"   # S7 (C-03): no approval channel in this test; W3-1: the extraction is durable only once the run's change is applied
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 

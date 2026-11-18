@@ -39,6 +39,7 @@ KINDS: Dict[Tuple[str, str], str] = {
     (A, '_fallback_routing'): 'function',
     (A, '_has_authoritative_full_source'): 'function',
     (A, '_sync_active_repair_contract'): 'function',
+    (A, 'AttemptContext.__init__'): 'function',   # C-05 (S3): the conftest stand-in for hand-built contexts
     (A, '_approve_and_execute_runtime_verification'): 'async function',
     (A, '_approve_runtime_commands'): 'async function',
     (A, '_build_targeted_retry_prompt'): 'function',
@@ -102,6 +103,7 @@ KINDS: Dict[Tuple[str, str], str] = {
     (C, 'ArtifactRegistry.derive_from_workspace'): 'function',
     (C, 'StaticAnalysisService.evaluate_candidate'): 'function',
     (C, 'WorkflowController._run_structured_enforce'): 'async function',
+    (C, 'WorkflowController.execute'): 'async function',   # S7 (C-03): the conftest approval stand-in (complete_change_approved)
     (C, 'WorkflowController._write_enforce_trace'): 'function',
     (C, '_evaluate_subtask_verification'): 'function',
     (C, 'assess_planned_edit'): 'function',
@@ -225,7 +227,8 @@ CLASS_CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
 # Patched by the enforce harness itself (tests/_enforce_unit_harness.py): every enforce scenario's units are the
 # harness plan's units only because these two patches are what the controller called (asserted below).
 HARNESS_PATCHED = ((C, "parse_planner_structured_output"), (C, "build_engineering_plan_from_planner_output"),
-                   (W, "final_review"))     # P-B: tests/test_skill_verification_deferral.py seeds a held verification into the stage-5 closer
+                   (W, "final_review"),     # the two conftest stand-ins below wrap the real callable and call through to it
+                   (A, "AttemptContext.__init__"), (C, "WorkflowController.execute"))     # P-B: tests/test_skill_verification_deferral.py seeds a held verification into the stage-5 closer
 
 NOT_REACHED: Dict[Tuple[str, str], str] = {
     # E14 characterization: patched by tests/test_e14_characterization.py, which calls the moved helper that looks each

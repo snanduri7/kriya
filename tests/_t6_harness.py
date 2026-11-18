@@ -54,14 +54,18 @@ def _read(state: Path) -> tuple:
 
 
 def direct_run(tmp_path: Path, monkeypatch, responder: Callable, files: Mapping[str, str], *,
-               goal: str = "add sub to calc.py", cfg=None, runtime_class=ChaosRuntime) -> Observed:
+               goal: str = "add sub to calc.py", cfg=None, runtime_class=ChaosRuntime,
+               prepare: Optional[Callable[[Any, Path], None]] = None) -> Observed:
     state = tmp_path / "state"
     state.mkdir()
     monkeypatch.setenv(ENV_STATE_DIR, str(state))
     workspace = git_workspace(tmp_path, files)
+    cfg = cfg or chaos_config()
+    if prepare is not None:
+        prepare(cfg, workspace)  # e.g. index the workspace into the run's own project store before the run
     runtime = runtime_class(responder)
     with RuntimeRegistration(runtime):
-        result = run_direct(chaos_engine(cfg or chaos_config()), goal, workspace)
+        result = run_direct(chaos_engine(cfg), goal, workspace)
     explained, records, run = _read(state)
     return Observed(result, explained, records, runtime, workspace, run)
 

@@ -113,7 +113,20 @@ def test_t6_investigation_turns(tmp_path, monkeypatch):
         if role == "investigation":
             return turns.pop(0) if turns else "Ready to implement."
         return CALC_WITH_SUB if role == "developer" else benign_roles(role, request)
-    observed = direct_run(tmp_path, monkeypatch, responder, FILES, cfg=cfg)
+    def indexed(config, workspace):
+        # The investigation pre-pass runs only for a project that HAS an index (C-05, S3: this project's own store). MEASURED 2026-11-18:
+        # this test used to find one by accident - the default ``./memory`` of the checkout it was run from - and made no investigation
+        # request in a clean checkout. It now indexes its own workspace into its own memory directory.
+        import asyncio
+
+        from kriya.analyzer.analyzer import RepositoryAnalyzer
+        from kriya.config.resolution import bind_project_identity
+
+        config.paths.memory = str(tmp_path / "memory")
+        bind_project_identity(config, str(workspace))
+        asyncio.run(RepositoryAnalyzer(str(workspace)).index_repository(config, generate_conventions_skill=False))
+
+    observed = direct_run(tmp_path, monkeypatch, responder, FILES, cfg=cfg, prepare=indexed)
     answers = observed.attempt(1)
     record("investigation turns", answers, observed.explained)
     requests = [r for r in observed.of("model.request") if r["attempt_number"] == 1]
@@ -267,7 +280,8 @@ def test_t6_final_review_refusal(tmp_path, monkeypatch):
     review = [r for r in observed.of("model.request") if r["phase"] == "review"]
     assert [r["payload"]["dispatched"] for r in review] == [False]                # refused before dispatch
     assert all(r["attempt_number"] is None for r in review)                      # never a Developer attempt
-    assert observed.explained["Q9"]["terminal_cause"]["failure_category"] == "final_review_refused"
+    assert observed.explained["Q9"]["terminal_cause"]["failure_category"] is None  # S6 (C-02 truth 5, owner ruling 2): the final review is advisory - a refused review is recorded and shown, the run is judged by its gates
+    assert observed.result["final_review_refusal"]["reason_code"]
 
 
 # 9. exception escape ----------------------------------------------------------------------------

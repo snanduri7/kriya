@@ -25,7 +25,8 @@ def _recorded(monkeypatch):
 def test_the_final_result_carries_the_typed_truth_the_launch_record_copies_and_the_run_event_agrees(tmp_path, monkeypatch):
     events = _recorded(monkeypatch)
     result, _ = _run(tmp_path, GOAL_1, Scripted(run=1))
-    assert result["quality_gates_passed"] is True, result
+    # S6 (C-02): an open truth is not a pass - the technical gates passed, and the result does not claim more than that
+    assert result["quality_gates_passed"] is False and result["technical_gates_passed"] is True, result
     truth = result["requirement_truth"]
     # the scripted verifier gives no usable verdict and this goal's behaviour has no deterministic closer: OPEN, never verified
     assert truth["status"] == "OPEN_REQUIREMENTS" and truth["verified"] == 0 and truth["total"] == 1 and truth["unresolved"]

@@ -286,7 +286,8 @@ def test_an_authorized_repair_that_rejects_the_pre_repair_owner_and_passes_the_r
     assert subject.pre_repair_failure_identity and subject.replay_failure_identity
     assert subject.pre_repair_failure_identity != subject.replay_failure_identity
     # the person approved V1 as SOURCE separately (V0, the replayed V0, then V1)
-    assert len(scene.source_approvals) == 3
+    # S7 (C-03): a plan of several units is put to the person once more as the COMPLETE change, the exact subject the one workspace commit applies
+    assert len(scene.source_approvals) == 4 and sorted(scene.source_approvals[-1]) == sorted([LIB, TEST])
     # the O0 verdict is in the run's evidence, and the run result records the one request
     (event,) = _counterfactual(run)
     assert event.details["verdict"] == OUTCOME_REJECTED and event.details["refusal"] is None

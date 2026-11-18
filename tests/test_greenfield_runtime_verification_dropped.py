@@ -89,7 +89,8 @@ def test_the_owner_goal_keeps_s4_and_the_application_is_executed(tmp_path):
     judge is consulted for s4 and the application is executed once the (separate) command approval is given."""
     run = _run(tmp_path)
 
-    assert [(unit, files) for unit, files, _reason in run.approvals if files] == [("s1", [POM]), ("s2", [MAIN]), ("s3", [TEST])]
+    # S7 (C-03): a plan of several units is put to the person once more as the COMPLETE change, the exact subject the one workspace commit applies (asked while s4, the last unit, closes)
+    assert [(unit, sorted(files)) for unit, files, _reason in run.approvals if files] == [("s1", [POM]), ("s2", [MAIN]), ("s3", [TEST]), ("s4", sorted([POM, MAIN, TEST]))]
     assert "s4" in run.judge_calls                                   # the runtime judge IS consulted for s4: it owns the runtime obligation
     assert run.executed, "the application was executed"
     assert run.grader_prompts and "Hello from Kriya" in run.grader_prompts[-1]    # the grader judged the CAPTURED stdout, not a claim
@@ -133,7 +134,8 @@ def test_the_runtime_command_approval_is_a_different_subject_from_the_source_cha
     """Same recording callback that approves the command: the command runs ONLY after that distinct approval, and the source-change gate still saw exactly three changes."""
     run = _run(tmp_path)
 
-    assert [(unit, files) for unit, files, _r in run.approvals if files] == [("s1", [POM]), ("s2", [MAIN]), ("s3", [TEST])]
+    # S7 (C-03): a plan of several units is put to the person once more as the COMPLETE change, the exact subject the one workspace commit applies (asked while s4, the last unit, closes)
+    assert [(unit, sorted(files)) for unit, files, _r in run.approvals if files] == [("s1", [POM]), ("s2", [MAIN]), ("s3", [TEST]), ("s4", sorted([POM, MAIN, TEST]))]
     [(unit, files, reason)] = [a for a in run.approvals if not a[1]]
     assert unit == "s4" and "Allow Kriya to execute" in reason
     assert harness.decisions(run.events) == ["approved", "approved", "approved"]                       # the command approval is NOT an approval.decision of the change gate

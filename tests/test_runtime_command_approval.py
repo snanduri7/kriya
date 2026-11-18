@@ -114,6 +114,7 @@ def test_reject_is_not_an_approval_and_records_nothing():
     assert state.run_verification_approved_fingerprint is None
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is about the approval, not the requirement outcome
 def test_the_subject_shows_the_RESOLVED_commands_and_exactly_those_execute(tmp_path):
     """Through the real controller: the toolchain resolves to absolute paths. The reviewer sees those paths; the executor runs those paths. (Kriya's own Java entrypoint grounding has
     already replaced the judge's `mvn exec:java` with javac + java -cp, which is itself why the subject must come from the FINAL commands, not the judge's.)"""

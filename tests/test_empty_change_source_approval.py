@@ -10,6 +10,7 @@ package, goal or language special case.
 import json
 
 import _enforce_unit_harness as harness
+import pytest
 
 from kriya.workflow.plan_schema import EngineeringPlan
 
@@ -49,6 +50,7 @@ TWO = [("s1", SERVICE, ()), ("s2", OTHER, ("s1",))]
 _decisions = harness.decisions
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is about the approval, not the requirement outcome
 def test_a_verification_only_unit_with_no_files_never_asks_for_a_source_change_approval(tmp_path):
     """THE MEASURED DEFECT: before the fix the callback is called a second time, for unit 'sv', with files == []."""
     _workspace, events, result, approvals = run_enforce(tmp_path, editors=ONE, verification_only=True)
@@ -70,6 +72,7 @@ def test_the_empty_gate_is_not_declined_into_a_rejected_run(tmp_path):
     assert result.legacy_result["status"] == "failed"
 
 
+@pytest.mark.usefixtures("requirements_closed")   # S6 (C-02): this test is about the approval, not the requirement outcome
 def test_one_changed_file_asks_exactly_once_with_the_complete_subject(tmp_path):
     workspace, events, result, approvals = run_enforce(tmp_path, editors=ONE, verification_only=False)
 

@@ -351,6 +351,8 @@ BELOW_PROJECT_BINDING_FILES = frozenset({
     "test_prv17_stage_contract_architecture.py", "test_repair_003_f1_residual_self_correction_rerun_environment_stop.py",
     "test_repair_orchestrator.py", "test_runtime_stdin_rerun_binding.py", "test_runtime_verification.py",
     "test_s19q1_content_filter_refusal.py", "test_toolchain_host_probe_authority_001.py", "test_wave8_analyzer_skill_owner.py",
+    # MEASURED 2026-11-18 (final certification run of 62b4621): the same S3 root in three files the S3 selection never ran
+    "test_oi55_managed_service_continues.py", "test_prompt_fit_closure_001.py", "test_s19p1e_dormant_repository.py",
 })
 
 
@@ -435,6 +437,24 @@ PRE_S6_S7_SCRIPTED_RUN_FILES = frozenset({
     "test_w36_terminal_result_truth.py", "test_workflow_recovery_handback.py", "test_worktree_canonical_root.py",
     # tests/state_machine (MEASURED 2026-11-17 by the focused gate of the advisory-review fix: 6 reds, the S6 root, direct path)
     "test_sm_attempt_metrics.py", "test_sm_best_of_n.py", "test_sm_reserved_fallback.py",
+    # MEASURED 2026-11-18 (final certification run of 62b4621: 377 reds, none in a file the boundary run above had selected; a partition
+    # run of the 367 non-container reds with these two fixtures given turned 294 green). Files that drive a scripted run to success and
+    # never state a requirement outcome or an approval of their own. The two large mixed files are listed too: their own S6 tests assert
+    # `applied_requirements_open` through a contract the fixture does not close, and stay green with it.
+    "test_attempt_lifecycle.py", "test_authority_invariants.py", "test_backend_readiness_v2_exception_masking.py",
+    "test_backend_readiness_v2_terminal_masking_gate.py", "test_context_edit_protocol_001.py", "test_counter_evidence_monotonic.py",
+    "test_e11_milestones_real_engine.py", "test_enforce_exception_finalization.py", "test_enforce_terminal_nested_recovery_stop_001.py",
+    "test_greenfield_direct_plan_runtime.py", "test_greenfield_runtime_end_to_end.py", "test_greenfield_runtime_verification_dropped.py",
+    "test_kernel_seams.py", "test_lr_r1_m1_t6_fixes.py", "test_lr_r1_m1_t6_paths.py", "test_midrun_workspace_mutations.py",
+    "test_oi93_runtime_truth.py", "test_owner_recovery_implicated_scope_001.py", "test_p2_artifact_derivation_indeterminate.py",
+    "test_p2_candidate_retention.py", "test_p2_plan_write_interrupt.py", "test_p3_developer_protocol_reproducers.py",
+    "test_p3d_structural_insertion.py", "test_prd032_chaos_commit.py", "test_prd032_chaos_static_analysis.py",
+    "test_prd032_planner_workspace_path.py", "test_prd032_terminal_commit_stop.py", "test_project_continuity_two_run.py",
+    "test_provider_malformed_reply.py", "test_recovery_learning_lifecycle_001.py", "test_reg_r1_workflow_reproducer.py",
+    "test_reg_r2_workflow_reproducer.py", "test_s18c_read_root_identity.py", "test_s18d_p2b_written_files_record.py",
+    "test_s18d_read_view_and_enforce_prompt.py", "test_skill_commit_failure_truth.py", "test_slice_a_terminal_failure.py",
+    "test_slice_f_gate_path.py", "test_verifier_repair_authorization_001.py", "test_w216a_compile_text_guard.py",
+    "test_w32_e2e_host_autocrlf.py", "test_workflow.py", "test_workflow_controller_enforce.py",
 })
 COMPLETE_CHANGE_QUESTION = "This is the complete change this run will apply to your project"
 
@@ -462,10 +482,23 @@ def complete_change_approved(monkeypatch):
     yield
 
 
+# A test of a listed file whose subject IS the requirement outcome of its run (it scripts or asserts that outcome itself): its requirements
+# are NOT closed for it, and it asserts the product's own answer. It still gets the approval stand-in, which decides nothing about requirements.
+STATES_ITS_OWN_OUTCOME = frozenset({
+    ("test_greenfield_runtime_end_to_end.py", "test_CHARACTERISATION_gap_c_the_structured_plan_leaves_the_same_requirement_ledger_pending"),
+    # scripts REQ-1 as "missing" and compares an interrupted run with that ordinary requirements-gap failure
+    ("test_enforce_exception_finalization.py", "test_an_interrupt_during_the_commit_that_the_journal_proves_rolled_back_is_a_failed_plan"),
+    # its named-test requirement is closed by the REAL terminal gate through the contained command flow, which is what it measures
+    ("test_midrun_workspace_mutations.py", "test_a_contained_terminal_gate_verifies_the_identity_the_run_first_bound_while_the_learning_stays_visible"),
+})
+
+
 @pytest.fixture(autouse=True)
 def _pre_s6_s7_scripted_runs(request):
-    if getattr(getattr(request, "path", None), "name", None) in PRE_S6_S7_SCRIPTED_RUN_FILES:
-        request.getfixturevalue("requirements_closed")
+    name = getattr(getattr(request, "path", None), "name", None)
+    if name in PRE_S6_S7_SCRIPTED_RUN_FILES:
+        if (name, request.node.originalname) not in STATES_ITS_OWN_OUTCOME:
+            request.getfixturevalue("requirements_closed")
         request.getfixturevalue("complete_change_approved")
     yield
 

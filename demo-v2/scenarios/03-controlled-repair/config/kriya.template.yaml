@@ -53,6 +53,20 @@ llm_chain:
     reasoning: false
     context_window: 32768
     temperature: 0.2
+    # S1 (C-09): one model name resolves to exactly one binding, so the fallback entry states the SAME capabilities and request options as
+    # `llm` above (it is the same stub endpoint and model). Differing here is refused at load: MODEL_BINDING_ALIAS_CONFLICT.
+    capabilities:
+      native_tool_calls: true
+      json_mode: true
+      reliable_multiline_json: false
+      streaming: true
+      max_tool_argument_chars: 8192
+      preferred_edit_protocol: "small_native_tools"
+    extra_body:
+      options:
+        num_ctx: 32768
+        top_p: 0.8
+        top_k: 20
 
 embedding:
   model: "stub-embedding"

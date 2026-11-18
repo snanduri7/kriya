@@ -157,6 +157,7 @@ async def test_f1_residual_control_a_rerun_that_launched_and_still_fails_is_grad
     still exits 3, and the SECOND grade() verdict decides - a run_verification failure carrying the self-correction
     attempt, never an environment stop."""
     ctx, _developer, run_verifier = _mutating_ctx(tmp_path, RUN_APP, grades=[GRADE_FAILED, GRADE_FAILED])
+    ctx.runtime_verification_required = True  # S6 (owner ruling 17): the graded failure is a gate only for a REQUIRED check
     repair = _ScriptedRepair(lambda _worktree: [])  # resolved, changed nothing that matters
     state = GenerationState()
     stub = _VenvCreationFails(fail_from=None)

@@ -60,7 +60,12 @@ def test_the_stored_goldens_never_pair_a_failed_gate_with_pass_and_still_record_
                 assert result != "PASS", f"{golden.name}: a FAILED gate recorded deterministic_result PASS"
             elif result == "PASS":
                 seen["passed_deterministic"] += 1
-    assert seen["failed"] >= 4 and seen["passed_deterministic"] >= 4, f"the invariant would be vacuous: {seen}"
+    # MEASURED 2026-11-18: the goldens held 37 failed runtime outcomes at 63c04ba and hold 0 since S6 (7370d76). The golden harness never
+    # declares its runtime checks REQUIRED, and since owner ruling 17 an optional check that fails is an advisory event, not a gate outcome.
+    # The failed side of this invariant is therefore proven on a live required gate instead
+    # (tests/test_workflow.py::test_prd025_llm_pass_cannot_override_undeclared_nonzero_exit); any failed outcome a golden does hold is
+    # still checked above. Registry: GOLDEN-RUNTIME-FAILED-REQUIRED-GATE-COVERAGE-LOST-AFTER-S6-001.
+    assert seen["passed_deterministic"] >= 4, f"the invariant would be vacuous: {seen}"
 
 
 def test_every_call_site_hands_the_authoritative_verdict_to_the_projection():

@@ -476,7 +476,9 @@ async def test_a_contained_terminal_gate_verifies_the_identity_the_run_first_bou
 
     result, seen = await _run_enforce_with_site(tmp_path, site, goal=NAMED_TEST_GOAL, repo_files=NAMED_TEST_FILES, spec_compliance=True)
 
-    assert result.legacy_result["status"] == "success"
+    # S6 (C-02): the named test is verified by the contained gate (1 of 2); "Add widget support." has no closer, so the applied run says its requirements are open
+    assert result.legacy_result["status"] == "applied_requirements_open" and result.legacy_result["technical_gates_passed"] is True
+    assert result.legacy_result["requirement_truth"]["verified"] == 1
     assert launches, "the terminal gate launched no contained command: this run did not exercise the contained terminal gate"
     binds = seen["validator_binds"]
     assert len(binds) >= 2 and {state for state, *_ in binds} == {"bound"}                    # the candidate's validator AND the oracle base's, none STALE
