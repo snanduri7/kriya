@@ -348,8 +348,28 @@ def _split_rules_by_verification(skill: Any) -> Tuple[List[str], List[str]]:
     return trusted, unverified
 
 
+class PlanningSkillConstraints(tuple):
+    """What ``planning_skill_constraints`` returns: the ``(block, skill_names)`` pair it always returned (it unpacks and compares as that
+    pair), carrying what the SAME applicable skills declare for plan validation (SKILL-INTEGRATION-DECISION-AUTHORITY-001).
+    ``integration_decisions``: one mapping per declared decision - ``id`` (``<skill name>:<local id>``), ``alternatives`` (the ids),
+    ``participants`` (the path globs), ``skill``. ``authority_errors``: why an applicable skill's decision metadata cannot be used
+    (malformed, or one decision id declared twice); a run with any stops before planning."""
+
+    integration_decisions: Tuple[Dict[str, Any], ...] = ()
+    authority_errors: Tuple[str, ...] = ()
+
+    def __new__(cls, block: str, names: List[str], integration_decisions: Any = (), authority_errors: Any = ()) -> "PlanningSkillConstraints":
+        self = super().__new__(cls, (block, names))
+        self.integration_decisions = tuple(integration_decisions)
+        self.authority_errors = tuple(authority_errors)
+        return self
+
+
 def planning_skill_constraints(config: Any, workspace_path: str, goal: str, *, skill_engine: Any = None) -> Tuple[str, List[str]]:
     """The applicable skills' conventions for the Planner: ``(block, skill_names)``, ``("", [])`` when none apply.
+
+    The returned pair is a ``PlanningSkillConstraints``: the integration decisions the skills rendered here declare travel with the text
+    they were rendered into, from this one selection (there is no second pass over the skills for validation).
 
     Selected by ``skill_applies_to_goal`` over the goal the plan serves, and rendered by ``render_skill_conventions``
     - the same two functions the Developer-side analysis uses - so the Planner sees the constraint the Developers will
@@ -365,6 +385,7 @@ def planning_skill_constraints(config: Any, workspace_path: str, goal: str, *, s
     from kriya.tools.knowledge import extract_library_versions
     from kriya.workflow.skill_conventions import (
         PLANNING_SKILL_CONSTRAINTS_HEADER,
+        canonical_decision_id,
         render_skill_conventions,
         skill_applies_to_goal,
     )
@@ -377,6 +398,8 @@ def planning_skill_constraints(config: Any, workspace_path: str, goal: str, *, s
     repo_slug = os.path.basename(workspace_path).lower().strip(".") or "root"
     blocks: List[str] = []
     names: List[str] = []
+    decisions: List[Dict[str, Any]] = []
+    authority_errors: List[str] = []
     for skill in engine.list_skills():
         applies, _ = skill_applies_to_goal(
             skill, goal, repo_slug=repo_slug, repo_model=repo_model, mentions_term=mentions_term, fact_match=fact_match,
@@ -384,10 +407,20 @@ def planning_skill_constraints(config: Any, workspace_path: str, goal: str, *, s
             staleness_warning=_skill_staleness_warning)
         if not applies:
             continue
+        decision_error = getattr(skill, "integration_decisions_error", None)
+        if decision_error:
+            authority_errors.append(f"skill {skill.name!r}: {decision_error}")
         rendered = render_skill_conventions(skill, engine, _split_rules_by_verification)
         if rendered:
             blocks.append(rendered)
             names.append(skill.name)
+            for decision in getattr(skill, "integration_decisions", None) or []:
+                decision_id = canonical_decision_id(skill.name, decision.id)
+                if any(known["id"] == decision_id for known in decisions):
+                    authority_errors.append(f"integration decision {decision_id!r} is declared by more than one applicable skill")
+                    continue
+                decisions.append({"id": decision_id, "alternatives": [alternative.id for alternative in decision.alternatives],
+                                  "participants": list(decision.participants), "skill": skill.name})
     if not blocks:
-        return "", []
-    return PLANNING_SKILL_CONSTRAINTS_HEADER + "".join(blocks), names
+        return PlanningSkillConstraints("", [], (), authority_errors)
+    return PlanningSkillConstraints(PLANNING_SKILL_CONSTRAINTS_HEADER + "".join(blocks), names, decisions, authority_errors)

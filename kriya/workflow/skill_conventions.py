@@ -96,6 +96,32 @@ def render_skill_conventions(skill: Any, skill_engine: Any, split_rules_by_verif
         text += "Examples:\n"
         for basename, content in skill.examples.items():
             text += f"=== Example File: {basename} ===\n{content}\n"
+    return text + render_integration_decisions(skill)
+
+
+def canonical_decision_id(skill_name: str, local_id: str) -> str:
+    """The plan-level identity of a skill-declared integration decision (the skill's name namespaces its local id)."""
+    return f"{skill_name}:{local_id}"
+
+
+def render_integration_decisions(skill: Any) -> str:
+    """SKILL-INTEGRATION-DECISION-AUTHORITY-001: the skill's declared integration decisions as every reader of the skill sees them (the
+    Planner and each Developer, through ``render_skill_conventions``): the decision id, each alternative id with the skill's own summary
+    of what it means, and the participants. The one place an id gets its meaning; empty for a skill that declares none."""
+    decisions = list(getattr(skill, "integration_decisions", None) or [])
+    if not decisions:
+        return ""
+    text = (
+        "Integration decisions declared by this skill (each alternative id names one of the mutually exclusive ways described above; "
+        "when files matching a decision's participants are planned in two or more subtasks, the plan records ONE "
+        "integration_relationships entry whose id is the decision id, whose alternatives are exactly these alternative ids and whose "
+        "selected_alternative is one of them, naming exactly those subtasks; each of them implements the selected alternative):\n"
+    )
+    for decision in decisions:
+        text += (f"- decision id: {canonical_decision_id(skill.name, decision.id)} "
+                 f"(participants: {', '.join(decision.participants)})\n")
+        for alternative in decision.alternatives:
+            text += f"  - alternative id: {alternative.id} = {alternative.summary}\n"
     return text
 
 

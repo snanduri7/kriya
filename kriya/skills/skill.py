@@ -443,6 +443,80 @@ def fact_match(skill: "Skill", repo_model: RepositoryModel) -> bool:
     facts = list(repo_model.dependencies) + list(repo_model.frameworks)
     return any(mentions_term(fact, tag) for tag in skill.tags for fact in facts)
 
+class SkillDecisionAlternative(BaseModel):
+    """One permitted alternative of a skill-declared integration decision: a stable id and what it means in the skill's own terms."""
+
+    id: str
+    summary: str
+
+
+class SkillIntegrationDecision(BaseModel):
+    """SKILL-INTEGRATION-DECISION-AUTHORITY-001 (owner ruling 2026-11-18 after Stage B runs 8 and 9): a skill's machine-readable statement
+    that a choice between mutually exclusive alternatives EXISTS and which planned artifacts take part in it. The skill owns this and
+    nothing more: which alternative a run uses is the Planner's selection (an ``IntegrationRelationship``), and that every required
+    decision is recorded before a Developer runs is plan validation's. ``id`` is local to the skill (the plan-level identity is
+    ``<skill name>:<id>``); ``participants`` are path globs matched against a plan's ``planned_files`` only (``fnmatch.fnmatchcase``
+    over the plan-relative POSIX path: case-sensitive, ``*`` and ``?`` also match ``/``, no filesystem is read)."""
+
+    id: str
+    alternatives: List[SkillDecisionAlternative]
+    participants: List[str]
+
+
+def _decision_selector_problem(selector: Any) -> Optional[str]:
+    if not isinstance(selector, str) or not selector.strip() or selector != selector.strip():
+        return "is blank or not a plain string"
+    if "\\" in selector:
+        return "contains a backslash"
+    if selector.startswith("/"):
+        return "is absolute"
+    if ".." in selector.split("/"):
+        return "contains '..'"
+    return None
+
+
+def parse_integration_decisions(raw: Any) -> Tuple[List[SkillIntegrationDecision], Optional[str]]:
+    """``(decisions, None)`` for the ``integration_decisions`` value of a skill.yaml (absent: none), or ``([], why)`` when it is not
+    structurally valid. Never partial: one malformed entry invalidates the whole declaration, so a constraint cannot silently disappear."""
+    if raw is None:
+        return [], None
+    if not isinstance(raw, list):
+        return [], "integration_decisions must be a list"
+    decisions: List[SkillIntegrationDecision] = []
+    seen: Set[str] = set()
+    for index, entry in enumerate(raw):
+        where = f"integration_decisions[{index}]"
+        if not isinstance(entry, dict) or set(entry) != {"id", "alternatives", "participants"}:
+            return [], f"{where} must have exactly the keys id, alternatives, participants"
+        decision_id = entry["id"]
+        if not isinstance(decision_id, str) or not decision_id.strip() or decision_id != decision_id.strip() or ":" in decision_id:
+            return [], f"{where}.id must be a non-blank string without ':'"
+        if decision_id in seen:
+            return [], f"{where}.id {decision_id!r} is declared twice"
+        seen.add(decision_id)
+        alternatives = entry["alternatives"]
+        if not isinstance(alternatives, list) or len(alternatives) < 2:
+            return [], f"{where}.alternatives must list at least two alternatives"
+        parsed: List[SkillDecisionAlternative] = []
+        for alternative in alternatives:
+            if (not isinstance(alternative, dict) or set(alternative) != {"id", "summary"}
+                    or not all(isinstance(alternative[key], str) and alternative[key].strip() for key in ("id", "summary"))
+                    or alternative["id"] != alternative["id"].strip()):
+                return [], f"{where}.alternatives entries must each have a non-blank id and a non-blank summary"
+            parsed.append(SkillDecisionAlternative(id=alternative["id"], summary=alternative["summary"].strip()))
+        if len({alternative.id for alternative in parsed}) != len(parsed):
+            return [], f"{where}.alternatives ids must be unique"
+        participants = entry["participants"]
+        if not isinstance(participants, list) or not participants:
+            return [], f"{where}.participants must list at least one path glob"
+        for selector in participants:
+            problem = _decision_selector_problem(selector)
+            if problem is not None:
+                return [], f"{where}.participants entry {selector!r} {problem}"
+        decisions.append(SkillIntegrationDecision(id=decision_id, alternatives=parsed, participants=list(participants)))
+    return decisions, None
+
+
 class Skill(BaseModel):
     name: str = Field(description="Name of the skill.")
     description: str = Field(description="Short summary of the skill's purpose.")
@@ -462,6 +536,8 @@ class Skill(BaseModel):
     verified_at: Optional[str] = Field(default=None, description="Date (YYYY-MM-DD) the skill was last marked verified - advisory provenance for a human to judge staleness, not used to automatically re-trigger anything.")
     verified_context: Optional[str] = Field(default=None, description="Best-effort description of what was actually verified (e.g. a version mentioned in the goal, or 'promoted from X') - advisory provenance only, same as verified_at.")
     source_path: Optional[str] = Field(default=None, description="Filesystem path to this skill's folder, set by discover_and_load - not part of skill.yaml itself.")
+    integration_decisions: List[SkillIntegrationDecision] = Field(default_factory=list, description="SKILL-INTEGRATION-DECISION-AUTHORITY-001: the integration decisions this skill declares. Read only from a skill whose metadata Kriya may believe (the `verified` rule: not a skill inside the workspace); empty otherwise.")
+    integration_decisions_error: Optional[str] = Field(default=None, description="Why this skill's `integration_decisions` metadata is structurally invalid (None: valid or absent). The skill still loads; a run that applies it stops before planning.")
 
 
 @dataclass(frozen=True)
@@ -892,6 +968,12 @@ class SkillEngine:
                     # B3: only a literal boolean true is a claim, and only a skill outside the workspace may be believed.
                     claimed_verified = meta.get("verified") is True
                     claimed_gap_acknowledged = meta.get("verification_gap_acknowledged") is True
+                    # SKILL-INTEGRATION-DECISION-AUTHORITY-001: decision metadata is authority (it makes a plan invalid), so it is read
+                    # only where `verified` is believed; a skill inside the workspace gets no new trust level. Malformed metadata is
+                    # kept as a typed error on the skill, never dropped with it: the run that applies the skill stops before planning.
+                    decisions, decisions_error = (
+                        parse_integration_decisions(meta.get("integration_decisions"))
+                        if self._skill_verification_is_authoritative(folder_path) else ([], None))
                     # Build Skill object
                     skill = Skill(
                         name=meta.get("name", folder),
@@ -910,7 +992,9 @@ class SkillEngine:
                         verification_gap_acknowledged=claimed_gap_acknowledged and self._skill_verification_is_authoritative(folder_path),
                         verified_at=meta.get("verified_at"),
                         verified_context=meta.get("verified_context"),
-                        source_path=folder_path
+                        source_path=folder_path,
+                        integration_decisions=decisions,
+                        integration_decisions_error=decisions_error,
                     )
 
                     self._skills[folder.lower()] = skill
@@ -937,6 +1021,9 @@ class SkillEngine:
                 "examples": skill.examples,
                 "supported_versions": skill.supported_versions,
                 "verified": skill.verified,
+                # only when declared: the identity of every skill that declares none is what it was
+                **({"integration_decisions": [decision.model_dump() for decision in skill.integration_decisions]}
+                   if skill.integration_decisions else {}),
             }, sort_keys=True, separators=(",", ":"))
             manifest.append({
                 "name": skill.name,

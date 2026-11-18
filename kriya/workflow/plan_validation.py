@@ -45,6 +45,7 @@ continue under a stale, lighter profile.
 """
 from __future__ import annotations
 
+import fnmatch
 import os
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
@@ -495,6 +496,53 @@ def integration_decision_findings(relationships: Sequence[Any]) -> List[Tuple[st
     return findings
 
 
+INTEGRATION_DECISION_REQUIRED_MISSING = "INTEGRATION_DECISION_REQUIRED_MISSING"
+
+
+def decision_participant_subtasks(plan: EngineeringPlan, selectors: Sequence[str]) -> List[str]:
+    """The subtasks a skill-declared integration decision binds in THIS plan: those that plan at least one file matching one of the
+    decision's participant globs, in plan order. Derived from the declaration and ``planned_files`` only - never from what a Planner's
+    relationship names, and never from the filesystem. Matching is ``fnmatch.fnmatchcase`` over the plan-relative POSIX path
+    (case-sensitive; ``*`` and ``?`` also match ``/``; ``[...]`` is a character class); no regex, nothing fuzzy."""
+    def planned_paths(subtask: Any) -> List[str]:
+        paths = [planned.path.replace("\\", "/") for planned in subtask.planned_files]
+        return [path[2:] if path.startswith("./") else path for path in paths]
+    return [subtask.id for subtask in plan.subtasks
+            if any(fnmatch.fnmatchcase(path, selector) for path in planned_paths(subtask) for selector in selectors)]
+
+
+def required_integration_decision_findings(plan: EngineeringPlan, required: Optional[Sequence[Mapping[str, Any]]]) -> List[Tuple[str, str]]:
+    """SKILL-INTEGRATION-DECISION-AUTHORITY-001: ``(reason_code, message)`` for each integration decision an applicable skill declares
+    (``id``, ``alternatives``, ``participants``) that this plan must record and does not record correctly. A decision whose participants
+    match files of fewer than two subtasks binds nothing here. Otherwise exactly one relationship carries the decision id, its
+    alternatives are exactly the declared ids, and its producers and consumers are exactly the derived subtasks (so a relationship over
+    a subset does not satisfy it). Whether its selection is one of its alternatives is ``integration_decision_findings``'s check."""
+    findings: List[Tuple[str, str]] = []
+    for declared in required or ():
+        decision_id, alternatives = declared["id"], list(declared["alternatives"])
+        participants = decision_participant_subtasks(plan, declared["participants"])
+        if len(participants) < 2:
+            continue
+        described = (f"integration decision {decision_id!r} (declared by skill {declared.get('skill')!r}; alternatives {alternatives!r}) "
+                     f"spans subtasks {participants!r}, which plan files matching {list(declared['participants'])!r}")
+        recorded = [rel for rel in plan.integration_relationships if rel.id == decision_id]
+        if not recorded:
+            findings.append((INTEGRATION_DECISION_REQUIRED_MISSING, f"{described}, and the plan records no integration relationship with that id"))
+            continue
+        if len(recorded) > 1:
+            findings.append((INTEGRATION_DECISION_SELECTION_INVALID, f"{described}, and the plan records it {len(recorded)} times instead of once"))
+            continue
+        rel = recorded[0]
+        if sorted(rel.alternatives) != sorted(alternatives) or len(rel.alternatives) != len(alternatives):
+            findings.append((INTEGRATION_DECISION_SELECTION_INVALID,
+                             f"{described}, and its relationship lists alternatives {list(rel.alternatives)!r} instead of exactly the declared ids"))
+        named = sorted(set(rel.producer_subtask_ids) | set(rel.consumer_subtask_ids))
+        if named != sorted(participants):
+            findings.append((INTEGRATION_DECISION_REQUIRED_MISSING,
+                             f"{described}, and its relationship names subtasks {named!r} instead of exactly those"))
+    return findings
+
+
 async def validate_plan(
     plan: EngineeringPlan,
     *,
@@ -516,6 +564,7 @@ async def validate_plan(
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
     known_requirement_ids: Optional[Iterable[str]] = None,
+    required_integration_decisions: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> PlanValidationResult:
     """available_tool_names=None SKIPS the tool-registry check entirely -
     only safe for contexts guaranteed not to contain TOOL-tagged subtasks
@@ -1082,6 +1131,11 @@ async def validate_plan(
     # SHARED-DECISION-AUTHORITY-001: a recorded cross-subtask decision is structurally well formed or the plan is
     # repaired - never resolved by order or "last wins", and never left for the Developers to choose.
     for code, message in integration_decision_findings(plan.integration_relationships):
+        errors.append(message)
+        reason_codes.append(code)
+    # SKILL-INTEGRATION-DECISION-AUTHORITY-001: a decision an applicable skill declares is recorded once, over exactly the subtasks
+    # it binds in this plan, or the plan is repaired - before any Developer runs.
+    for code, message in required_integration_decision_findings(plan, required_integration_decisions):
         errors.append(message)
         reason_codes.append(code)
     for rel in plan.integration_relationships:

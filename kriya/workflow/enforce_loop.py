@@ -806,9 +806,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # be expected to obey and can make a cross-subtask choice between a skill's mutually exclusive alternatives ONCE, in an
         # integration relationship. Lossless and never trimmed (a request that cannot hold it is a typed dispatch refusal, not a
         # silent drop); only skills applicable to this goal; the same failure mode as the Developer-side load (not swallowed).
-        planning_skill_text, planning_skill_names = (
+        planning_skills = (
             deps.planning_skill_constraints(kernel_config, workspace_path, goal, skill_engine=legacy_kwargs.get("skill_engine_override"))
             if kernel_config is not None else ("", []))   # no configuration, no skills root to read
+        planning_skill_text, planning_skill_names = planning_skills
+        # SKILL-INTEGRATION-DECISION-AUTHORITY-001: what the SAME applicable skills declare as required integration decisions. Every
+        # authoritative validate_plan() of this run (admission, each repair round, each recovery revision) receives them; a run whose
+        # skills declare none passes nothing and validates exactly as before. Unusable decision metadata is contradictory or missing
+        # authority no Planner answer can repair: the run stops here, before the Planner is asked.
+        skill_authority_errors = list(getattr(planning_skills, "authority_errors", ()) or ())
+        if skill_authority_errors:
+            deps.logger.error("WorkflowController enforce run %r: %s: %s", run_id, SKILL_INTEGRATION_DECISIONS_INVALID,
+                              "; ".join(skill_authority_errors))
+            raise deps._UnsafeStructuredPlan(
+                f"{SKILL_INTEGRATION_DECISIONS_INVALID}: " + "; ".join(skill_authority_errors),
+                reason_codes=[SKILL_INTEGRATION_DECISIONS_INVALID], invalid_subtask_ids=[], repair_attempts=0)
+        required_decisions = tuple(getattr(planning_skills, "integration_decisions", ()) or ())
+        decision_requirements: Dict[str, Any] = {"required_integration_decisions": required_decisions} if required_decisions else {}
         if planning_skill_text:
             authoritative_planner_request += planning_skill_text
             deps.logger.info("Planner given %d applicable skill(s): %s", len(planning_skill_names), ", ".join(planning_skill_names))
@@ -1031,6 +1045,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
                     validation = await deps.validate_plan(
                         plan, workspace_path=workspace_path,
+                        **decision_requirements,
                         available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
                         route=route, triage_service=deps.workflow_engine.engineering_triage,
                         resuming_own_established_progress=has_own_established_progress,
@@ -2827,6 +2842,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     )
                     prerequisite_validation = await deps.validate_plan(
                         prerequisite_revision,
+                        **decision_requirements,
                         workspace_path=plan_workspace_path,
                         available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
                         route=route,
@@ -2968,6 +2984,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         )
                         gap_validation = await deps.validate_plan(
                             gap_revision,
+                            **decision_requirements,
                             workspace_path=plan_workspace_path,
                             available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
                             route=route,
@@ -3175,6 +3192,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 revision_validation = await deps.validate_plan(
                     revised_plan,
+                    **decision_requirements,
                     workspace_path=plan_workspace_path,
                     available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
                     route=route,
@@ -5309,6 +5327,9 @@ def promoted_owner_scope_conflict(owner_result: Mapping[str, Any], owner_id: str
         "raw_evidence": originating_conflict.get("raw_evidence") or nested.get("raw_evidence") or "",
         "reason": f"{originating_reason}; {reroute}" if originating_reason else reroute,
     }
+# An applicable skill's integration-decision metadata is malformed, or one decision id is declared twice: authority the run cannot
+# use and no Planner answer can repair. The run stops before the Planner is asked (SKILL-INTEGRATION-DECISION-AUTHORITY-001).
+SKILL_INTEGRATION_DECISIONS_INVALID = "SKILL_INTEGRATION_DECISIONS_INVALID"
 # A recovery was refused BEFORE its owner was reopened because the owner's change would invalidate a completed TOOL
 # execution, which is never run again. The TOOL stays completed, the owner unchanged, the original failure stands.
 TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE = "TOOL_STAGE_INVALIDATED_NOT_REPLAYABLE"

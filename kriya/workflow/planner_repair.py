@@ -854,6 +854,14 @@ def build_structured_plan_repair_prompt(
             "id (one id is one decision). If the choice does not actually span more than one subtask, remove "
             "alternatives and selected_alternative from the entry.\n"
         )
+    if "INTEGRATION_DECISION_REQUIRED_MISSING" in reason_codes:
+        targeted_correction += (
+            "- For each integration decision the errors name as declared by an applicable skill and not recorded: add ONE "
+            "integration_relationships entry whose id is exactly the decision id given in the error, whose alternatives are exactly the "
+            "alternative ids given there (the ids, not their descriptions), whose selected_alternative is ONE of those ids chosen by you, "
+            "and whose producer_subtask_ids and consumer_subtask_ids together name exactly the subtasks the error lists - no fewer and no "
+            "others. The skill's own text says what each alternative id means.\n"
+        )
     if "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM" in reason_codes:
         targeted_correction += (
             "- For each integration_relationships entry the errors name as having a consumer that "

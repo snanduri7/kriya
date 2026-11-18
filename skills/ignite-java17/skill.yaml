@@ -10,3 +10,18 @@ verification_gap_acknowledged: false
 verified: true
 verified_at: '2026-09-09'
 verified_context: org.apache.ignite:ignite-core 2.18.0
+integration_decisions:
+- id: spring-xml-startup-mechanism
+  alternatives:
+  - id: direct-ignition-start
+    summary: Mechanism 1 of the rules (Direct Ignition) - the Spring XML defines only a plain org.apache.ignite.configuration.IgniteConfiguration
+      bean with no IgniteSpringBean anywhere, and the Java code starts the node itself with Ignition.start(<the XML file>).
+  - id: spring-managed-ignite-bean
+    summary: Mechanism 2 of the rules (Spring-managed IgniteSpringBean) - the Spring XML defines an org.apache.ignite.IgniteSpringBean
+      that starts the node when the Spring context loads, and the Java code loads that context and retrieves the already-started
+      instance from it, never calling Ignition.start().
+  participants:
+  - 'src/main/resources/*.xml'
+  - '*App.java'
+  - '*Application.java'
+  - '*Main.java'
