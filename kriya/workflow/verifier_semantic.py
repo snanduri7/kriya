@@ -391,10 +391,32 @@ class VerifierRegenerationRequest:
     path: str
     sha256: str
     rationale: str
+    # VERIFIER-SEMANTIC-REGENERATION-OPERATION-001 (owner ruling 2026-11-18, Stage B runs 5-7): semantic regeneration is its own operation, not a
+    # gate-failure repair. ``source`` is the COMPLETE reviewed verifier, the exact text of the bytes ``sha256`` names; the request shows all of it
+    # and its only legal outcome is the complete replacement file (no anchored edit, no redirect, no "no change").
+    source: str = ""
+    # AUTHORIZATION != DELIVERY: a provider answer that violates the response protocol is not a candidate verifier. At most this many
+    # protocol-correction re-sends, on the same model binding, carrying only the machine-detected error. The first valid whole-file answer is
+    # the one candidate; nothing after it is re-asked.
+    delivery_retries: int = 1
+
+    @property
+    def mode_text(self) -> str:
+        return (
+            "MODE: VERIFIER_REGENERATION.\nReturn the complete replacement content of exactly one existing file - the requested path "
+            f"'{self.path}'. The whole file is replaced by what you return: include every part of it that stays. Never return content for "
+            "another file.\n"
+        )
 
     @property
     def prompt_block(self) -> str:
+        source = self.source if self.source.endswith("\n") else self.source + "\n"
         return (
+            "\n=== Semantic verifier regeneration: the exact verifier under review ===\n"
+            f"The complete current content of '{self.path}' (sha256 {self.sha256[:16]}), byte for byte, between the markers:\n"
+            "<<<VERIFIER_SOURCE\n"
+            f"{source}"
+            "VERIFIER_SOURCE>>>\n"
             "\n=== Operator semantic-review rationale for this exact verifier ===\n"
             f"A person reviewed '{self.path}' (sha256 {self.sha256[:16]}, shown above) against the Authoritative Goal and declared what it expects "
             "INVALID. Their stated reason, quoted between the markers, is evidence about this one file only: it is not part of the goal, not a "
@@ -403,8 +425,28 @@ class VerifierRegenerationRequest:
             f"{self.rationale}\n"
             "OPERATOR_RATIONALE>>>\n"
             f"Rewrite exactly '{self.path}': remove or correct the expectation the reason identifies, and keep every expectation the Authoritative "
-            "Goal supports. Add no expectation the Authoritative Goal does not state. This is the verifier's one regeneration: returning it "
-            "unchanged is not an accepted outcome of this request.\n"
+            "Goal supports. Add no expectation the Authoritative Goal does not state. Return the COMPLETE replacement file. This is the "
+            "verifier's one regeneration: returning it unchanged is not an accepted outcome of this request.\n"
+        )
+
+    def response_violation(self, entry: Mapping[str, Any]) -> Optional[str]:
+        """Why a Developer answer is not a candidate verifier under this operation's response protocol (None = it is one: a complete file and
+        nothing else). The text is the machine-detected error only; it is what a protocol-correction re-send carries."""
+        if entry.get("protocol_error"):
+            return f"the response did not follow the response protocol: {entry['protocol_error']}"
+        if entry.get("edits"):
+            return (f"the response was an anchored EDIT; this request accepts only one complete <<<KRIYA:FILE path=\"{self.path}\">>> block "
+                    "holding the whole replacement file")
+        if entry.get("content") is None:
+            return (f"the response returned no file content (a \"no change\" answer is not an outcome of this request); it accepts only one "
+                    f"complete <<<KRIYA:FILE path=\"{self.path}\">>> block holding the whole replacement file")
+        return None
+
+    def correction_block(self, violation: str) -> str:
+        return (
+            "\n=== Response protocol correction ===\n"
+            f"Your previous response to this same request was not accepted, for this machine-detected reason only: {violation}\n"
+            f"Answer the same request again, following the RESPONSE PROTOCOL: one complete file block for '{self.path}'.\n"
         )
 
 
@@ -428,6 +470,10 @@ class UnitSemantics:
         self.pending: Optional[Tuple[str, str]] = None       # (path, sha256 of the invalid bytes): its one regeneration is the NEXT generation
         self.regenerating: Optional[Tuple[str, str]] = None  # the same pair once that generation started, until its outcome is judged
         self.rationales: Dict[Tuple[str, str], str] = {}     # (path, sha256 of the invalid bytes) -> the person's rationale for exactly those bytes
+        # VERIFIER-SEMANTIC-REGENERATION-OPERATION-001: delivery and candidate production are counted apart from each other (and from the work
+        # grant and the provider requests, which have their own owners).
+        self.delivery_retries: int = 0                       # protocol-correction re-sends of the regeneration request
+        self.candidates: int = 0                             # valid whole-file answers received: at most one per authorization
 
     # -- facts in
     def observe(self, result: Any) -> None:
@@ -632,7 +678,32 @@ class UnitSemantics:
         if [normalize_path(target) for target in (targets or ())] != [path]:
             return None
         rationale = self.rationales.get((path, sha))
-        return VerifierRegenerationRequest(path, sha, rationale) if rationale else None
+        if not rationale:
+            return None
+        # the COMPLETE exact verifier, read now and held to the reviewed bytes: anything else is not the subject of the decision
+        try:
+            data = self.read_bytes(path) if self.read_bytes is not None else None
+            source = data.decode("utf-8") if data is not None and hashlib.sha256(data).hexdigest() == sha else None
+        except Exception:  # unreadable or not text now: never guessed
+            source = None
+        return VerifierRegenerationRequest(path, sha, rationale, source) if source else None
+
+    def regeneration_in_flight(self, targets: Optional[Iterable[str]]) -> bool:
+        """Is a generation with these targets the in-flight regeneration? (True with no ``regeneration_request`` = its exact subject cannot be
+        shown: the caller must not send a generic repair in its place.)"""
+        return self.regenerating is not None and [normalize_path(target) for target in (targets or ())] == [self.regenerating[0]]
+
+    def note_delivery(self, entry: Mapping[str, Any]) -> Dict[str, Any]:
+        """Count what one regeneration answer was, from the Developer's own result entry; returns the evidence of it."""
+        retry = entry.get("regeneration_delivery_retry")
+        if retry:
+            self.delivery_retries += 1
+        produced = entry.get("content") is not None and not entry.get("protocol_error") and not entry.get("edits")
+        if produced:
+            self.candidates += 1
+        return {"delivery_retry": dict(retry) if retry else None, "candidate_produced": produced,
+                "delivery_retries": self.delivery_retries, "candidates": self.candidates,
+                "candidate_sha256": hashlib.sha256(entry["content"].encode("utf-8")).hexdigest() if produced else None}
 
     def full_regeneration_refusal(self) -> GateRuling:
         """A verifier of this invocation may no longer be written (accepted, or its one regeneration is used), and the retry policy's next

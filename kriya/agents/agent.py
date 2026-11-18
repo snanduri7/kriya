@@ -1418,7 +1418,7 @@ class DeveloperAgent(BaseAgent):
         # Deferred because importing a kriya.workflow submodule at module load time
         # executes kriya.workflow.__init__, which imports WorkflowEngine and loops
         # back to this agent module.
-        from kriya.workflow.generation_manifest import FileRole, classify_file_role
+        from kriya.workflow.generation_manifest import FileRole, classify_file_role, role_contract_block
 
         all_paths = [e["filepath"] for e in file_entries]
         files_out = []
@@ -1670,6 +1670,13 @@ class DeveloperAgent(BaseAgent):
             # module's own already-validated "repeat critical instructions near the
             # generation point" pattern (see the "only this file" comment further down)
             # rather than duplicating the whole spec twice.
+            if semantic_regeneration is not None:
+                # VERIFIER-SEMANTIC-REGENERATION-OPERATION-001: its own operation - the complete replacement file is the only outcome,
+                # whatever a gate-failure repair of this file would have been offered. Under the legacy markers it is the raw full-file
+                # request (which has no "no change" or patch form at all).
+                requested_operation_value, prefer_anchored_edit, full_file_offered = "repair_with_full_file", False, True
+                if developer_response_protocol(self.llm.config) != STRUCTURED_PROTOCOL:
+                    apply_fix_analysis = False
             create_full_file = requested_operation_value == "create_full_file"
             repair_full_file_without_failure = (
                 requested_operation_value == "repair_with_full_file"
@@ -1914,7 +1921,9 @@ class DeveloperAgent(BaseAgent):
                 # FILE-INTEGRITY-CONTRACT-001: the sentinel protocol replaces
                 # every legacy marker instruction; the task/mode text stays.
                 repair_outcomes = prefer_anchored_edit or apply_fix_analysis
-                if create_full_file or (requested_operation is None and not apply_fix_analysis):
+                if semantic_regeneration is not None:
+                    mode_text = semantic_regeneration.mode_text
+                elif create_full_file or (requested_operation is None and not apply_fix_analysis):
                     mode_text = (
                         "MODE: CREATE_FULL_FILE.\nWrite the complete content of exactly one file - the "
                         f"requested file path '{filepath}'. Do not include conversational explanation or the "
@@ -1958,6 +1967,7 @@ class DeveloperAgent(BaseAgent):
             )
             prompt_tail = (
                 f"{generation_directive}"
+                f"{role_contract_block(filepath)}"
                 f"{verification_reminder}"
                 f"{skill_reminder}"
                 f"{authority_reminder}"
@@ -1993,148 +2003,183 @@ class DeveloperAgent(BaseAgent):
                     None if prefer_anchored_edit else (expected_output_by_file or {}).get(filepath)
                 ),
             )
-            try:
+            # VERIFIER-SEMANTIC-REGENERATION-OPERATION-001 (AUTHORIZATION != DELIVERY): every request is asked once. Only a semantic
+            # verifier regeneration whose answer violates its response protocol is asked once more - the same request on the same model
+            # binding (the same completion options) plus the machine-detected error. The first valid whole-file answer is the candidate.
+            delivery_retry: Optional[Dict[str, Any]] = None
+            rejected_entry: Dict[str, Any] = {}
+            while True:
                 try:
-                    content = await self._complete_file(file_sys_prompt, file_prompt, **completion_options)
+                    try:
+                        content = await self._complete_file(file_sys_prompt, file_prompt, **completion_options)
+                    except ContextBudgetUnsatisfiableError as refusal:
+                        # PRD-016 fallback 1: the prompt itself does not fit any
+                        # allowed window. The already-written siblings' contents
+                        # are the one optional section this call owns: send the
+                        # request once more with their names only. A grounded
+                        # output refusal is not a context problem - it goes to
+                        # the caller's lower-output-protocol fallback instead.
+                        if (reduced_sibling_section is None or isinstance(refusal, OutputBudgetUnsatisfiableError)
+                                or not sibling_section or sibling_section not in file_prompt):
+                            raise
+                        logger.warning(
+                            "Developer: '%s' does not fit the context budget with sibling contents; retrying with "
+                            "sibling filenames only.", filepath,
+                        )
+                        record = getattr(self.llm, "budget_expansions", None)
+                        if isinstance(record, list):
+                            record.append({
+                                "event_kind": "model.optional_context_reduced", "model": model_override,
+                                "reason": "sibling_contents_omitted", "file": filepath,
+                                "required_prompt_tokens": refusal.decision.prompt_tokens,
+                                "selected_context_window": refusal.decision.context_window,
+                            })
+                        file_prompt = file_prompt.replace(sibling_section, reduced_sibling_section, 1)
+                        content = await self._complete_file(file_sys_prompt, file_prompt, **completion_options)
                 except ContextBudgetUnsatisfiableError as refusal:
-                    # PRD-016 fallback 1: the prompt itself does not fit any
-                    # allowed window. The already-written siblings' contents
-                    # are the one optional section this call owns: send the
-                    # request once more with their names only. A grounded
-                    # output refusal is not a context problem - it goes to
-                    # the caller's lower-output-protocol fallback instead.
-                    if (reduced_sibling_section is None or isinstance(refusal, OutputBudgetUnsatisfiableError)
-                            or not sibling_section or sibling_section not in file_prompt):
-                        raise
-                    logger.warning(
-                        "Developer: '%s' does not fit the context budget with sibling contents; retrying with "
-                        "sibling filenames only.", filepath,
-                    )
-                    record = getattr(self.llm, "budget_expansions", None)
-                    if isinstance(record, list):
-                        record.append({
-                            "event_kind": "model.optional_context_reduced", "model": model_override,
-                            "reason": "sibling_contents_omitted", "file": filepath,
-                            "required_prompt_tokens": refusal.decision.prompt_tokens,
-                            "selected_context_window": refusal.decision.context_window,
-                        })
-                    file_prompt = file_prompt.replace(sibling_section, reduced_sibling_section, 1)
-                    content = await self._complete_file(file_sys_prompt, file_prompt, **completion_options)
-            except ContextBudgetUnsatisfiableError as refusal:
-                # Which file could not be budgeted, for the caller's fallback
-                # (a lower-output protocol for that file) and its evidence.
-                refusal.filepath = filepath
-                refusal.anchored_edit = prefer_anchored_edit
-                raise
+                    if delivery_retry is not None:
+                        # the protocol-correction re-send could not be dispatched: a provider has already answered, so there is
+                        # no failover and nothing more is asked - the first answer stands as it was (not a candidate).
+                        file_entry = rejected_entry
+                        delivery_retry["outcome"] = "correction_not_dispatched"
+                        break
+                    # Which file could not be budgeted, for the caller's fallback
+                    # (a lower-output protocol for that file) and its evidence.
+                    refusal.filepath = filepath
+                    refusal.anchored_edit = prefer_anchored_edit
+                    raise
 
-            # DEBUG, not INFO - fires on every per-file completion in this loop, so
-            # would flood a long run's log at the default level. Added specifically
-            # to settle a real ambiguity found live, 2026-08-16 (ignite_qpid_person,
-            # run b-10c): a targeted retry's "Developer fix analysis for ..." INFO
-            # line (below) printed correctly, but the very next "Developer returned
-            # an anchored edit..." line that should immediately follow it (when
-            # edits parses truthy) was silently missing for that one retry - the
-            # file write got skipped entirely (content ended up None), and the
-            # SAME stale, already-broken file was re-verified, reproducing an
-            # identical runtime failure that looked exactly like "correct
-            # diagnosis, edit didn't take effect." Reconstructing the raw
-            # completion text from kriya.log alone was unreliable: a streaming
-            # call's stream_callback echoes raw tokens to stdout separately from
-            # (and not reliably ordered relative to) this logger's own immediately-
-            # flushed lines when both land in the same redirected log file, so the
-            # apparent SEARCH:/REPLACE: block sitting next to the analysis line in
-            # the log was never provably the exact text _split_fix_analysis_edit()
-            # actually parsed. This is that missing ground truth: the literal,
-            # unparsed completion, logged before _split_fix_analysis[_edit]() ever
-            # touches it - repr() specifically so an unexpected marker, stray
-            # phrase, or hidden whitespace (e.g. a "no change needed"-shaped aside
-            # ahead of a SEARCH:/REPLACE: block, which short-circuits parsing to
-            # edits=None/content=None before the block is ever inspected) is
-            # visible verbatim, not swallowed by print-formatting.
-            logger.debug(f"Developer raw completion for '{filepath}' (pre-parse): {content!r}")
+                # DEBUG, not INFO - fires on every per-file completion in this loop, so
+                # would flood a long run's log at the default level. Added specifically
+                # to settle a real ambiguity found live, 2026-08-16 (ignite_qpid_person,
+                # run b-10c): a targeted retry's "Developer fix analysis for ..." INFO
+                # line (below) printed correctly, but the very next "Developer returned
+                # an anchored edit..." line that should immediately follow it (when
+                # edits parses truthy) was silently missing for that one retry - the
+                # file write got skipped entirely (content ended up None), and the
+                # SAME stale, already-broken file was re-verified, reproducing an
+                # identical runtime failure that looked exactly like "correct
+                # diagnosis, edit didn't take effect." Reconstructing the raw
+                # completion text from kriya.log alone was unreliable: a streaming
+                # call's stream_callback echoes raw tokens to stdout separately from
+                # (and not reliably ordered relative to) this logger's own immediately-
+                # flushed lines when both land in the same redirected log file, so the
+                # apparent SEARCH:/REPLACE: block sitting next to the analysis line in
+                # the log was never provably the exact text _split_fix_analysis_edit()
+                # actually parsed. This is that missing ground truth: the literal,
+                # unparsed completion, logged before _split_fix_analysis[_edit]() ever
+                # touches it - repr() specifically so an unexpected marker, stray
+                # phrase, or hidden whitespace (e.g. a "no change needed"-shaped aside
+                # ahead of a SEARCH:/REPLACE: block, which short-circuits parsing to
+                # edits=None/content=None before the block is ever inspected) is
+                # visible verbatim, not swallowed by print-formatting.
+                logger.debug(f"Developer raw completion for '{filepath}' (pre-parse): {content!r}")
 
-            edits = None
-            analysis = None
-            protocol_error = None
-            protocol_reason_code = None
-            # FILE-INTEGRITY-CONTRACT-001: parse the protocol, never rewrite
-            # the payload; a response that does not match it is refused typed.
-            protocol = developer_response_protocol(self.llm.config)
-            repair_protocol = prefer_anchored_edit or apply_fix_analysis
-            if protocol == STRUCTURED_PROTOCOL:
-                # As with the legacy markers, a whole-file outcome is parsed and
-                # then judged by the one operation-authority check downstream
-                # (validate_operation_result / D1), never refused here.
-                parsed = parse_structured(content, filepath, patch_allowed=prefer_anchored_edit)
-            elif repair_protocol:
-                parsed = parse_legacy_repair(content, filepath, patch_allowed=prefer_anchored_edit)
-            else:
-                parsed = self.parse_file_payload(content, filepath)
-            attempt_evidence_scope.record_developer_parse(parsed, filepath, selected_protocol=protocol,
-                                                          source="developer_response")
-            analysis = parsed.analysis if repair_protocol or protocol == STRUCTURED_PROTOCOL else None
-            content = None
-            if parsed.kind == RESPONSE_INVALID:
-                protocol_error, protocol_reason_code = parsed.error, parsed.reason_code
-            elif parsed.kind == RESPONSE_EDITS:
-                edits = parsed.edit_dicts()
-                logger.info(f"Developer returned an anchored edit for '{filepath}' instead of full content.")
-            elif parsed.kind == RESPONSE_FILE:
-                content = parsed.content
-                if parsed.protocol == LEGACY_PROTOCOL and repair_protocol:
-                    unwrapped = self._unwrap_file_content_envelope(content or "", filepath)
-                    content = unwrapped if unwrapped is not None else content
-            if analysis:
-                logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
-
-            # PRD-015: truncated output is never a file. A completion the
-            # provider stopped at the output budget may still parse as code
-            # (a Python module cut at a line boundary compiles), so the
-            # normalized finish state decides, not the text.
-            truncation_error = _truncated_completion_error(self.llm, filepath)
-            if truncation_error:
-                protocol_error = truncation_error
-
-            if protocol_error:
-                logger.warning(
-                    f"Developer returned a malformed repair response for '{filepath}': "
-                    f"{protocol_error}. Refusing to treat response prose as source code."
-                )
                 edits = None
+                analysis = None
+                protocol_error = None
+                protocol_reason_code = None
+                # FILE-INTEGRITY-CONTRACT-001: parse the protocol, never rewrite
+                # the payload; a response that does not match it is refused typed.
+                protocol = developer_response_protocol(self.llm.config)
+                repair_protocol = prefer_anchored_edit or apply_fix_analysis
+                if protocol == STRUCTURED_PROTOCOL:
+                    # As with the legacy markers, a whole-file outcome is parsed and
+                    # then judged by the one operation-authority check downstream
+                    # (validate_operation_result / D1), never refused here.
+                    parsed = parse_structured(content, filepath, patch_allowed=prefer_anchored_edit)
+                elif repair_protocol:
+                    parsed = parse_legacy_repair(content, filepath, patch_allowed=prefer_anchored_edit)
+                else:
+                    parsed = self.parse_file_payload(content, filepath)
+                attempt_evidence_scope.record_developer_parse(parsed, filepath, selected_protocol=protocol,
+                                                              source="developer_response")
+                analysis = parsed.analysis if repair_protocol or protocol == STRUCTURED_PROTOCOL else None
                 content = None
+                if parsed.kind == RESPONSE_INVALID:
+                    protocol_error, protocol_reason_code = parsed.error, parsed.reason_code
+                elif parsed.kind == RESPONSE_EDITS:
+                    edits = parsed.edit_dicts()
+                    logger.info(f"Developer returned an anchored edit for '{filepath}' instead of full content.")
+                elif parsed.kind == RESPONSE_FILE:
+                    content = parsed.content
+                    if parsed.protocol == LEGACY_PROTOCOL and repair_protocol:
+                        unwrapped = self._unwrap_file_content_envelope(content or "", filepath)
+                        content = unwrapped if unwrapped is not None else content
+                if analysis:
+                    logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
 
-            # Threaded out (not just logged) so kriya/workflow/attribution.py's
-            # self_diagnosis tier can check whether this text names a DIFFERENT
-            # known file than the one it's attached to - closes a real gap found
-            # live (2026-08-13, ignite_qpid_protocol validation): the model's own
-            # analysis correctly named the real cause in a sibling file, but
-            # nothing downstream ever read this text again after logging it.
-            if truncation_error:
-                protocol_reason_code = OUTPUT_TRUNCATED
-            if edits:
-                file_entry = {"filepath": filepath, "content": None, "edits": edits}
-            else:
-                sanitized = content
-                list_answer_error = self._file_list_protocol_answer_error(sanitized, filepath)
-                if list_answer_error:
+                # PRD-015: truncated output is never a file. A completion the
+                # provider stopped at the output budget may still parse as code
+                # (a Python module cut at a line boundary compiles), so the
+                # normalized finish state decides, not the text.
+                truncation_error = _truncated_completion_error(self.llm, filepath)
+                if truncation_error:
+                    protocol_error = truncation_error
+
+                if protocol_error:
                     logger.warning(
-                        f"Developer returned a file-list protocol answer instead of content for "
-                        f"'{filepath}': {sanitized!r}. Refusing to write it as the file."
+                        f"Developer returned a malformed repair response for '{filepath}': "
+                        f"{protocol_error}. Refusing to treat response prose as source code."
                     )
-                    sanitized = None
-                    protocol_error = list_answer_error
-                    protocol_reason_code = FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT
-                file_entry = {"filepath": filepath, "content": sanitized}
-            if analysis:
-                file_entry["analysis"] = analysis
-            # W3-4: the ONLY carrier of a redirect. Only a valid structured REDIRECT line from a
-            # repair response that was accepted as a response; the analysis prose never becomes one.
-            if repair_protocol and parsed.redirect is not None and not protocol_error:
-                file_entry["redirect_to"] = [parsed.redirect.to_file]
-            if protocol_error:
-                file_entry["protocol_error"] = protocol_error
-            if protocol_reason_code:
-                file_entry["protocol_reason_code"] = protocol_reason_code
+                    edits = None
+                    content = None
+
+                # Threaded out (not just logged) so kriya/workflow/attribution.py's
+                # self_diagnosis tier can check whether this text names a DIFFERENT
+                # known file than the one it's attached to - closes a real gap found
+                # live (2026-08-13, ignite_qpid_protocol validation): the model's own
+                # analysis correctly named the real cause in a sibling file, but
+                # nothing downstream ever read this text again after logging it.
+                if truncation_error:
+                    protocol_reason_code = OUTPUT_TRUNCATED
+                if edits:
+                    file_entry = {"filepath": filepath, "content": None, "edits": edits}
+                else:
+                    sanitized = content
+                    list_answer_error = self._file_list_protocol_answer_error(sanitized, filepath)
+                    if list_answer_error:
+                        logger.warning(
+                            f"Developer returned a file-list protocol answer instead of content for "
+                            f"'{filepath}': {sanitized!r}. Refusing to write it as the file."
+                        )
+                        sanitized = None
+                        protocol_error = list_answer_error
+                        protocol_reason_code = FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT
+                    file_entry = {"filepath": filepath, "content": sanitized}
+                if analysis:
+                    file_entry["analysis"] = analysis
+                # W3-4: the ONLY carrier of a redirect. Only a valid structured REDIRECT line from a
+                # repair response that was accepted as a response; the analysis prose never becomes one.
+                if repair_protocol and parsed.redirect is not None and not protocol_error:
+                    file_entry["redirect_to"] = [parsed.redirect.to_file]
+                if protocol_error:
+                    file_entry["protocol_error"] = protocol_error
+                if protocol_reason_code:
+                    file_entry["protocol_reason_code"] = protocol_reason_code
+                if semantic_regeneration is None:
+                    break
+                violation = semantic_regeneration.response_violation(file_entry)
+                if violation is None:
+                    if delivery_retry is not None:
+                        delivery_retry["outcome"] = "candidate_produced"
+                    break
+                # not a candidate verifier: never a file, an edit to apply or a no-change assessment
+                file_entry = {**file_entry, "content": None, "protocol_error": file_entry.get("protocol_error") or violation}
+                file_entry.pop("edits", None)
+                file_entry.pop("redirect_to", None)
+                file_entry.setdefault("protocol_reason_code", "VERIFIER_REGENERATION_PROTOCOL_VIOLATION")
+                if delivery_retry is not None or semantic_regeneration.delivery_retries < 1:
+                    if delivery_retry is not None:
+                        delivery_retry["outcome"] = "violated_again"
+                    break
+                delivery_retry = {"violation": violation, "model": model_override or self.llm.model, "outcome": None}
+                rejected_entry = file_entry
+                logger.warning(f"Developer: the semantic regeneration answer for '{filepath}' violated its response protocol "
+                               f"({violation}); re-sending the same request once on the same model.")
+                file_prompt = file_prompt + semantic_regeneration.correction_block(violation)
+            if delivery_retry is not None:
+                file_entry["regeneration_delivery_retry"] = delivery_retry
             files_out.append(file_entry)
         return files_out
 

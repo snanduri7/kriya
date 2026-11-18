@@ -105,6 +105,22 @@ PLANNED_SOURCE_HEADER = "=== Planned File Current Source (this subtask's approve
 _PLANNED_SOURCE_UNBOUNDED_TOKENS = 1 << 40
 
 
+def _record_regeneration_delivery(state: RunState, semantics: Any, regeneration: Any, result: Any, model: Any) -> None:
+    """VERIFIER-SEMANTIC-REGENERATION-OPERATION-001: the delivery evidence of one semantic regeneration, kept apart from the work grant (work
+    ledger), the provider requests (model.request records) and the retry families (RetryBudgets): whether a protocol-correction re-send was
+    made, and whether a candidate verifier (a valid whole-file answer) was produced."""
+    for entry in result or ():
+        if isinstance(entry, dict) and entry.get("filepath") == regeneration.path:
+            details = semantics.note_delivery(entry)
+            state.record_event(RunEvent(
+                kind="verifier_semantic.regeneration_delivery", attempt=state.attempt_number,
+                source="generation_service._record_regeneration_delivery", authority=EventAuthority.AUTHORITATIVE,
+                message=("A candidate verifier was produced by the one semantic regeneration." if details["candidate_produced"]
+                         else "The semantic regeneration's answer was not a candidate verifier."),
+                details={"path": regeneration.path, "reviewed_sha256": regeneration.sha256, "model": model, **details},
+            ))
+
+
 async def _maybe_run_developer_investigation(
     deps: GenerationDeps, state: RunState, ctx: AttemptCtx, kwargs: Dict[str, Any], active_model: str,
 ) -> None:
@@ -537,6 +553,17 @@ async def _run_developer_generation_as_developer(
         state, ctx, file_count=file_count, active_model=active_model,
     )
     await deps._maybe_run_developer_investigation(state, ctx, kwargs, active_model)
+    # VERIFIER-SEMANTIC-REGENERATION-OPERATION-001: only the generation that IS a verifier's one in-flight regeneration (its targets are exactly
+    # that path) carries the policy owner's typed request: the complete reviewed verifier, the person's rationale, whole-file replacement as the
+    # only outcome. Every other generation gets nothing. Decided before the edit capabilities, which read it. When the regeneration is in flight
+    # and its exact subject cannot be shown, nothing generic is sent in its place.
+    semantics = getattr(ctx, "verifier_semantic", None)
+    regeneration = semantics.regeneration_request(kwargs.get("known_target_files")) if semantics is not None else None
+    if regeneration is not None:
+        kwargs["verifier_regeneration"] = regeneration
+    elif semantics is not None and semantics.regeneration_in_flight(kwargs.get("known_target_files")):
+        raise RuntimeError("VERIFIER_SEMANTIC_REGENERATION_SUBJECT_UNAVAILABLE: the verifier under regeneration is no longer the reviewed bytes "
+                           "or has no bound rationale; no request was sent")
     capabilities = deps._decide_edit_capabilities(state, ctx, kwargs)
     # DEVELOPER-PROMPT-FIT-001: every request is fitted into the capacity of
     # the binding it is sent to, its optional sections shrinking first.
@@ -544,12 +571,6 @@ async def _run_developer_generation_as_developer(
         ctx.kernel.config, deps._chain_binding(ctx, kwargs.get("model_override")),
         kwargs.pop("optional_sections", None) or (),
     )
-    # VERIFIER-REGENERATION-BLIND-001: only the generation that IS a verifier's one in-flight regeneration (its targets are exactly that path)
-    # carries the policy owner's request: the person's rationale, and no "no change" outcome. Every other generation gets nothing.
-    semantics = getattr(ctx, "verifier_semantic", None)
-    regeneration = semantics.regeneration_request(kwargs.get("known_target_files")) if semantics is not None else None
-    if regeneration is not None:
-        kwargs["verifier_regeneration"] = regeneration
     if "expected_output_by_file" not in kwargs:
         # A target whose capability excludes the full file is always asked
         # for an anchored patch, to which the Developer applies no
@@ -572,6 +593,8 @@ async def _run_developer_generation_as_developer(
                 {path: getattr(op, "value", op) for path, op in (retry_kwargs.get("operation_by_file") or {}).items()})
             result = await ctx.developer.run_generation(**retry_kwargs)
         succeeded = True
+        if regeneration is not None:
+            _record_regeneration_delivery(state, semantics, regeneration, result, active_model)
         return result
     finally:
         # P3-A: what this invocation really sent, for the anchor check.

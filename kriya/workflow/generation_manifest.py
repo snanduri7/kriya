@@ -38,6 +38,20 @@ _SOURCE_EXTENSIONS = {".java", ".kt", ".kts", ".py", ".go", ".rs", ".rb", ".js",
 _CONFIG_EXTENSIONS = {".xml", ".yaml", ".yml", ".properties", ".toml", ".ini", ".conf"}
 
 
+# TEST-ASSERTION-CONTRACT-001 (owner ruling 2026-11-18; Stage B runs 6 and 7: two generated verifiers asserted behaviour that only the unit's
+# own unverified candidate code exhibited). One generic rule for every file of role TEST; nothing about a language, a library or a kind of input.
+TEST_ASSERTION_CONTRACT = (
+    "\nTest assertion contract (this file is a test): every assertion must be entailed by the Authoritative Goal or this unit's assigned "
+    "acceptance criteria. Existing code is the candidate under test and may establish APIs/signatures, but its behavior is not authority for "
+    "expected behavior. Do not assert outcomes for inputs/cases whose semantics the contract does not define.\n"
+)
+
+
+def role_contract_block(path: str) -> str:
+    """The contract text a Developer request for ``path`` carries because of the file's role ("" for every role but TEST)."""
+    return TEST_ASSERTION_CONTRACT if classify_file_role(path) is FileRole.TEST else ""
+
+
 def classify_file_role(path: str) -> FileRole:
     normalized = path.replace("\\", "/").lower()
     basename = os.path.basename(normalized)

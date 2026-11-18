@@ -20,6 +20,25 @@ from kriya.workflow.workflow import WorkflowEngine
 PASSING = {"success": True, "output": "tests/test_shop.py .\n1 passed in 0.01s"}
 
 
+class Unoffered:
+    """A scripted Developer answer that DELIBERATELY ignores the response protocol the request offers (a misbehaving model). Without this
+    wrapper a protocol-faithful run (``run_enforce(protocol_faithful=True)``) records any answer in an outcome the request did not offer as a
+    harness error: a reproducer must not pass because its scripted model answered in a form the real request never allowed
+    (Stage B run 7: the request offered only an anchored EDIT; the scripted model of the earlier reproducer answered with a whole file)."""
+
+    def __init__(self, answer: Any) -> None:
+        self.answer = answer
+
+
+def offered_outcomes(system_prompt: str, path: str) -> Optional[set]:
+    """The outcomes a structured Developer request offers for ``path`` ({"file", "edit", "no_change"}); None when it is not a structured
+    request (nothing to hold a scripted answer to)."""
+    if "RESPONSE PROTOCOL" not in (system_prompt or ""):
+        return None
+    return {name for name, marker in (("file", f'<<<KRIYA:FILE path="{path}">>>'), ("edit", f'<<<KRIYA:EDIT path="{path}">>>'),
+                                      ("no_change", f'<<<KRIYA:NO_CHANGE path="{path}">>>')) if marker in system_prompt}
+
+
 def git(repo, *args):
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=repo, check=True, capture_output=True)
 
@@ -38,6 +57,7 @@ class Run:
     developer_calls: List[Optional[str]] = field(default_factory=list)                    # the unit of EVERY Developer request, in order (a replayed verifier makes none)
     planner_calls: int = 0                                                                # how many times the Planner was asked for the plan
     developer_requests: List[Tuple[Optional[str], str, str]] = field(default_factory=list)  # (unit, the file the request was answered for, the system prompt's first line)
+    unfaithful_answers: List[str] = field(default_factory=list)                           # protocol_faithful: scripted answers in an outcome the request did not offer
 
 
 def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, str]], goal: str = "Change the page size", mode: str = "human-in-the-loop",
@@ -46,7 +66,8 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
                 record_steps: bool = False, on_execute: Optional[Callable[[Any], None]] = None, on_build: Optional[Callable[[], Any]] = None,
                 run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None, init_git: bool = True,
                 on_tests: Optional[Callable[[Any], Dict[str, Any]]] = None, existing_workspace: Any = None,
-                execute_kwargs: Optional[Dict[str, Any]] = None, configure: Optional[Callable[[Any], None]] = None) -> Run:
+                execute_kwargs: Optional[Dict[str, Any]] = None, configure: Optional[Callable[[Any], None]] = None,
+                protocol_faithful: bool = False) -> Run:
     """``units``: a source may be a callable (called once per Developer request of that unit). ``on_tests(validator)``: the tests gate's answer for that
     validator's tree (default: PASSING). ``existing_workspace``: run again in the workspace an earlier call created (a later run of the same work: nothing is
     created or committed), with ``execute_kwargs`` passed to the controller (``resume=True``). ``configure(cfg)``: adjust the run's configuration."""
@@ -100,6 +121,15 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
             run.developer_calls.append(active.get("id"))
             run.developer_requests.append((active.get("id"), path, first))
             text_or_pair = source() if callable(source) else source
+            deliberate = isinstance(text_or_pair, Unoffered)
+            if deliberate:
+                text_or_pair = text_or_pair.answer
+            offered = offered_outcomes(system_prompt or "", path)
+            if protocol_faithful and not deliberate and offered is not None:
+                outcome = ("no_change" if text_or_pair is None else "edit" if isinstance(text_or_pair, list)
+                           else "another path" if isinstance(text_or_pair, tuple) else "file")
+                if outcome not in offered:
+                    run.unfaithful_answers.append(f"{path}: scripted answer is {outcome!r} but the request offers only {sorted(offered)}")
             if isinstance(text_or_pair, tuple):     # (another path, content): the scripted model answers for a file it was not asked for
                 path, text_or_pair = text_or_pair
             if text_or_pair is None:                # the scripted model answers "no change needed" for the file it was asked for

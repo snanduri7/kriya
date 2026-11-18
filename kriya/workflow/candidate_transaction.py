@@ -509,6 +509,13 @@ def _decide_edit_capabilities(deps: CandidateDeps, state: RunState, ctx: Attempt
         if content.strip() and content in mandatory_context:
             shown = [("shown_full", content)]
         full_file = deps._is_restore_public_contract_phase(state) or deps._has_authoritative_full_source(path, ctx, state)
+        # VERIFIER-SEMANTIC-REGENERATION-OPERATION-001: the in-flight semantic regeneration of exactly this path shows the model the complete
+        # reviewed verifier (the policy owner's request carries it, held to the reviewed bytes), so whole-file replacement is authoritative for
+        # it - when, and only when, the file on disk is still those bytes. No other target and no other generation gains anything here.
+        regeneration = kwargs.get("verifier_regeneration")
+        if (regeneration is not None and getattr(regeneration, "path", None) == path
+                and regeneration.source == content):
+            full_file = True
         capabilities[path] = build_edit_capability(
             path, content,
             full_file=full_file,

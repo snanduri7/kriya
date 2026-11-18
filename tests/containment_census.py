@@ -45,6 +45,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_stage_b_run4_recovery_reproducer.py': ('S', 'M'),  # the same real-workflow reopen harness (Stage B run 4)
  'tests/test_verifier_regeneration_spent_by_refusal_001.py': ('S', 'M'),  # the real-unit verifier-semantic harness (Stage B run 5)
  'tests/test_verifier_regeneration_blind_001.py': ('S', 'M'),  # the real-unit verifier-semantic harness (Stage B run 6)
+ 'tests/test_verifier_semantic_regeneration_operation_001.py': ('S', 'M'),  # the real-unit verifier-semantic harness (Stage B run 7)
  'tests/test_enforce_unit_advisory_review_acceptance_001.py': ('S', 'M'),  # R2: the real-unit enforce harness and the direct chaos run
  'tests/test_enforce_recovery_convergence_001.py': ('S', 'M'),  # R4: the real-unit dependent-reverification run
  'tests/test_backend_readiness_004_authority_request.py': ('N', 'F'),

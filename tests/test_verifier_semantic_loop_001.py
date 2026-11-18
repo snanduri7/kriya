@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 import pytest
-from _enforce_unit_harness import run_enforce
+from _enforce_unit_harness import Unoffered, run_enforce
 
 from kriya.policy.approval import TypedApprovalCallback, VerifierSemanticDecision, VerifierSemanticSubject
 from kriya.workflow import verifier_semantic as vs
@@ -106,9 +106,10 @@ class Scene:
 
     def __init__(self, *, lib: List[Any], test: List[Any], semantic: Optional[List[Optional[str]]] = None, gate: Any = None, typed: bool = True,
                  plan: Optional[EngineeringPlan] = None, base_files: Optional[Dict[str, str]] = None, units: Optional[Dict[str, Any]] = None,
-                 configure: Any = None) -> None:
+                 configure: Any = None, protocol_faithful: bool = True) -> None:
         self.lib, self.test, self.semantic, self.gate, self.typed = list(lib), list(test), list(semantic or []), gate, typed
         self.plan, self.base_files, self.units, self.configure = plan, base_files, units, configure
+        self.protocol_faithful = protocol_faithful   # a scripted answer must be in an outcome the request offers, unless wrapped in Unoffered
         self.names = (LIB, TEST)
         self.subjects: List[VerifierSemanticSubject] = []
         self.gate_trees: List[Dict[str, Optional[str]]] = []
@@ -168,7 +169,9 @@ class Scene:
         units = self.units or {"s1": {LIB: lambda: self._next(self.lib), TEST: lambda: self._next(self.test)}}
         with patch.object(WorkflowEngine, "run_generation_workflow", new=unit), patch.object(vs.UnitSemantics, "attempt_scope", new=scope):
             self.result = run_enforce(tmp_path, plan=self.plan or _plan(), goal=GOAL, units=units, on_tests=self._tests, mode=mode,
-                                      callback=callback, base_files=self.base_files, configure=self.configure)
+                                      callback=callback, base_files=self.base_files, configure=self.configure,
+                                      protocol_faithful=self.protocol_faithful)
+        assert self.result.unfaithful_answers == [], self.result.unfaithful_answers
         return self.result
 
     # -- what happened
@@ -254,16 +257,17 @@ def test_unattended_a_passing_run_authored_verifier_is_not_applied(tmp_path):
 
 @pytest.mark.parametrize("answer_for", [LIB, "tests/test_other.py", "tests/test_shop_renamed.py"])
 def test_the_regeneration_answer_cannot_write_production_a_sibling_or_a_renamed_verifier(tmp_path, answer_for):
-    """The one-path write scope is the write gate's: an answer for any other path changes nothing, is not a regeneration of V, and there is no
-    further Developer request."""
-    scene = Scene(lib=[LIB_20], test=[_test(10), (answer_for, LIB_10 if answer_for == LIB else _test(20, "ELSEWHERE"))],
+    """The one-path write scope is the write gate's: an answer for any other path changes nothing and is not a regeneration of V. It violates
+    the regeneration's response protocol, so the same request is re-sent ONCE (VERIFIER-SEMANTIC-REGENERATION-OPERATION-001); the same answer
+    again ends it. There is no further Developer request."""
+    scene = Scene(lib=[LIB_20], test=[_test(10), Unoffered((answer_for, LIB_10 if answer_for == LIB else _test(20, "ELSEWHERE")))],
                   semantic=["expectation_invalid"])
     scene.run(tmp_path)
     result = scene.stop()
     assert result.get("quality_gates_passed") is not True and scene.applied() == {LIB: None, TEST: None}
     assert result.get("failure_category") in ("verifier_semantic_authority_required", "unauthorized_generation_target"), result.get("failure_category")
     assert all(tree[LIB] == LIB_20 and tree[TEST] == _test(10) for tree in scene.gate_trees), "no gate ever saw a changed production file or verifier"
-    assert len(scene.requested()) == 3, "the two planned files, then the ONE regeneration request"
+    assert len(scene.requested()) == 4, "the two planned files, the ONE regeneration request and its one protocol-correction re-send"
     assert [record["during"][0] for record in scene.scopes].count([TEST]) == 1
 
 
