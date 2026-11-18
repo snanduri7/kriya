@@ -99,9 +99,10 @@ class Scene:
     the last one repeats). ``gate``: ``(tree, call_number) -> result`` (default: ``_gate_result``)."""
 
     def __init__(self, *, lib: List[Any], test: List[Any], semantic: Optional[List[Optional[str]]] = None, gate: Any = None, typed: bool = True,
-                 plan: Optional[EngineeringPlan] = None, base_files: Optional[Dict[str, str]] = None, units: Optional[Dict[str, Any]] = None) -> None:
+                 plan: Optional[EngineeringPlan] = None, base_files: Optional[Dict[str, str]] = None, units: Optional[Dict[str, Any]] = None,
+                 configure: Any = None) -> None:
         self.lib, self.test, self.semantic, self.gate, self.typed = list(lib), list(test), list(semantic or []), gate, typed
-        self.plan, self.base_files, self.units = plan, base_files, units
+        self.plan, self.base_files, self.units, self.configure = plan, base_files, units, configure
         self.names = (LIB, TEST)
         self.subjects: List[VerifierSemanticSubject] = []
         self.gate_trees: List[Dict[str, Optional[str]]] = []
@@ -159,7 +160,7 @@ class Scene:
         units = self.units or {"s1": {LIB: lambda: self._next(self.lib), TEST: lambda: self._next(self.test)}}
         with patch.object(WorkflowEngine, "run_generation_workflow", new=unit), patch.object(vs.UnitSemantics, "attempt_scope", new=scope):
             self.result = run_enforce(tmp_path, plan=self.plan or _plan(), goal=GOAL, units=units, on_tests=self._tests, mode=mode,
-                                      callback=callback, base_files=self.base_files)
+                                      callback=callback, base_files=self.base_files, configure=self.configure)
         return self.result
 
     # -- what happened

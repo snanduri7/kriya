@@ -571,9 +571,35 @@ def _semantic_attribution(ruling: GateRuling) -> AttributionResult:
         reasoning="A generated verifier has no semantic authority; nothing is attributed and nothing may be changed.")
 
 
+def _carry_undispatched_verifier_regeneration(state: GenerationState, ctx, candidate_unavailable: Optional[str], classified) -> bool:
+    """VERIFIER-REGENERATION-SPENT-BY-REFUSAL-001 (Stage B run 5: the primary refused the one regeneration request before any provider request,
+    and 5 ms later the unit stopped VERIFIER_SEMANTIC_REGENERATION_NOT_EXECUTED; the fallback was never offered it). An attempt that ended on a
+    pre-provider refusal of its model candidate sent nothing, so it regenerated nothing: the policy owner is not asked to judge it. The owner puts
+    the same regeneration back to pending (only for the unchanged verifier bytes) and the next attempt's target stays exactly that path. True =
+    carried; the failure seam then asks for no ruling. Whether a candidate remains is not decided here: with none, the unit is already stopping
+    with the typed MODEL_CANDIDATE_UNAVAILABLE reason (``_record_candidate_unavailable``), and that reason stands."""
+    unit = getattr(ctx, "verifier_semantic", None)
+    if unit is None or candidate_unavailable is None:
+        return False
+    path = unit.regeneration_not_dispatched()
+    if path is None:
+        return False
+    state.last_implicated_files, state.last_missing_files = [path], None
+    state.record_event(RunEvent(
+        kind="verifier_semantic.regeneration_carried", attempt=state.attempt_number,
+        source="retry_strategy._carry_undispatched_verifier_regeneration", authority=EventAuthority.AUTHORITATIVE,
+        message=(f"The one regeneration of {path} was refused before any provider request ({candidate_unavailable} candidate); it was not "
+                 "performed and stays pending for the next eligible candidate."),
+        details={"path": path, "refused_candidate": candidate_unavailable,
+                 "reason_code": getattr(classified, "candidate_refusal_reason", None), "terminal": bool(state.environment_failure)},
+    ))
+    return True
+
+
 def _close_unadmitted_verifier_regeneration(state: GenerationState, ctx) -> None:
     """After the failed attempt was charged: a verifier's one regeneration happens only as the targeted attempt the retry policy itself admits
-    next, for exactly that path. No budget is reset to make room for it; otherwise the unit stops for review."""
+    next, for exactly that path. No budget is reset to make room for it; otherwise the unit stops for review. With the primary refused before
+    any provider request (MODEL-CANDIDATE-UNAVAILABLE-001) that targeted attempt is the fallback's (VERIFIER-REGENERATION-SPENT-BY-REFUSAL-001)."""
     unit = getattr(ctx, "verifier_semantic", None)
     if unit is None or (unit.pending is None and not unit.denied):
         return
@@ -591,7 +617,9 @@ def _close_unadmitted_verifier_regeneration(state: GenerationState, ctx) -> None
             return
         refusal = unit.full_regeneration_refusal()
     else:
-        admitted = (decision.should_continue and decision.action is RetryAction.TARGETED
+        targeted = decision.action is RetryAction.TARGETED or (
+            decision.action is RetryAction.FALLBACK_TARGETED and bool(state.primary_candidate_unavailable))
+        admitted = (decision.should_continue and targeted
                     and list(state.last_implicated_files or ()) == [unit.pending[0]] and state.plan_scope_conflict is None)
         refusal = unit.regeneration_admitted(admitted)
     if refusal is not None and not state.environment_failure:
@@ -1160,7 +1188,9 @@ async def _record_attempt_failure(
     # differently-built retry prompts.
     # VERIFIER-SEMANTIC-AUTHORITY-001, the primary interception: BEFORE attribution may choose a mutation target. A failing run-authored verifier
     # is settled by the one policy owner (kriya/workflow/verifier_semantic.py); with no such subject the ruling is None and nothing below changes.
-    semantic_ruling = await _generated_verifier_ruling(state, ctx, failure)
+    # A pre-provider refusal of the model candidate is not a gate failure of any verifier: an in-flight regeneration is carried, not judged.
+    semantic_ruling = (None if _carry_undispatched_verifier_regeneration(state, ctx, candidate_unavailable, classified)
+                       else await _generated_verifier_ruling(state, ctx, failure))
     if is_incomplete_generation:
         state.last_missing_files = e.missing_files
         state.last_implicated_files = None

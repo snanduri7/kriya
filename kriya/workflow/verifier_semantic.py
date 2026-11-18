@@ -564,6 +564,24 @@ class UnitSemantics:
         return self._stop(REASON_REGENERATION_NOT_ADMITTED, path,
                           "the expectation was declared invalid, and the retry policy admits no targeted attempt to regenerate it")
 
+    def regeneration_not_dispatched(self) -> Optional[str]:
+        """VERIFIER-REGENERATION-SPENT-BY-REFUSAL-001: the attempt that started the one regeneration ended before any provider saw its request (the
+        caller's fact: a pre-provider refusal of the model candidate). Nothing was regenerated, so there is nothing to judge: the SAME (path, bytes)
+        is pending again for the next attempt, and the person is not asked again. Only while the verifier is still the bytes the decision was made
+        for; otherwise nothing is carried and the in-flight regeneration is left for the existing judgment. Returns the carried path, else None.
+        A regeneration a provider answered is never returned here: it is judged by ``_judge_regeneration`` and stays the only one."""
+        if self.regenerating is None:
+            return None
+        path, sha = self.regenerating
+        try:
+            data = self.read_bytes(path) if self.read_bytes is not None else None
+        except Exception:  # unreadable now: not the bound subject, never guessed
+            data = None
+        if data is None or hashlib.sha256(data).hexdigest() != sha:
+            return None
+        self.pending, self.regenerating = self.regenerating, None
+        return path
+
     def full_regeneration_refusal(self) -> GateRuling:
         """A verifier of this invocation may no longer be written (accepted, or its one regeneration is used), and the retry policy's next
         attempt would regenerate the unit's whole file set. That is neither a strict production-owner repair nor the one regeneration."""
