@@ -430,6 +430,9 @@ EXCEPTIONS: Dict[str, Tuple[str, str]] = {'tests/state_machine/test_sm_attempt_m
  'tests/test_d6_runtime_artifacts.py::test_the_real_ignite_application_passes_and_its_work_directory_is_discarded': ('N', 'M'),
  # the D4 verification-only routing harness (test_d4_runtime_entrypoint_ownership.py, file rule S/M), replayed on Stage C run 3's exec:exec failure
  'tests/test_exec_exec_entrypoint_001.py::test_run3_replay_the_verification_unit_routes_it_to_the_poms_owner_and_writes_nothing_itself': ('S', 'M'),
+ # the real-unit harness of test_enforce_verified_no_change.py (file rule S/M), run for Stage C run 3's system.properties unit
+ 'tests/test_file_template_returned_unfilled_001.py::test_an_empty_file_answer_creates_the_empty_file_and_passes_the_units_own_verification': ('S', 'M'),
+ 'tests/test_file_template_returned_unfilled_001.py::test_the_unfilled_template_is_refused_the_developer_is_told_and_the_empty_answer_then_passes': ('S', 'M'),
  'tests/test_d8_terminal_toolchain_authority.py::test_an_unchanged_declaration_runs_the_named_test_with_the_callers_authority[False]': ('N', 'C'),
  'tests/test_d8_terminal_toolchain_authority.py::test_an_unchanged_declaration_runs_the_named_test_with_the_callers_authority[True]': ('N', 'C'),
  'tests/test_d8_terminal_toolchain_authority.py::test_the_earlier_unit_gate_still_refuses_an_unauthorized_toolchain_change': ('N', 'C'),

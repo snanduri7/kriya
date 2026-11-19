@@ -115,6 +115,9 @@ _STRUCTURED_REDIRECT_RE = re.compile(r'^<<<KRIYA:REDIRECT to="([^"]+)">>>$')
 _STRUCTURED_SEARCH = "<<<KRIYA:SEARCH>>>"
 _STRUCTURED_REPLACE = "<<<KRIYA:REPLACE>>>"
 _STRUCTURED_END = {"FILE": "<<<KRIYA:END_FILE>>>", "EDIT": "<<<KRIYA:END_EDIT>>>"}
+# The one line the FILE template shows where the file's content goes (structured_contract prints exactly this, and the parser
+# refuses an answer that returns it as the whole content - FILE-TEMPLATE-RETURNED-UNFILLED-001).
+FILE_CONTENT_PLACEHOLDER = "<the complete file content>"
 _END_FILE_NO_FINAL_NEWLINE = "<<<KRIYA:END_FILE no_final_newline>>>"
 
 
@@ -455,6 +458,18 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
         if kind == "FILE":
             if any(item.startswith(SENTINEL_PREFIX) for item in body):
                 return _fail(INVALID_EDIT_PROTOCOL, "a sentinel line inside a FILE payload")
+            # FILE-TEMPLATE-RETURNED-UNFILLED-001 (Stage C runs 20261119T125126-20dc890c and 20261119T163313-acea6505, MEASURED: asked
+            # for a file that should be empty, the Developer answered with the FILE template exactly as the contract printed it; the
+            # placeholder line became src/main/resources/system.properties, and the Reviewer and the compliance check, shown that line
+            # as "the content", both read it as a description of the content and passed it). An answer whose WHOLE payload is the
+            # contract's own placeholder line is the template returned unfilled: it is not this response's content and nothing is
+            # written. Only that exact case - the same line among other lines, or any other text, is content like any other; an
+            # empty payload stays what it was (an empty file).
+            if [item.strip() for item in body] == [FILE_CONTENT_PLACEHOLDER]:
+                return _fail(INVALID_EDIT_PROTOCOL,
+                             f"the FILE block holds only the protocol's own placeholder line {FILE_CONTENT_PLACEHOLDER!r}, not the "
+                             "file's content - write the real content between the two protocol lines (a file with no content has "
+                             "nothing between them)")
             # Explicit grammar: each payload line is newline-terminated, unless
             # the end marker declares no_final_newline.
             content = "\n".join(body) + ("\n" if body and final_newline else "")
@@ -552,7 +567,7 @@ def structured_contract(filepath: str, *, analysis_required: bool, allow_edit: b
     if exclusive:
         parts.append(alternative(2, "replace the whole file"))
     if allow_file:
-        parts.append(f'<<<KRIYA:FILE path="{filepath}">>>\n<the complete file content>\n<<<KRIYA:END_FILE>>>\n'
+        parts.append(f'<<<KRIYA:FILE path="{filepath}">>>\n{FILE_CONTENT_PLACEHOLDER}\n<<<KRIYA:END_FILE>>>\n'
                      "(every line you write ends with a newline in the file)")
     if exclusive and allow_no_change:
         parts.append(alternative(3, "the file is already correct"))
