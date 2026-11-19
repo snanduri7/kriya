@@ -2082,6 +2082,17 @@ def _diagnosis_mismatch_bypass_reason(
             "inspection; diagnosis prose cannot veto owner restoration"
         )
 
+    # VERIFIER-REGENERATION-DIAGNOSIS-MISMATCH-001 (Stage B run 11, 20261118T230243-da5b8720): the file is the verifier whose typed semantic
+    # regeneration is in flight. Its authorities are the person's rationale, the test gate that executes the regenerated file in this same
+    # attempt and the person's review of the new bytes; the model's analysis prose is none of them and must not veto the candidate before
+    # they speak. Exactly that path, by the policy owner's own typed state: no other file of the attempt and no ordinary repair is exempt.
+    semantics = getattr(ctx, "verifier_semantic", None)
+    if semantics is not None and semantics.regeneration_in_flight([filepath]):
+        return (
+            "this file is the verifier under its one semantic regeneration; the test gate and the person's semantic review judge the "
+            "regenerated file, diagnosis prose cannot veto it"
+        )
+
     # Bounded-veto policy, checked before anything else and independent of
     # fail_type: this check can reject a given FILE'S edit at most once per
     # run. Found live, 2026-08-17 (ignite_qpid_person, run b-10o): the
