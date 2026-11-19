@@ -673,8 +673,12 @@ def _raise_candidate_runtime_entrypoint_failure(
     message = (
         f"{CANDIDATE_RUNTIME_ENTRYPOINT_INVALID}: the candidate's {config} selects the runtime main class "
         f"{entrypoint['effective_entrypoint']} ({entrypoint['candidate_config_key']}), but no source in the "
-        "project declares it and the fresh build did not produce it. Maven uses this configuration over the run "
-        f"command's -Dexec.mainClass={entrypoint['requested_entrypoint']}, so the application cannot start.\n\n"
+        "project declares it and the fresh build did not produce it. "
+        # EXEC-EXEC-ENTRYPOINT-DIAGNOSIS-001: an `exec:exec` run names no main class on the command line; say so instead of "None".
+        # With a requested class the text is exactly what it was.
+        + (f"Maven uses this configuration over the run command's -Dexec.mainClass={entrypoint['requested_entrypoint']}"
+           if entrypoint.get("requested_entrypoint") else "The run command names no other main class")
+        + ", so the application cannot start.\n\n"
         f"Captured output:\n{run_result.get('output', '')}"
     )
     failure = Failure(

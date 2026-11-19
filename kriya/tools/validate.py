@@ -2696,6 +2696,96 @@ class PolymorphicValidator:
             return None, key, self.ENTRYPOINT_UNKNOWN
         return value, key, self.ENTRYPOINT_CANDIDATE_BUILD_CONFIG
 
+    def _exec_plugin_exec_main_class(self, cli_properties: Dict[str, str]) -> Tuple[Optional[str], Optional[str], str]:
+        """EXEC-EXEC-ENTRYPOINT-DIAGNOSIS-001 (Stage C run 20261119T163313-acea6505: `mvn exec:exec` failed with
+        ClassNotFoundException for the class the candidate's own pom.xml named, and nothing diagnosed it because only `exec:java`
+        was read). (value, config key, provenance) of the Java main class a command-line `exec:exec` launches, read from the
+        project's POM - and ONLY when that configuration proves it:
+
+        - the exec-maven-plugin configuration is taken by the same precedence as `_exec_plugin_main_class` (the `default-cli`
+          execution, the plugin, pluginManagement);
+        - its `<executable>` is literally the Java launcher (`java`, or a path ending in `/java`, no property reference);
+        - its `<arguments>` are read the way that launcher reads them: options first (an option taking a value consumes the next
+          element, which may be `<classpath/>` / `<modulepath/>`), then the FIRST non-option argument is the main class. `-jar`,
+          `-m` and `--module` launch no named class;
+        - an argument that is one `${property}` is resolved from the command's -D properties (KRIYA_COMMAND) or the POM's
+          `<properties>` (CANDIDATE_BUILD_CONFIG) before it is read.
+
+        Anything else is UNKNOWN - never a guess from position: no such configuration (or one under a `<parent>` that may supply
+        it), another executable, `-Dexec.executable` / `-Dexec.args` on the command (they replace the POM's program and arguments),
+        an unresolved or partial property reference, or no non-option argument at all."""
+        unknown = (None, None, self.ENTRYPOINT_UNKNOWN)
+        if "exec.executable" in cli_properties or "exec.args" in cli_properties:
+            return unknown
+        try:
+            root = ET.parse(os.path.join(self.workspace_path, "pom.xml")).getroot()
+        except (OSError, ET.ParseError):
+            return unknown
+
+        def local(element: ET.Element) -> str:
+            return element.tag.rsplit("}", 1)[-1]
+
+        def child(element: Optional[ET.Element], name: str) -> Optional[ET.Element]:
+            return next((c for c in element if local(c) == name), None) if element is not None else None
+
+        def children(element: Optional[ET.Element]) -> List[ET.Element]:
+            return list(element) if element is not None else []      # never an Element's truth value (empty = falsy)
+
+        properties = {local(e): (e.text or "").strip() for p in root if local(p) == "properties" for e in p}
+        build = child(root, "build")
+        configurations: List[Tuple[ET.Element, str]] = []
+        for section, key_prefix in ((build, "build/plugins"), (child(build, "pluginManagement"), "build/pluginManagement/plugins")):
+            for plugin in children(child(section, "plugins")):
+                artifact = child(plugin, "artifactId")
+                if local(plugin) != "plugin" or artifact is None or (artifact.text or "").strip() != self._EXEC_PLUGIN:
+                    continue
+                key = f"{key_prefix}/plugin[{self._EXEC_PLUGIN}]"
+                for execution in children(child(plugin, "executions")):
+                    identifier, configuration = child(execution, "id"), child(execution, "configuration")
+                    if (identifier is not None and (identifier.text or "").strip() == "default-cli"
+                            and child(configuration, "arguments") is not None):
+                        configurations.append((configuration, f"{key}/executions/execution[default-cli]/configuration"))
+                if child(child(plugin, "configuration"), "arguments") is not None:
+                    configurations.append((child(plugin, "configuration"), f"{key}/configuration"))
+        if not configurations:
+            return unknown
+        configuration, key = configurations[0]
+        executable = ((child(configuration, "executable").text or "").strip()
+                      if child(configuration, "executable") is not None else "")
+        if "$" in executable or os.path.basename(executable.replace("\\", "/")) != "java":
+            return unknown
+
+        def resolved(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+            """(value, provenance, property name) of one argument's text; value None when it cannot be known."""
+            reference = re.fullmatch(r"\$\{([^}]+)\}", text)
+            if reference:
+                name = reference.group(1)
+                if name in cli_properties:
+                    return cli_properties[name], self.ENTRYPOINT_KRIYA_COMMAND, name
+                if name in properties and "$" not in properties[name]:
+                    return properties[name], self.ENTRYPOINT_CANDIDATE_BUILD_CONFIG, name
+                return None, None, name
+            return text, self.ENTRYPOINT_CANDIDATE_BUILD_CONFIG, None
+
+        items, index = children(child(configuration, "arguments")), 0
+        while index < len(items):
+            if local(items[index]) != "argument":
+                return unknown                      # a classpath element where an option or the class is expected proves nothing
+            value, provenance, name = resolved((items[index].text or "").strip())
+            if not value:
+                return unknown
+            if value.startswith("-"):
+                if value in ("-jar", "-m", "--module"):
+                    return unknown
+                index += 2 if value in self._JAVA_OPTIONS_WITH_VALUE else 1
+                continue
+            if "$" in value or not re.fullmatch(r"[\w$.]+", value):
+                return unknown
+            where = f"{key}/arguments/argument" + (f" = ${{{name}}}, properties/{name}"
+                                                   if name and provenance == self.ENTRYPOINT_CANDIDATE_BUILD_CONFIG else "")
+            return value, where, provenance
+        return unknown
+
     def diagnose_runtime_entrypoint(self, command: List[str]) -> Optional[Dict[str, Any]]:
         """D4: a deterministic account of the main class a failed JVM runtime
         command ran - what was requested, what actually ran and who chose it,
@@ -2708,13 +2798,20 @@ class PolymorphicValidator:
         tool, requested, effective, provenance, config_key = os.path.basename(command[0]), None, None, None, None
         if tool in ("mvn", "mvnw"):
             goals = [g for g in command[1:] if not g.startswith("-")]
-            if not any(g == "exec:java" or (g.endswith(":java") and self._EXEC_PLUGIN in g) for g in goals):
+            java_goal = any(g == "exec:java" or (g.endswith(":java") and self._EXEC_PLUGIN in g) for g in goals)
+            # EXEC-EXEC-ENTRYPOINT-DIAGNOSIS-001: `exec:exec` launches whatever the POM's <executable>/<arguments> say; when that is
+            # provably the Java launcher with a main class, it is diagnosed like any other JVM launch (exec:java is unchanged).
+            exec_goal = any(g == "exec:exec" or (g.endswith(":exec") and self._EXEC_PLUGIN in g) for g in goals)
+            if not java_goal and not exec_goal:
                 return None
             cli = dict(arg[2:].split("=", 1) for arg in command[1:] if arg.startswith("-D") and "=" in arg)
             requested = cli.get("exec.mainClass")
-            effective, config_key, provenance = self._exec_plugin_main_class(cli)
-            if provenance == self.ENTRYPOINT_KRIYA_COMMAND and config_key is None:
-                effective = requested
+            if java_goal:
+                effective, config_key, provenance = self._exec_plugin_main_class(cli)
+                if provenance == self.ENTRYPOINT_KRIYA_COMMAND and config_key is None:
+                    effective = requested
+            else:
+                effective, config_key, provenance = self._exec_plugin_exec_main_class(cli)
         elif tool == "java":
             args, i = command[1:], 0
             while i < len(args) and args[i].startswith("-"):

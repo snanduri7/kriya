@@ -1428,12 +1428,24 @@ async def _record_attempt_failure(
             # migration's manifest evidence. From a unit that owns no files
             # this grounds the existing cross-owner (PLAN_SCOPE_DEFECT)
             # recovery below; the unit's own write scope is never widened.
+            # EXEC-EXEC-ENTRYPOINT-DIAGNOSIS-001 (Stage C run 20261119T163313-acea6505): this reasoning is the MUST FIX text the
+            # reopened owner of the configuration file is shown, and the bounded evidence excerpt beside it may end before the
+            # JVM's own "could not find or load main class" line. So it names what the diagnosis found - the file, the class it
+            # selects and where - and what makes it right. Facts of the validator's diagnosis only; no class is guessed here.
+            diagnosed = (failure.diagnostics or {}).get("entrypoint_diagnosis") or {}
+            selected = (
+                f" {diagnosed.get('candidate_config_source')} selects '{diagnosed.get('effective_entrypoint')}' "
+                f"({diagnosed.get('candidate_config_key')}). Make it the fully qualified name (package and class) of the class "
+                "that declares the application's main method."
+                if diagnosed.get("effective_entrypoint") and diagnosed.get("candidate_config_source") else ""
+            )
             attribution = AttributionResult(
                 tier="authoritative_deterministic", files=list(failure.likely_files),
                 confidence="high" if failure.likely_files else "low",
                 reasoning=(
                     "The candidate's build configuration selects a runtime main class that no current "
                     "source declares and the fresh build did not produce (deterministic entrypoint diagnosis)."
+                    + selected
                 ),
             )
         else:

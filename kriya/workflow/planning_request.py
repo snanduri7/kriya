@@ -321,6 +321,42 @@ def integration_contracts_for(plan: EngineeringPlan, subtask_id: str) -> List[Di
     return contracts
 
 
+PLANNED_ENTRYPOINT_AUTHORITY = (
+    "The approved plan assigns the application's entry point to this one file. Any build or run configuration that names a main "
+    "class, module or script must name exactly this one, and the file must declare exactly it; do not invent another name."
+)
+_JAVA_MAIN_SOURCE_ROOT = "src/main/java/"
+
+
+def planned_entrypoint_for(plan: EngineeringPlan, subtask: Subtask) -> Optional[Dict[str, Any]]:
+    """PLANNED-ENTRYPOINT-CONTEXT-001 (Stage C runs 20261119T125126-20dc890c and 20261119T163313-acea6505: the plan assigned
+    ``src/main/java/com/example/ProtocolApplication.java`` to a later unit, the unit writing ``pom.xml`` was never told, and invented
+    ``com.example.QpidAmqpApp`` as the main class - twice).
+
+    The plan's entry point as a fact for ``subtask``, or None. ONE source: the plan's own planned files, read with the existing role
+    classifier (``generation_manifest.classify_file_role``). It is established only when EXACTLY ONE planned file of the whole plan
+    has the entry-point role (none: a library, nothing is required of it; two or more: ambiguous, nothing is said). It is given only
+    to the units it concerns: the owner of a build file, and the owner of the entry-point file itself. For a file under Maven's
+    ``src/main/java/`` the class name the path implies is stated too (the path IS that name by the language's convention); for
+    anything else only the path. A fact of the plan for the Developer: it closes nothing and is no verdict."""
+    planned = [(owner.id, planned_file.path) for owner in plan.subtasks for planned_file in owner.planned_files
+               if planned_file.action != FileAction.DELETE and classify_file_role(planned_file.path) is FileRole.ENTRYPOINT]
+    if len(planned) != 1:
+        return None
+    owner_id, path = planned[0]
+    concerns = owner_id == subtask.id or any(
+        classify_file_role(planned_file.path) is FileRole.BUILD for planned_file in subtask.planned_files)
+    if not concerns:
+        return None
+    fact: Dict[str, Any] = {"file": path, "planned_by": owner_id, "authority": PLANNED_ENTRYPOINT_AUTHORITY}
+    normalized = path.replace("\\", "/")
+    if normalized.endswith(".java") and _JAVA_MAIN_SOURCE_ROOT in normalized:
+        relative = normalized.split(_JAVA_MAIN_SOURCE_ROOT, 1)[1][:-len(".java")]
+        if re.fullmatch(r"[A-Za-z_$][\w$]*(/[A-Za-z_$][\w$]*)*", relative):
+            fact["java_main_class"] = relative.replace("/", ".")
+    return fact
+
+
 def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> str:
     """Render the plan-level semantic contract for one bounded stage."""
     providers = {
@@ -368,6 +404,10 @@ def build_subtask_semantic_context(plan: EngineeringPlan, subtask: Subtask) -> s
             if owns_test_artifact and runtime_owner_ids else None
         ),
     }
+    entrypoint = planned_entrypoint_for(plan, subtask)
+    if entrypoint is not None:
+        # Only for the units the fact concerns, so every other context is exactly as it was.
+        payload["planned_entrypoint"] = entrypoint
     contracts = integration_contracts_for(plan, subtask.id)
     if contracts:
         # Only when the plan names this subtask in a relationship, so every other context is exactly as it was.

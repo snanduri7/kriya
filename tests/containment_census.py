@@ -428,6 +428,8 @@ EXCEPTIONS: Dict[str, Tuple[str, str]] = {'tests/state_machine/test_sm_attempt_m
  'tests/test_d4_runtime_entrypoint_ownership.py::test_a_valid_class_that_still_cannot_load_is_never_the_poms_fault': ('N', 'M'),
  'tests/test_d4_runtime_entrypoint_ownership.py::test_the_live_shape_is_a_candidate_defect_on_the_fresh_build': ('N', 'M'),
  'tests/test_d6_runtime_artifacts.py::test_the_real_ignite_application_passes_and_its_work_directory_is_discarded': ('N', 'M'),
+ # the D4 verification-only routing harness (test_d4_runtime_entrypoint_ownership.py, file rule S/M), replayed on Stage C run 3's exec:exec failure
+ 'tests/test_exec_exec_entrypoint_001.py::test_run3_replay_the_verification_unit_routes_it_to_the_poms_owner_and_writes_nothing_itself': ('S', 'M'),
  'tests/test_d8_terminal_toolchain_authority.py::test_an_unchanged_declaration_runs_the_named_test_with_the_callers_authority[False]': ('N', 'C'),
  'tests/test_d8_terminal_toolchain_authority.py::test_an_unchanged_declaration_runs_the_named_test_with_the_callers_authority[True]': ('N', 'C'),
  'tests/test_d8_terminal_toolchain_authority.py::test_the_earlier_unit_gate_still_refuses_an_unauthorized_toolchain_change': ('N', 'C'),
