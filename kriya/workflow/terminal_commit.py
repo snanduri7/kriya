@@ -217,8 +217,11 @@ def entrypoint_identity_refusal(
             full_path = os.path.join(workspace_path, relpath)
             if relpath not in members or not os.path.isfile(full_path):
                 return None
-            with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
-                return handle.read()
+            # A scanner's view of the bytes through the ONE lossy view (file_integrity.display_text); this module never decodes
+            # lossily itself (tests/test_file_integrity_contract_001.py::test_no_lossy_decoding_in_mutation_or_revision_authority,
+            # red since ccefcf5 wrote the decode inline here). The text read is the same as before; no content is taken from it.
+            with open(full_path, "rb") as handle:
+                return display_text(handle.read())
 
         def candidate(relpath: str) -> Optional[str]:
             return changed[relpath] if relpath in changed else baseline(relpath)
