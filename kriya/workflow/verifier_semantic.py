@@ -424,9 +424,18 @@ class VerifierRegenerationRequest:
             "<<<OPERATOR_RATIONALE\n"
             f"{self.rationale}\n"
             "OPERATOR_RATIONALE>>>\n"
-            f"Rewrite exactly '{self.path}': remove or correct the expectation the reason identifies, and keep every expectation the Authoritative "
-            "Goal supports. Add no expectation the Authoritative Goal does not state. Return the COMPLETE replacement file. This is the "
-            "verifier's one regeneration: returning it unchanged is not an accepted outcome of this request.\n"
+            # VERIFIER-REGENERATION-MULTI-FINDING-001 (Stage B run 12; owner ruling 2026-11-19): one rationale can hold several findings, some
+            # about assertions in tests that pass. The directive makes every finding an action over the whole file. Measured on the sealed
+            # run-12 request, one sample each: with the earlier singular "remove or correct the expectation the reason identifies" the
+            # finding that had no failing test was ignored; with this text it was applied.
+            f"Rewrite exactly '{self.path}': The operator's semantic-review rationale may identify multiple independent defects in this "
+            "verifier. Treat every distinct finding as requiring action for this file. Review the entire verifier, including assertions in "
+            "tests that currently pass. Correct invalid expected values and remove or replace expectations the rationale identifies as "
+            "unsupported by the Authoritative Goal; preserve valid contract-backed expectations. Do not preserve an unsupported expectation "
+            "merely because the current candidate implementation satisfies it or the test passes. Do not introduce new expectations for "
+            "unspecified behavior. Return a verifier implementing all findings, not merely fixes for the reported failing tests. Return the "
+            "COMPLETE replacement file. This is the verifier's one regeneration: returning it unchanged is not an accepted outcome of this "
+            "request.\n"
         )
 
     def response_violation(self, entry: Mapping[str, Any]) -> Optional[str]:
