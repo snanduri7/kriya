@@ -362,3 +362,40 @@ def parse_ownership_justifications(text: str) -> Dict[str, str]:
     if not isinstance(raw, dict):
         return {}
     return {str(k): str(v) for k, v in raw.items() if isinstance(v, str) and v.strip()}
+
+
+_CALLABLE_SYMBOL_TYPES = ("method", "constructor", "function")
+
+
+def artifacts_called_by(workspace_path: str, caller_paths: Sequence[str], candidate_paths: Sequence[str]) -> List[str]:
+    """VERIFIER-FAILURE-OWNER-CORROBORATION-001 (Stage C run 20261119T174636-1a504074): the members of ``candidate_paths`` that declare
+    at least one method, constructor or function a ``caller_paths`` source calls, in ``candidate_paths`` order.
+
+    The existing structural evidence, nothing new: an in-memory ``DependencyGraph`` over exactly these files (the machinery
+    ``grounded_owner_candidates`` uses above) and its own join of a file's ``calls`` relations to the symbols that carry the called
+    name (``get_callees``). It is a fact about NAMES - a called name that a candidate declares - never a type-resolved call edge: it
+    corroborates that the caller exercises the candidate and proves nothing about where a defect is. A file that cannot be read or
+    parsed contributes nothing, so the answer can only shrink, never guess."""
+    from kriya.analyzer.graph import DependencyGraph
+
+    candidates = list(dict.fromkeys(path for path in candidate_paths if path))
+    callers = [path for path in dict.fromkeys(caller_paths) if path and path not in candidates]
+    if not candidates or not callers:
+        return []
+    graph = DependencyGraph(":memory:")
+    try:
+        indexed = set()
+        for path in (*callers, *candidates):
+            full = os.path.join(workspace_path, path)
+            try:
+                with open(full, "r", encoding="utf-8", errors="replace") as handle:
+                    content = handle.read()
+                graph.index_file(path, content, os.path.getmtime(full))
+            except Exception:   # unreadable or unparseable: no evidence from this file (the caller's fail-closed default stands)
+                continue
+            indexed.add(path)
+        declaring = {row.get("filepath") for caller in callers if caller in indexed for row in graph.get_callees(caller)
+                     if row.get("type") in _CALLABLE_SYMBOL_TYPES}
+        return [path for path in candidates if path in indexed and path in declaring]
+    finally:
+        graph.close()

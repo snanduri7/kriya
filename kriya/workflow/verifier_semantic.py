@@ -303,6 +303,9 @@ class OwnerAuthority:
     reason_code: str
     owner_id: Optional[str] = None
     files: Tuple[str, ...] = ()
+    # VERIFIER-FAILURE-OWNER-CORROBORATION-001: True when the gate's locator named only the verifier and the owner was selected from
+    # corroborated source and plan evidence instead. Such a selection is bounded repair ELIGIBILITY, never a located root cause.
+    corroborated: bool = False
 
     @property
     def selected(self) -> bool:
@@ -312,7 +315,7 @@ class OwnerAuthority:
 def production_owner_authority(
     *, executed_failure: bool, located_paths: Sequence[str], verifier_paths: Iterable[str],
     is_workspace_artifact: Callable[[str], bool], owners_of: Callable[[str], Sequence[str]], conflicting_owner_ids: Iterable[str] = (),
-    ambiguous_locators: Iterable[str] = (),
+    ambiguous_locators: Iterable[str] = (), corroborated_paths: Sequence[str] = (),
 ) -> OwnerAuthority:
     """The stricter predicate of the generated-verifier path (WS3-C ruling 3). A locator alone is grounding, never owner authority. A production owner is
     selected only when: typed evidence proves an executed verifier failure; the deterministic locator names at least one concrete workspace artifact that
@@ -332,8 +335,22 @@ def production_owner_authority(
         return OwnerAuthority(OWNER_LOCATOR_ABSENT)
     verifiers = {normalize_path(path) for path in verifier_paths}
     production = sorted({path for path in located if path not in verifiers})
+    corroborated = False
     if not production:
-        return OwnerAuthority(OWNER_LOCATOR_VERIFIER_ONLY)
+        # VERIFIER-FAILURE-OWNER-CORROBORATION-001 (Stage C run 20261119T174636-1a504074; owner ruling 2026-11-19).
+        # OLD ASSUMPTION: a production owner can be selected only from a locator that names a production artifact. NEW EVIDENCE: the
+        # commonest failure of a valid test is an assertion on a returned value, whose stack names the test alone; in the sealed run
+        # a person had confirmed the expectation, the defect was real, and the run had no repair path. REQUIRED CORRECTION: when the
+        # locator names ONLY the accepted verifier, the caller's corroborated artifacts stand in for the missing locator - production
+        # files the verifier's source calls into AND that the validated plan puts in a direct dependency of the verifier's unit.
+        # Neither evidence alone selects anyone (a dependency the verifier does not call, or a call into a file that is no direct
+        # dependency, corroborates nothing), and everything below is unchanged: the artifacts must be workspace members with exactly
+        # ONE plan owner between them, with no conflicting evidence; anything else selects nobody. What is selected is the bounded
+        # repair candidate, not a proven root cause: the unchanged verifier, run again after the repair, is the judge.
+        production = sorted({normalize_path(path) for path in corroborated_paths if path} - verifiers)
+        if not production:
+            return OwnerAuthority(OWNER_LOCATOR_VERIFIER_ONLY)
+        corroborated = True
     artifacts = [path for path in production if is_workspace_artifact(path)]
     if not artifacts:
         return OwnerAuthority(OWNER_LOCATOR_EXTERNAL)
@@ -350,7 +367,7 @@ def production_owner_authority(
     owner_id = next(iter(owners))
     if any(other != owner_id for other in conflicting_owner_ids):
         return OwnerAuthority(OWNER_CONFLICTING, files=tuple(artifacts))
-    return OwnerAuthority(OWNER_SELECTED, owner_id=owner_id, files=tuple(owners[owner_id]))
+    return OwnerAuthority(OWNER_SELECTED, owner_id=owner_id, files=tuple(owners[owner_id]), corroborated=corroborated)
 
 
 # ----------------------------------------------------------------------------- one unit invocation (what the loop seams call)
@@ -575,9 +592,12 @@ class UnitSemantics:
     # -- the failure seam (before the ordinary retry may choose targets)
     async def on_gate_failure(self, *, written: Iterable[str], failure_type: str, outcome: str,
                               locate: Callable[[], Tuple[Sequence[str], Sequence[str]]],
-                              is_workspace_artifact: Callable[[str], bool], owners_of: Callable[[str], Sequence[str]]) -> GateRuling:
+                              is_workspace_artifact: Callable[[str], bool], owners_of: Callable[[str], Sequence[str]],
+                              corroborate: Optional[Callable[[Sequence[str]], Sequence[str]]] = None) -> GateRuling:
         """``locate``: the gate's locators as (uniquely resolved canonical member paths, ambiguous locators); called only when an accepted
-        verifier's failure needs a production owner."""
+        verifier's failure needs a production owner. ``corroborate`` (VERIFIER-FAILURE-OWNER-CORROBORATION-001): the accepted FAILING
+        verifier paths -> the production artifacts both the verifier's source and the validated plan point at; asked only when the
+        locators name nothing but verifiers, and absent (None) it corroborates nothing."""
         written = list(written)
         if failure_type == REGENERATE_FAILURE_TYPE and self.pending is not None:
             # decided at the pass seam: the retry loop only has to start it
@@ -601,9 +621,15 @@ class UnitSemantics:
                 return self._regeneration(decision, verifier)
             self.denied.add(verifier.path)                           # expectation_valid: these exact bytes stay as they are
         located_paths, ambiguous_locators = locate()
+        verifier_paths = {normalize_path(verifier.path) for verifier in verifiers}
+        located = [normalize_path(path) for path in located_paths if path]
+        corroborated_paths: Sequence[str] = ()
+        if corroborate is not None and located and not list(ambiguous_locators) and all(path in verifier_paths for path in located):
+            corroborated_paths = tuple(corroborate([verifier.path for verifier in failing]))
         owner = production_owner_authority(
             executed_failure=True, located_paths=located_paths, verifier_paths=[verifier.path for verifier in verifiers],
-            is_workspace_artifact=is_workspace_artifact, owners_of=owners_of, ambiguous_locators=ambiguous_locators)
+            is_workspace_artifact=is_workspace_artifact, owners_of=owners_of, ambiguous_locators=ambiguous_locators,
+            corroborated_paths=corroborated_paths)
         if not owner.selected:
             return self._stop(REASON_NO_PRODUCTION_OWNER, failing[0].path,
                               f"the expectation is valid, and no production owner has authority to be repaired from this failure: {owner.reason_code}")

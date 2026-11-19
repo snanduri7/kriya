@@ -530,12 +530,30 @@ async def _generated_verifier_ruling(state: GenerationState, ctx, failure: Failu
     def owners_of(path: str) -> List[str]:
         return [subtask.id for subtask in getattr(plan, "subtasks", None) or () if any(planned.path == path for planned in subtask.planned_files)]
 
+    def corroborate(verifier_paths: Sequence[str]) -> List[str]:
+        """VERIFIER-FAILURE-OWNER-CORROBORATION-001: the production files BOTH kinds of existing evidence point at - the validated plan
+        (files of the units the accepted verifier's own unit DIRECTLY depends on) and the verifier's source (it calls a method or
+        function one of those files declares: ownership_findings.artifacts_called_by, the existing structural parse). Either alone
+        yields nothing. Whether these make exactly one owner is the policy owner's decision, not made here."""
+        subtasks = list(getattr(plan, "subtasks", None) or ())
+        verifier_units = {owner for path in verifier_paths for owner in owners_of(path)}
+        direct = {dependency for subtask in subtasks if subtask.id in verifier_units for dependency in subtask.depends_on}
+        accepted = set(verifier_paths)
+        candidates = sorted({planned.path for subtask in subtasks if subtask.id in direct for planned in subtask.planned_files
+                             if planned.path not in accepted and not is_runnable_test_file(planned.path)})
+        if not candidates:
+            return []
+        from kriya.workflow.ownership_findings import artifacts_called_by
+
+        return artifacts_called_by(ctx.worktree_path, list(verifier_paths), candidates)
+
     ruling = await unit.on_gate_failure(
         written=sorted(state.all_files_written), failure_type=failure.type, outcome=failure.raw_output or failure.message or "",
         # mutation-grade identity: the locators resolved against the candidate tree's members, unique or not at all (never
         # failure.file_locations, which lists every written file that shares a basename)
         locate=lambda: resolve_unique_locator_artifacts(failure.raw_output or failure.message or "", ctx.worktree_path),
-        is_workspace_artifact=lambda path: os.path.isfile(os.path.join(ctx.worktree_path, path)), owners_of=owners_of)
+        is_workspace_artifact=lambda path: os.path.isfile(os.path.join(ctx.worktree_path, path)), owners_of=owners_of,
+        corroborate=corroborate)
     if ruling.unchanged:
         return None
     if ruling.owner is not None and getattr(ctx, "write_scope_mode", None) != WriteScopeMode.ALLOWLIST:
@@ -559,6 +577,16 @@ async def _generated_verifier_ruling(state: GenerationState, ctx, failure: Failu
 
 def _semantic_attribution(ruling: GateRuling) -> AttributionResult:
     """The attribution of a failure the policy owner ruled on: no model is asked whose file it is."""
+    if ruling.owner is not None and ruling.owner.corroborated:
+        # VERIFIER-FAILURE-OWNER-CORROBORATION-001: no locator named these files, so the text (the MUST FIX the reopened owner is
+        # shown) says what the evidence is and that it is a repair candidate. The tier is the plan-structure one, not "locator".
+        return AttributionResult(
+            tier="subtask_dependency", files=list(ruling.owner.files), confidence="high",
+            reasoning=("A person accepted the generated verifier's expectation, and the failure is the verifier's own assertion (the gate's "
+                       "locator names no production file). The verifier calls into these production artifacts, and the validated plan "
+                       f"makes their one owner ({ruling.owner.owner_id}) a direct dependency of the verifier's unit. They are the bounded "
+                       "repair candidate, not a proven root cause: make the accepted expectation hold. The verifier is not a repair "
+                       "target and is run again unchanged."))
     if ruling.owner is not None:
         return AttributionResult(
             tier="locator", files=list(ruling.owner.files), confidence="high",
