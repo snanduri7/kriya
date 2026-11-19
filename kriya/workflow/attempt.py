@@ -2179,6 +2179,24 @@ def _build_java_main_class_map(java_files: List[str], ctx: "AttemptContext") -> 
     return process_boundary._build_java_main_class_map(_process_boundary_deps(), java_files, ctx)
 
 
+def java_main_classes_of(sources: Dict[str, str]) -> Dict[str, str]:
+    """{path: fully qualified entry-point class} for the given Java sources (path -> text), by the SAME detector the candidate
+    gates use (DependencyGraph.find_java_main_class), with no attempt and no project index (process_boundary.NO_PROJECT_INDEX).
+    JAVA-ENTRYPOINT-IDENTITY-001: this is what the final commit boundary (terminal_commit.entrypoint_identity_refusal) is handed.
+    Unlike the best-effort map above, nothing is swallowed here: a detector that cannot be built or queried raises, and the
+    commit boundary refuses (fail closed)."""
+    graph = _load_dependency_graph()(process_boundary.NO_PROJECT_INDEX)
+    try:
+        found: Dict[str, str] = {}
+        for path, content in sources.items():
+            entrypoint_class = graph.find_java_main_class(path, content)
+            if entrypoint_class:
+                found[path] = entrypoint_class
+        return found
+    finally:
+        graph.close()
+
+
 # VER-005 implementation (2026-09-13): noise directories skipped while
 # discovering real Python repository facts (see
 # _build_python_runtime_grounding below) - dependency/build/cache

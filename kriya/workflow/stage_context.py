@@ -198,6 +198,7 @@ class StageDeps:
     keep_full_suite_evidence: Any = _late("keep_full_suite_evidence")      # sets WorkflowEngine._prior_full_suite_evidence
     # Function-local imports of all-import-cycle modules in the moved bodies, as loaders called where they imported.
     load_full_suite_evidence_for_reuse: Any = _late("load_full_suite_evidence_for_reuse")   # kriya.workflow.baseline_policy
+    java_main_classes_of: Any = _late("java_main_classes_of")              # kriya.workflow.attempt (JAVA-ENTRYPOINT-IDENTITY-001: the final commit's detector)
     load_lesson_extraction: Any = _late("load_lesson_extraction")          # kriya.knowledge.staging + live-failure channel
     # Names tests patch on kriya.workflow.workflow (resolved there at call time).
     delete_checkpoint: Any = _late("delete_checkpoint")

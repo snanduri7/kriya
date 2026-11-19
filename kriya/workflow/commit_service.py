@@ -182,6 +182,13 @@ def terminal_writes(request: TerminalCommitRequest) -> List[StagedFileWrite]:
     )
 
 
+def _java_main_classes_of(sources: Dict[str, str]) -> Dict[str, str]:
+    # JAVA-ENTRYPOINT-IDENTITY-001: the canonical detector for the final commit's identity check (terminal_commit
+    # .entrypoint_identity_refusal). A function-local import: kriya.workflow.attempt is in the kernel's all-import cycle.
+    from kriya.workflow.attempt import java_main_classes_of
+    return java_main_classes_of(sources)
+
+
 def _transaction_prefix(run_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "", run_id).lstrip("-_")[:100] or "run"
 
@@ -270,6 +277,7 @@ def commit_verified_candidate(report: TerminalGateReport, request: TerminalCommi
         static_analysis=request.static_analysis,
         verified_candidate=report.verified_candidate,
         approval=request.approval, run_id=request.run_id,
+        java_main_classes=_java_main_classes_of,
     )
     if not outcome.committed:
         return TerminalCommitResult(completed=False, failure=outcome.failure_payload())

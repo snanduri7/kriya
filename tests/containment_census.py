@@ -103,6 +103,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_early_exit_traces.py': ('F2', 'F'),
  'tests/test_empty_change_source_approval.py': ('S', 'M'),
  'tests/test_enforce_verified_no_change.py': ('S', 'M'),
+ 'tests/test_java_entrypoint_identity_001.py': ('S', 'M'),  # the same real-unit no-change harness (Stage C run c1)
  'tests/test_execution_copy_creator_provenance.py': ('N', 'C'),
  'tests/test_f7a_operator_config_attribution.py': ('S', 'M'),
  'tests/test_failure_signature_run_noise.py': ('S', 'M'),

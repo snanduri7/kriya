@@ -36,7 +36,7 @@ import stat
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from kriya.control.run_coordinator import begin_run_commit, settle_run_commit
+from kriya.control.run_coordinator import begin_run_commit, candidate_workspace_root, settle_run_commit
 from kriya.control.run_record import (
     COMMIT_COMMITTED,
     COMMIT_NOT_COMMITTED,
@@ -45,6 +45,7 @@ from kriya.control.run_record import (
 )
 from kriya.policy.approval import MutationApproval, mutation_approval_refusal
 from kriya.policy.filesystem import ControlObjectIdentities, is_trusted_control_path
+from kriya.repository.bound_tree import NO_GIT_REPOSITORY, bound_tree_paths, workspace_root_class
 from kriya.repository.commit import (  # M1: owned by kriya/repository/commit.py, re-exported (PARTIAL_FACADES); Removed in P1
     CandidateMaterializationError as CandidateMaterializationError,
 )
@@ -62,6 +63,14 @@ from kriya.workflow.edit_safety import (
 )
 from kriya.workflow.exception_masking import find_masking_against_workspace
 from kriya.workflow.file_integrity import display_text, file_raw_digest, raw_digest
+from kriya.workflow.file_resolution import (
+    ENTRYPOINT_MISMATCH,
+    ENTRYPOINT_PENDING,
+    ENTRYPOINT_UNVERIFIED,
+    ENTRYPOINT_VERIFIED,
+    EntrypointIdentity,
+    exec_main_class_identity,
+)
 from kriya.workflow.verification_binding import (
     CandidateVerificationBinding,
     VerifiedCandidateStale,
@@ -140,6 +149,98 @@ def semantic_safety_refusal(writes: List[StagedFileWrite], workspace_path: str) 
         return SEMANTIC_SAFETY_REFUSED, "; ".join(
             f"{os.path.relpath(target, workspace_path)}: {found}" for target, found in findings)
     return None
+
+
+class EntrypointIdentityRefused(RuntimeError):
+    """JAVA-ENTRYPOINT-IDENTITY-001: the batch would leave the real workspace with a Maven entry point that names no real main class."""
+
+
+ENTRYPOINT_IDENTITY_REFUSED = "ENTRYPOINT_IDENTITY_REFUSED"
+ENTRYPOINT_IDENTITY_INDETERMINATE = "ENTRYPOINT_IDENTITY_INDETERMINATE"
+_ENTRYPOINT_POM = "pom.xml"
+
+
+def _entrypoint_identity_of(pom_text: Optional[str], java_paths: Iterable[str], read: Callable[[str], Optional[str]],
+                            java_main_classes: Optional[Callable[[Dict[str, str]], Dict[str, str]]]) -> Optional[EntrypointIdentity]:
+    """The identity of one tree state (file_resolution.exec_main_class_identity); None when the state has no pom.xml. A pom that
+    declares no single literal <exec.mainClass> is UNVERIFIED without the detector ever being needed; any other pom needs it."""
+    if pom_text is None:
+        return None
+    declared = exec_main_class_identity(pom_text, {})
+    if declared.status == ENTRYPOINT_UNVERIFIED:
+        return declared
+    if java_main_classes is None:
+        raise RuntimeError("no Java main-class detector was supplied for a pom.xml that declares <exec.mainClass>")
+    sources = {path: text for path, text in ((path, read(path)) for path in sorted(java_paths)) if text is not None}
+    return exec_main_class_identity(pom_text, dict(java_main_classes(sources)))
+
+
+def entrypoint_identity_refusal(
+    writes: List[StagedFileWrite], workspace_path: str,
+    java_main_classes: Optional[Callable[[Dict[str, str]], Dict[str, str]]],
+) -> Optional[Tuple[str, str]]:
+    """(reason code, detail) when the batch must not reach the REAL workspace because it would newly leave ``pom.xml``'s
+    ``<exec.mainClass>`` naming a class that is not the application's one main class; None when it may.
+
+    Which commits it judges is decided here, from the run's own lease, never by the caller: a destination the active run
+    authorized as its isolated candidate (control.run_coordinator.candidate_workspace_root, the enforce plan worktree) is an
+    intermediate apply and is not judged (a plan may hold a mismatch between the unit that writes the class and the unit that
+    owns the pom); EVERY other destination is judged, including one with no active run. A real workspace can never be declared
+    a candidate: candidate_workspace_root answers None for the run's own workspace whatever was authorized.
+
+    The policy is the exception-masking one (semantic_safety_refusal): only a batch that writes or deletes pom.xml or a .java
+    file is judged; the state after the batch (the canonical bound tree of the workspace - what git tracks or leaves visible,
+    repository.bound_tree.bound_tree_paths - with the batch's additions and deletions applied) is compared with the workspace as
+    it is. Refused: a MISMATCH after the batch that was not the identical mismatch before it; and a VERIFIED entry point the
+    batch leaves with no main class at all (PENDING: the class or its main method was removed under an unchanged
+    configuration). A project that never had a verified entry point may stay PENDING (greenfield, a library, an incomplete
+    project), and UNVERIFIED is never refused; nothing here records any state as verified. Fail closed: an applicable check that
+    cannot be made (no detector, a detector or membership error) refuses. Nothing is ever rewritten here.
+
+    Scope, stated plainly: the ROOT pom.xml and a single literal ``<exec.mainClass>`` property. A multi-module build, a main class
+    configured on a plugin, and a property that is itself a reference are not judged here (UNVERIFIED or not applicable)."""
+    try:
+        if candidate_workspace_root(workspace_path) is not None:
+            return None
+        changed: Dict[str, Optional[str]] = {}
+        for write in writes:
+            relpath = os.path.relpath(write.target_path, workspace_path).replace(os.sep, "/")
+            changed[relpath] = None if write.delete else write.content
+        if not any(path == _ENTRYPOINT_POM or path.endswith(".java") for path in changed):
+            return None
+
+        # a workspace with no repository at all is admitted only when empty (bound_tree.admit_workspace_for_mutation): it has no members
+        members = set() if workspace_root_class(workspace_path) == NO_GIT_REPOSITORY else set(bound_tree_paths(workspace_path))
+
+        def baseline(relpath: str) -> Optional[str]:
+            # only a member of the bound tree is workspace content: a git-ignored pom.xml on disk is in no candidate and decides nothing
+            full_path = os.path.join(workspace_path, relpath)
+            if relpath not in members or not os.path.isfile(full_path):
+                return None
+            with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
+                return handle.read()
+
+        def candidate(relpath: str) -> Optional[str]:
+            return changed[relpath] if relpath in changed else baseline(relpath)
+
+        java_before = {path for path in members if path.endswith(".java")}
+        java_after = {path for path in java_before | set(changed) if path.endswith(".java") and changed.get(path, "") is not None}
+        after = _entrypoint_identity_of(candidate(_ENTRYPOINT_POM), java_after, candidate, java_main_classes)
+        if after is None or after.status not in (ENTRYPOINT_MISMATCH, ENTRYPOINT_PENDING):
+            return None
+        before = _entrypoint_identity_of(baseline(_ENTRYPOINT_POM), java_before, baseline, java_main_classes)
+        if after.status == ENTRYPOINT_PENDING:
+            if before is None or before.status != ENTRYPOINT_VERIFIED:
+                return None
+            return ENTRYPOINT_IDENTITY_REFUSED, (
+                f"{_ENTRYPOINT_POM}: <exec.mainClass> is {after.configured!r}, but this change leaves the application with no class that "
+                f"has a main method; before it the entry point was {before.actual!r} (declared in {before.source_file})")
+        if before is not None and before.status == ENTRYPOINT_MISMATCH and (
+                before.configured, before.actual, before.source_file) == (after.configured, after.actual, after.source_file):
+            return None
+    except Exception as error:
+        return ENTRYPOINT_IDENTITY_INDETERMINATE, f"{type(error).__name__}: {error}"
+    return ENTRYPOINT_IDENTITY_REFUSED, f"{_ENTRYPOINT_POM}: <exec.mainClass> is {after.configured!r}, but {after.actual_description()}"
 
 
 @dataclass(frozen=True)
@@ -277,6 +378,7 @@ def commit_terminal_candidate(
     run_id: Optional[str] = None,
     evidence: Optional[Dict[str, Any]] = None,
     contract_transition: Optional[Callable[[str], Optional[Any]]] = None,
+    java_main_classes: Optional[Callable[[Dict[str, str]], Dict[str, str]]] = None,
 ) -> TerminalCommitOutcome:
     """Commit a materialized, verified candidate into the real workspace.
 
@@ -325,6 +427,15 @@ def commit_terminal_candidate(
         return TerminalCommitOutcome(
             committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
             transaction_id=transaction_id, reason_code=reason_code, error=SemanticSafetyRefused(detail),
+        )
+    # JAVA-ENTRYPOINT-IDENTITY-001: the final-content identity of the Maven entry point, judged for every destination the run did not
+    # authorize as its isolated candidate; before static analysis, the durable intent and the first workspace byte.
+    mismatched = entrypoint_identity_refusal(writes, workspace_path, java_main_classes)
+    if mismatched is not None:
+        reason_code, detail = mismatched
+        return TerminalCommitOutcome(
+            committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
+            transaction_id=transaction_id, reason_code=reason_code, error=EntrypointIdentityRefused(detail),
         )
     refusal = static_analysis.verify(writes, workspace_path)
     if refusal is not None:

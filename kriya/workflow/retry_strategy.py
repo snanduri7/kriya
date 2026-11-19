@@ -76,6 +76,7 @@ from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_
 from kriya.workflow.model_transition import MODEL_CANDIDATE_UNAVAILABLE, fallback_routing_for_context
 from kriya.workflow.open_findings import (
     DELIVERY_FAILURE_TYPES,
+    is_candidate_finding,
     may_open_failure_family,
     open_finding_files,
     open_finding_locations,
@@ -780,7 +781,15 @@ async def _record_attempt_failure(
             "applied": False,
         },
     ))
-    failure_is_authoritative = getattr(failure, "authority", "authoritative") == "authoritative"
+    # RETRY-ACTIVE-FAILURE-TRUTH-001 (Stage C run c1, MEASURED): the deterministic VERIFIED_NO_CHANGE_REFUSED of attempts 2-8 never
+    # became the active failure, so every retry request still showed attempt 1's edit-protocol error. "deterministic" is Kriya's own
+    # deterministic ruling: the event log already records it as the primary failure (GenerationState.record_failure). It supersedes
+    # the older active failure when its type is a statement about the candidate (open_findings.is_candidate_finding). Advisory,
+    # auxiliary and any other value are unchanged. This decides ONLY which failure the next request names: the open finding and the
+    # failure family below still ask their own owner (open_findings.replaces_open_finding), which is deliberately not changed here.
+    failure_authority = getattr(failure, "authority", "authoritative")
+    failure_is_authoritative = failure_authority == "authoritative" or (
+        failure_authority == "deterministic" and is_candidate_finding(failure.type))
     # Advisory Developer feedback is useful retry/attribution evidence, but
     # may not replace the compiler/test/runtime failure the next repair prompt
     # must solve. FailureLedger enforces the same rule for event history; keep

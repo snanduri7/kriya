@@ -649,6 +649,7 @@ def apply_terminal_candidate(
         final_writes, workspace_path=workspace_path,
         static_analysis=commit_guard(deps.config, state.static_analysis_result),
         verified_candidate=state.verified_candidate_binding,
+        java_main_classes=deps.java_main_classes_of,         # JAVA-ENTRYPOINT-IDENTITY-001: the canonical detector, for the final-commit identity check
         approval=state.mutation_approval, run_id=run_id,     # S7: the decision the approval gate bound to this exact batch
         transaction_id=terminal_transaction_id,
         evidence={

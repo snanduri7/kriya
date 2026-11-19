@@ -67,6 +67,7 @@ from kriya.workflow.attempt import (
     AttemptContext,
     _stop_on_environment_gate_result,
     assert_candidate_unchanged_since_source_review,
+    java_main_classes_of,
     run_attempt,
 )
 from kriya.workflow.attribution import (
@@ -1950,7 +1951,7 @@ class WorkflowEngine:
             reviewer=self.reviewer, developer=self.developer, audit_approval_rules=self._audit_approval_rules,
             keep_full_suite_evidence=self._keep_full_suite_evidence,
             load_full_suite_evidence_for_reuse=_load_full_suite_evidence_for_reuse,
-            load_lesson_extraction=_load_lesson_extraction,
+            load_lesson_extraction=_load_lesson_extraction, java_main_classes_of=java_main_classes_of,
             REVIEW_SECTION_HEADER=REVIEW_SECTION_HEADER, banner=banner, commit_guard=commit_guard,
             review_requests=review_requests, build_reviewer_verified_evidence=build_reviewer_verified_evidence,
             build_candidate_diff_context=build_candidate_diff_context,

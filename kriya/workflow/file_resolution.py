@@ -1620,6 +1620,68 @@ def correct_exec_main_class_property(pom_content: str, java_main_classes: Dict[s
     )
 
 
+# JAVA-ENTRYPOINT-IDENTITY-001 (Stage C run c1, 20261119T101125-d5e300d1): the four answers to "does the Maven-configured application
+# entry point name the application's real main class?".
+ENTRYPOINT_VERIFIED = "VERIFIED"        # the configured fully qualified name is exactly the name of a real main class
+ENTRYPOINT_PENDING = "PENDING"          # an entry point is configured and no main class exists yet (a later unit may still write it)
+ENTRYPOINT_MISMATCH = "MISMATCH"        # real main classes exist, and the configured fully qualified name is none of them
+ENTRYPOINT_UNVERIFIED = "UNVERIFIED"    # not decidable from static text: never a pass, never a failure
+
+
+@dataclass(frozen=True)
+class EntrypointIdentity:
+    """What ``exec_main_class_identity`` found. ``configured`` is the ``<exec.mainClass>`` value. VERIFIED: ``actual`` is the matching
+    main class and ``source_file`` the file that declares it. MISMATCH: ``actual`` and ``source_file`` are the real main class(es)
+    (package declaration plus top-level type name) and the file(s) declaring them, each sorted and joined by ", " when there are
+    several; ``main_class_count`` says how many."""
+
+    status: str
+    configured: Optional[str] = None
+    actual: Optional[str] = None
+    source_file: Optional[str] = None
+    reason: str = ""
+    main_class_count: int = 0
+
+    def actual_description(self) -> str:
+        """The real main class(es) of a MISMATCH, as a clause for a message."""
+        if self.main_class_count > 1:
+            return (f"none of the application's {self.main_class_count} classes with a main method has that name "
+                    f"({self.actual}; declared in {self.source_file})")
+        return f"the application's only class with a main method is {self.actual!r} (declared in {self.source_file})"
+
+
+def exec_main_class_identity(pom_content: str, java_main_classes: Dict[str, str]) -> EntrypointIdentity:
+    """Compares pom.xml's ``<exec.mainClass>`` property with the application's real main class. Pure: nothing is read or written.
+
+    The check-only form of ``correct_exec_main_class_property`` above, over the same two facts: the same property (the same pattern) and
+    the same {file: fully qualified main class} map (kriya.analyzer.graph.DependencyGraph.find_java_main_class: package declaration plus the
+    one top-level type that has a real main method; a file name alone decides nothing). Run c1, MEASURED: s1 wrote
+    ``<exec.mainClass>com.example.ProtocolApplication</exec.mainClass>`` before any class existed, s5 wrote ``ProtocolApplication`` in the
+    default package without writing the pom, and the correction above runs only for a unit that wrote the pom, so nothing compared them.
+
+    No package convention is assumed and nothing is preferred: the two names are equal or they are not. Whatever cannot be decided from
+    the text is UNVERIFIED and never VERIFIED: no ``<exec.mainClass>`` property, more than one, an empty value, a value that is itself a
+    property reference. Several real main classes are not a reason to give up: an explicit configured name either is one of them
+    (VERIFIED) or is none of them (MISMATCH); which one was "intended" is never guessed."""
+    properties = _EXEC_MAIN_CLASS_PROPERTY_RE.findall(pom_content)
+    if len(properties) != 1:
+        return EntrypointIdentity(ENTRYPOINT_UNVERIFIED, reason=(
+            "pom.xml sets no <exec.mainClass> property" if not properties else "pom.xml sets <exec.mainClass> more than once"))
+    configured = properties[0][1].strip()
+    if not configured or "${" in configured:
+        return EntrypointIdentity(ENTRYPOINT_UNVERIFIED, configured=configured or None, reason="<exec.mainClass> is empty or is itself a property reference")
+    if not java_main_classes:
+        return EntrypointIdentity(ENTRYPOINT_PENDING, configured=configured, reason="no class with a main method exists yet")
+    count = len(java_main_classes)
+    declaring = sorted(path for path, name in java_main_classes.items() if name == configured)
+    if declaring:
+        return EntrypointIdentity(ENTRYPOINT_VERIFIED, configured=configured, actual=configured, source_file=declaring[0], main_class_count=count)
+    return EntrypointIdentity(
+        ENTRYPOINT_MISMATCH, configured=configured, actual=", ".join(sorted(set(java_main_classes.values()))),
+        source_file=", ".join(sorted(java_main_classes)), main_class_count=count,
+        reason="the configured entry point is not a main class of the application")
+
+
 def downgrade_ungrounded_goal_explicit_commands(judgment: Dict[str, Any], goal: str) -> Dict[str, Any]:
     """Independent brutal review finding #2 (2026-08-15): RunVerifierAgent.judge()
     self-reports command_source ("goal_explicit" vs "inferred") in the same

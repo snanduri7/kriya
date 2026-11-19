@@ -62,6 +62,7 @@ from kriya.workflow.failure_grounding import (
     _build_test_quality_gate_failure,
     _capture_failed_content,
     build_cross_package_mismatch_message,
+    build_static_rule_failure,
     find_cross_package_symbol_mismatch,
     find_locator_files_outside_known_scope,
     resolve_repository_locator_files,
@@ -75,9 +76,11 @@ from kriya.workflow.file_integrity import (
     raw_digest,
 )
 from kriya.workflow.file_resolution import (
+    ENTRYPOINT_MISMATCH,
     correct_exec_main_class_property,
     downgrade_ungrounded_goal_explicit_commands,
     ensure_maven_covers_nonconventional_java_files,
+    exec_main_class_identity,
     extract_jvm_module_flags,
     ground_java_entrypoint_in_no_build_file_projects,
     ground_python_runtime_target,
@@ -214,6 +217,61 @@ def _observe_test_gate(ctx: Any, result: Any) -> None:
 def _autonomous_rewrite_permitted(ctx: Any, state: Any, result: Any) -> bool:
     unit = getattr(ctx, "verifier_semantic", None)
     return unit is None or unit.autonomous_rewrite_permitted(sorted(state.all_files_written), result)
+
+
+def _enforce_entrypoint_identity(deps: GateDeps, state: RunState, ctx: AttemptCtx, compile_known_files: List[str]) -> None:
+    """JAVA-ENTRYPOINT-IDENTITY-001 (Stage C run c1, 20261119T101125-d5e300d1): the Maven-configured entry point of the candidate tree
+    must name the application's real main class. A check, never a mutation; called right after the candidate's own pom corrections and
+    before the compile gate, in every attempt that executes candidate gates.
+
+    The correction above (correct_exec_main_class_property) runs only for a candidate that wrote pom.xml. In a staged plan the pom is
+    usually written before the main class exists and the unit that writes the class does not own the pom, so nothing compared the two
+    (c1, MEASURED: s1 wrote the pom, s5 wrote the class, s7 owned the pom and answered NO CHANGE seven times). Here the same two facts
+    are compared whoever wrote them. A known mismatch is always recorded as a run event. It is a failure only for a unit the plan lets
+    write pom.xml (an allow-list scope that names it), where a NO CHANGE answer must not hide it and the next request must say exactly
+    what differs. A unit that may not write the pom records the mismatch and goes on: a failure there would name a file outside its
+    authority. The failure is the ordinary deterministic static-rule failure whose subject is pom.xml (failure_grounding
+    .build_static_rule_failure), so the existing repair path owns it. PENDING and UNVERIFIED are neither recorded as a mismatch nor
+    failed: they are not knowledge of one."""
+    pom_path = os.path.join(ctx.worktree_path, "pom.xml")
+    if not os.path.exists(pom_path):
+        return
+    try:
+        pom_content = load_snapshot(pom_path).text
+    except FileIntegrityError:
+        return
+    java_files = [f for f in compile_known_files if f.endswith(".java")]
+    identity = exec_main_class_identity(pom_content, deps._build_java_main_class_map(java_files, ctx))
+    if identity.status != ENTRYPOINT_MISMATCH:
+        return
+    writable = ctx.write_scope_mode == WriteScopeMode.ALLOWLIST and "pom.xml" in set(ctx.allowed_write_relpaths or ())
+    state.record_event(RunEvent(
+        kind="candidate.entrypoint_identity_mismatch", attempt=state.attempt_number,
+        source="attempt.pom_corrections", authority=EventAuthority.ADVISORY,
+        message=(f"pom.xml configures the entry point {identity.configured!r}; the application's main class is {identity.actual!r} "
+                 f"({identity.source_file})"),
+        details={"path": "pom.xml", "configured": identity.configured, "actual": identity.actual,
+                 "source_file": identity.source_file, "main_class_count": identity.main_class_count,
+                 "pom_writable_by_this_unit": writable},
+    ))
+    if not writable:
+        return
+    violation = (
+        f"[java_entrypoint_identity] pom.xml: <exec.mainClass> is '{identity.configured}', but the application's only class with a main "
+        f"method is '{identity.actual}' (declared in {identity.source_file}; its package declaration and class name are its fully "
+        f"qualified name). mvn exec cannot run a class named '{identity.configured}'. Make the configured entry point and the real "
+        "main class the same fully qualified name."
+    ) if identity.main_class_count <= 1 else (
+        f"[java_entrypoint_identity] pom.xml: <exec.mainClass> is '{identity.configured}', but {identity.actual_description()}; a "
+        f"class's package declaration and class name are its fully qualified name. mvn exec cannot run a class named "
+        f"'{identity.configured}'. Make the configured entry point the fully qualified name of a real main class."
+    )
+    failure = build_static_rule_failure(
+        violation, ctx.worktree_path, sorted(set(compile_known_files) | {"pom.xml"}), state.attempt_number,
+        writable_paths=ctx.allowed_write_relpaths,
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
 
 
 def _apply_candidate_pom_corrections(
@@ -571,6 +629,7 @@ async def _run_executing_candidate_gates(
         # correctly re-applies if a retry rewrites pom.xml back to a plain
         # Maven-convention shape.
         deps._apply_candidate_pom_corrections(state, ctx, compile_known_files)
+        _enforce_entrypoint_identity(deps, state, ctx, compile_known_files)
         deps._require_worktree_matches_candidate(state, ctx)
         tree_binding.check("pre_compile")
         validator.tree_binding = tree_binding
