@@ -1532,6 +1532,19 @@ def _load_baseline_environment_identity() -> Callable[..., Any]:
     return baseline_environment_identity
 
 
+def bound_behavior_authority(engine: Any) -> bool:
+    """DISTRUSTED-MARKER-NOT-A-VETO-001: whether the operator's verification authority is bound to this run's engine AND covers the
+    BEHAVIOR claim of at least one requirement. The one existing binding is read (``authority_bundle.bound_authority_bundle``: a real
+    ``AuthorityBundle`` the CLI bound, validated against the goal and the requirement set when it was loaded); nothing is inferred from
+    a name, a path or an attribute that merely looks like a bundle. This says only that the independent judge of behaviour will run at
+    the terminal gates: it closes nothing and grants nothing."""
+    from kriya.workflow.authority_bundle import bound_authority_bundle
+    from kriya.workflow.requirements import BEHAVIOR
+
+    bundle = bound_authority_bundle(engine)
+    return bundle is not None and any(entry.claim == BEHAVIOR for entries in bundle.covers.values() for entry in entries)
+
+
 def _load_authority_bundle() -> Tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
     # The authority-bundle closer's function-local import (a non-public AUTHORITY module), made where the body made it.
     from kriya.workflow.authority_bundle import (
@@ -2017,6 +2030,7 @@ class WorkflowEngine:
             captured_baseline=captured_baseline, attribute_suite_result=attribute_suite_result,
             post_environment_identity=post_environment_identity, SCOPE_FULL_REGRESSION=SCOPE_FULL_REGRESSION,
             bound_acceptance=bound_acceptance, bound_approval=bound_approval, test_execution=test_execution,
+            bound_behavior_authority=bound_behavior_authority,
         )
 
     def _keep_full_suite_evidence(self, evidence: Optional[Dict[str, Any]]) -> None:

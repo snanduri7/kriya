@@ -1652,6 +1652,10 @@ class AttemptContext:
     # hand it their results; the failure seam, the pass seams and the self-correction guards obey its rulings.
     verifier_semantic: Optional[Any] = None
     runtime_verification_required: bool = False
+    # DISTRUSTED-MARKER-NOT-A-VETO-001: True only when the operator's verification authority is bound to this run and covers behaviour
+    # (workflow.bound_behavior_authority over the one existing binding). Read by runtime_verification._resolve_runtime_verification_grade
+    # alone, and only for an ungrounded PASS marker. False for every ad hoc construction: the fail-closed behaviour.
+    terminal_behavior_authority_bound: bool = False
     strict_spec_compliance: bool = False
     # Gap B (2026-10-15): see defer_execution_until_source_review. The caller that runs the post-approval phase sets the first; run_attempt fills the second (the held
     # approve-and-execute half); the caller sets the third after the person approves the source (True while the candidate bytes are still the approved ones).

@@ -1,0 +1,96 @@
+Analysis:
+The error indicates that pom.xml has `<exec.mainClass>com.example.QpidAmqpApp</exec.mainClass>` but the actual main class is `com.example.ProtocolApplication`. This mismatch will cause Maven exec to fail because it cannot find a class named `QpidAmqpApp`. The fix is to change the main class property in pom.xml to match the actual application entry point, which is `com.example.ProtocolApplication`.
+
+<<<KRIYA:EDIT path="pom.xml">>>
+<<<KRIYA:SEARCH>>>
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <exec.mainClass>com.example.QpidAmqpApp</exec.mainClass>
+    </properties>
+<<<KRIYA:REPLACE>>>
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <exec.mainClass>com.example.ProtocolApplication</exec.mainClass>
+    </properties>
+<<<KRIYA:END_EDIT>>>
+<<<KRIYA:FILE path="pom.xml">>>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>qpid-amqp-app</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>Qpid AMQP Application</name>
+    <description>Embedded Qpid Broker-J with JMS client using Jakarta Messaging 3.1 API</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <exec.mainClass>com.example.ProtocolApplication</exec.mainClass>
+    </properties>
+
+    <dependencies>
+        <!-- Embedded broker -->
+        <dependency>
+            <groupId>org.apache.qpid</groupId>
+            <artifactId>qpid-broker-core</artifactId>
+            <version>9.2.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.qpid</groupId>
+            <artifactId>qpid-broker-plugins-amqp-1-0-protocol</artifactId>
+            <version>9.2.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.qpid</groupId>
+            <artifactId>qpid-broker-plugins-memory-store</artifactId>
+            <version>9.2.1</version>
+        </dependency>
+
+        <!-- JMS client (Jakarta Messaging 3.1 API) -->
+        <dependency>
+            <groupId>org.apache.qpid</groupId>
+            <artifactId>qpid-jms-client</artifactId>
+            <version>2.10.0</version>
+        </dependency>
+
+        <!-- JUnit for testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.9.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <executable>java</executable>
+                    <arguments>
+                        <!-- Required for Qpid broker embedding on JDK 17.0.10+ -->
+                        <argument>-Djava.security.manager=allow</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${exec.mainClass}</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+<<<KRIYA:END_FILE>>>

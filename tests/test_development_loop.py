@@ -57,7 +57,9 @@ def test_the_engine_injects_every_development_collaborator(tmp_path):
     engine = _engine(tmp_path)
     deps = engine._development_deps()
     assert not_injected(deps, development_stage_fields()) == []
-    assert len(development_stage_fields()) == 56
+    # 57 since DISTRUSTED-MARKER-NOT-A-VETO-001 added ``bound_behavior_authority`` (workflow.bound_behavior_authority: whether the
+    # operator's verification authority is bound to the run and covers behaviour). The line above is the real check: it is injected.
+    assert len(development_stage_fields()) == 57 and "bound_behavior_authority" in development_stage_fields()
     assert not_injected(deps, SHARED) == []
     assert (deps.engine, deps.kernel, deps.developer, deps.run_verifier, deps.spec_compliance) == (
         engine, engine.kernel, engine.developer, engine.run_verifier, engine.spec_compliance)

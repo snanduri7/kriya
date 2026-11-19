@@ -291,6 +291,7 @@ class StageDeps:
     SCOPE_FULL_REGRESSION: Any = _development("SCOPE_FULL_REGRESSION")
     bound_acceptance: Any = _development("bound_acceptance")
     bound_approval: Any = _development("bound_approval")
+    bound_behavior_authority: Any = _development("bound_behavior_authority")
     test_execution: Any = _development("test_execution")
 
 

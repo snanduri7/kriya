@@ -71,7 +71,11 @@ from kriya.workflow.resume_support import (
     TOOL_STARTED_NOT_DURABLE,
 )
 from kriya.workflow.subtask_executor import plannable_tool_names
-from kriya.workflow.verification_contract import RUNTIME_FAILURE_IDENTITY_KEY
+from kriya.workflow.verification_contract import (
+    RUNTIME_FAILURE_IDENTITY_KEY,
+    ContractVerdictState,
+    classify_contract_verdict,
+)
 from kriya.workflow.verifier_repair import (
     REFUSED_AUTHORIZATION_STALE,
     UNAVAILABLE_ALREADY_ASKED,
@@ -4338,6 +4342,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     owner_files = sorted(pf.path for pf in owner.planned_files if pf.action != deps.FileAction.DELETE)
                     owner_position = order.index(owner.id) + 1 if owner.id in order else position
                     before = tuple(deps.read_file_revision(os.path.join(plan_workspace_path, path)) for path in owner_files)
+                    # OWNER-RECOVERY-STATIC-CAUSE-001: is the failure being repaired the gate's statically decidable one (a PASS
+                    # marker with no FAIL branch in any established file)? Read now, before the owner writes, and again after.
+                    static_cause_paths = sorted(set(established_file_context) | set(owner_files))
+                    static_cause_before = distrusted_marker_cause_stands(call_result, plan_workspace_path, static_cause_paths)
                     # K-A: THIS owner's own review, only when it is about the bytes the owner has now.
                     owner_review, owner_review_disposition = _fresh_advisory_review(owner)
                     episode_invoked.append(owner.id)
@@ -4363,17 +4371,31 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # COMPLETED (the same evaluation the planned path applies), a byte change in the plan worktree,
                     # and no file outside its declared scope (MA6 invariant 4).
                     owner_status, _owner_error, _owner_codes = deps._evaluate_subtask_verification(owner, owner_result)
+                    # OWNER-RECOVERY-STATIC-CAUSE-001: the same predicate on the bytes the owner left. Still true = the cause of the
+                    # failure being repaired is provably still there, so the changed bytes are not its repair and the unchanged
+                    # verification is not run again. Never true for a failure this predicate did not own before the owner wrote.
+                    static_cause_unresolved = bool(
+                        static_cause_before
+                        and distrusted_marker_cause_stands(call_result, plan_workspace_path, static_cause_paths)
+                    )
                     owner_accepted = (
                         _unit_gates_accepted(owner.id, "verification_owner_recovery", owner_result)
                         and owner_status == deps.SubtaskStatus.COMPLETED
                         and after != before
                         and not owner_undeclared
+                        and not static_cause_unresolved
                     )
                     deps.logger.warning(
                         "VERIFICATION_OWNER_RECOVERY_%s verification=%s owner=%s changed=%s gates=%s undeclared=%s",
                         "ACCEPTED" if owner_accepted else "REJECTED", subtask.id, owner.id, after != before,
                         bool(owner_result.get("quality_gates_passed")), owner_undeclared,
                     )
+                    if static_cause_unresolved:
+                        deps.logger.warning(
+                            "VERIFICATION_OWNER_RECOVERY_STATIC_CAUSE_UNRESOLVED verification=%s owner=%s - the program still prints "
+                            "[VERIFICATION] PASS and no established file contains the [VERIFICATION] FAIL branch; the change is "
+                            "not a repair of this failure and the verification is not run again.", subtask.id, owner.id,
+                        )
                     # K-B: the ONLY outcome after which another owner may be asked - the unit's canonical typed
                     # unchanged stop with no byte of the owner's files changed. Anything else that is not an
                     # acceptance (changed bytes refused by a gate, scope or declared verification; a budget or
@@ -4401,6 +4423,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "owner_quality_gates_passed": bool(owner_result.get("quality_gates_passed")),
                             "undeclared_files": owner_undeclared,
                             "reason_codes": [deps.VERIFICATION_RETRY_NO_CHANGE_POSSIBLE],
+                            # OWNER-RECOVERY-STATIC-CAUSE-001: a fact beside the existing code (present only when true), not a new reason code
+                            **({"static_cause_unresolved": True} if static_cause_unresolved else {}),
                             "error": None if owner_accepted else (
                                 "the reopened owner produced no accepted change; the verification unit's "
                                 f"failure stands ({deps.VERIFICATION_RETRY_NO_CHANGE_POSSIBLE})"),
@@ -5262,6 +5286,33 @@ VERIFICATION_OWNER_EPISODE_ACCEPTED = "VERIFICATION_OWNER_EPISODE_ACCEPTED"
 VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED = "VERIFICATION_OWNER_EPISODE_ALL_OWNERS_UNCHANGED"
 VERIFICATION_OWNER_EPISODE_OWNER_STOPPED = "VERIFICATION_OWNER_EPISODE_OWNER_STOPPED"
 VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER = "VERIFICATION_OWNER_EPISODE_NO_ELIGIBLE_OWNER"
+# OWNER-RECOVERY-STATIC-CAUSE-001: the gate types whose failure may be the statically decidable distrusted marker.
+_GRADED_RUNTIME_FAILURE_TYPES = ("run_verification", "run_verification_hung")
+
+
+def distrusted_marker_cause_stands(unit_result: Mapping[str, Any], root: str, paths: Sequence[str]) -> bool:
+    """OWNER-RECOVERY-STATIC-CAUSE-001 (Stage C run 2, MEASURED: the reopened owner answered a distrusted ``[VERIFICATION] PASS`` with
+    a change to one comment, the byte comparison accepted it as the repair, and the verification unit was run again to the identical
+    failure). True when the failed verification unit's own gate output, read against the files under ``root`` as they are NOW, is still
+    the one statically decidable failure of that gate: the program printed PASS and no file contains the FAIL branch
+    (``verification_contract.classify_contract_verdict`` - the predicate the gate itself applied, nothing re-derived here).
+
+    False for everything this cannot decide from bytes: another failure type, no marker in the bounded output the unit result carries
+    (``last_failure.raw_output`` is the last 4,000 characters), a FAIL marker, or a grounded PASS. Then the caller's existing
+    acceptance applies unchanged - a runtime-dependent repair is still judged by running the verification again. A file that cannot
+    be read contributes nothing, exactly as in the gate's own reading."""
+    last = unit_result.get("last_failure") or {}
+    if last.get("type") not in _GRADED_RUNTIME_FAILURE_TYPES:
+        return False
+    contents: List[str] = []
+    for path in sorted(set(paths)):
+        try:
+            with open(os.path.join(root, path), "r", encoding="utf-8", errors="replace") as handle:
+                contents.append(handle.read())
+        except OSError:
+            continue
+    state, _verdict = classify_contract_verdict(str(last.get("raw_output") or ""), contents)
+    return state is ContractVerdictState.INDETERMINATE_DISTRUSTED
 
 
 def dependent_failure_identity(unit_result: Mapping[str, Any]) -> Optional[str]:

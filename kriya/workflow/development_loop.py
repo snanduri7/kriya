@@ -559,6 +559,7 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
             if runtime_verification_required is None
             else runtime_verification_required
         ),
+        terminal_behavior_authority_bound=deps.bound_behavior_authority(deps.engine),
         strict_spec_compliance=strict_spec_compliance,
         execution_scope=execution_scope,
         reopened_owner=reopened_owner,

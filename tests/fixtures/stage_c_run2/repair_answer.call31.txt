@@ -1,0 +1,45 @@
+The existing `pom.xml` has two issues: the `<exec.mainClass>` property points to `com.example.QpidAmqpApp`, but the actual main class is `com.example.ProtocolApplication`; and the exec plugin configuration uses the `exec:java` goal shape (with `<arguments>`) which cannot apply JVM flags like `-Djava.security.manager=allow`. The correct approach for applying JVM flags is to use the `exec:exec` goal with `<executable>java</executable>` and pass flags as arguments, while keeping `${exec.mainClass}` as the final argument so it respects command-line overrides.
+
+<<<KRIYA:EDIT path="pom.xml">>>
+<<<KRIYA:SEARCH>>>
+<exec.mainClass>com.example.QpidAmqpApp</exec.mainClass>
+<<<KRIYA:REPLACE>>>
+<exec.mainClass>com.example.ProtocolApplication</exec.mainClass>
+<<<KRIYA:END_EDIT>>>
+
+<<<KRIYA:EDIT path="pom.xml">>>
+<<<KRIYA:SEARCH>>>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <executable>java</executable>
+                    <arguments>
+                        <!-- Required for Qpid broker embedding on JDK 17.0.10+ -->
+                        <argument>-Djava.security.manager=allow</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${exec.mainClass}</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+<<<KRIYA:REPLACE>>>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <executable>java</executable>
+                    <arguments>
+                        <!-- Required for Qpid broker embedding on JDK 17.0.10+ -->
+                        <argument>-Djava.security.manager=allow</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${exec.mainClass}</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+<<<KRIYA:END_EDIT>>>
+
+<<<KRIYA:NO_CHANGE path="pom.xml">>>

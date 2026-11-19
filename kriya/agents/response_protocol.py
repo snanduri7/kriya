@@ -524,6 +524,24 @@ def structured_contract(filepath: str, *, analysis_required: bool, allow_edit: b
         parts.append("First write 1-3 sentences of analysis as plain text. Then write exactly one outcome:")
     else:
         parts.append("Write exactly one outcome and nothing else:")
+    # REPAIR-OUTCOME-ALTERNATIVES-001 (Stage C run 2, MEASURED): when the EDIT and the FILE template were both offered, listed one after
+    # the other, 7 of 8 answers of two models filled in more than one of them (EDIT then FILE; EDIT then NO_CHANGE) and the strict parser
+    # refused each; with one content template offered, 13 of 13 answers held one outcome. So exactly that combination is presented as
+    # numbered alternatives separated by OR. Every other combination is byte-identical to what it was (the qualification cases never
+    # offer both), the grammar and the parser are unchanged, and no outcome is added or withdrawn.
+    exclusive = allow_edit and allow_file
+    total = 2 + (1 if allow_no_change else 0)
+
+    def alternative(number: int, meaning: str) -> str:
+        return f"{'OR ' if number > 1 else ''}ALTERNATIVE {number} of {total} - {meaning}:"
+
+    if exclusive:
+        parts.append(
+            f"The {total} outcomes below are ALTERNATIVES, not steps: your answer contains exactly ONE of them. An answer "
+            "that contains two of them (for example an EDIT block and then a FILE block) is rejected as a whole, even when "
+            "both say the same thing."
+        )
+        parts.append(alternative(1, "change only the lines that are wrong"))
     if allow_edit:
         parts.append(
             f'<<<KRIYA:EDIT path="{filepath}">>>\n<<<KRIYA:SEARCH>>>\n<exact existing lines, copied verbatim>\n'
@@ -531,9 +549,13 @@ def structured_contract(filepath: str, *, analysis_required: bool, allow_edit: b
             "(repeat SEARCH/REPLACE pairs inside one EDIT block for several changes; each SEARCH must be "
             "complete lines that occur exactly once in the file and must not overlap another SEARCH)"
         )
+    if exclusive:
+        parts.append(alternative(2, "replace the whole file"))
     if allow_file:
         parts.append(f'<<<KRIYA:FILE path="{filepath}">>>\n<the complete file content>\n<<<KRIYA:END_FILE>>>\n'
                      "(every line you write ends with a newline in the file)")
+    if exclusive and allow_no_change:
+        parts.append(alternative(3, "the file is already correct"))
     if allow_no_change:
         parts.append(f'<<<KRIYA:NO_CHANGE path="{filepath}">>>   (only if this file needs no change)')
     if allow_redirect:

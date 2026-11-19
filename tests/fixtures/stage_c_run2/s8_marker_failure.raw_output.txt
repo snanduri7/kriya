@@ -1,0 +1,36 @@
+=== Runtime prerequisite: mvn clean compile (current source): PASSED ===
+
+=== Step 1/1: mvn -e exec:exec ===
+[INFO] Error stacktraces are turned on.
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ---------------------< com.example:qpid-amqp-app >----------------------
+[INFO] Building Qpid AMQP Application 1.0-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- exec:3.1.0:exec (default-cli) @ qpid-amqp-app ---
+[Broker] BRK-1006 : Using configuration : N/A
+[Broker] BRK-1001 : Startup : Version: 9.2.1 Build: 63289b4d1cf001e1fc3d4b0e2e4dce64d8997241
+[Broker] BRK-1010 : Platform : JVM : Eclipse Adoptium version: 17.0.20+8 OS : Linux version: 6.12.5-linuxkit arch: aarch64 cores: 2
+[Broker] BRK-1011 : Maximum Memory : Heap : 1,073,741,824 bytes Direct : 1,073,741,824 bytes
+[Broker] BRK-1017 : Process : PID : 69
+[Broker] VirtualHostNode (default) : Update : SUCCESS : {virtualHostInitialConfiguration={}}
+[Broker] BRK-1002 : Starting : Listening on TCP port 5672
+[Broker] BRK-1004 : Qpid Broker Ready
+[RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=1700000000, bodyLength=15, equals=true
+[VERIFICATION] PASS
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  2.304 s
+[INFO] Finished at: 2026-11-19T08:09:30Z
+[INFO] ------------------------------------------------------------------------
+
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp
+SLF4J(W): No SLF4J providers were found.
+SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+Nov 19, 2026 8:09:29 AM io.netty.util.internal.MacAddressUtil defaultMachineId
+WARNING: Failed to find a usable hardware address from the network interfaces; using random bytes: da:c0:31:fa:30:86:98:55

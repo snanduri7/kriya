@@ -236,6 +236,24 @@ _DISTRUST_DISCLOSURE_NOTE = (
 )
 
 
+# What a distrusted PASS marker's failure tells whoever must repair it: the rule that failed and the change that satisfies it.
+DISTRUSTED_MARKER_FAILED_RULE = (
+    "FAILED RULE: the program printed \"[VERIFICATION] PASS\", but no written file contains \"[VERIFICATION] FAIL\" anywhere, "
+    "so that PASS line is printed whatever the program's comparison found. "
+    "REQUIRED CORRECTION: print \"[VERIFICATION] PASS\" only on the branch where the program's own comparison of the real values "
+    "succeeded, and print \"[VERIFICATION] FAIL: <one-sentence reason>\" on the branch where it did not. A PASS line placed after "
+    "or outside that comparison, or a change to comments or unrelated code, does not correct this."
+)
+
+
+# Recorded with a grade that was decided by the independent grading although the program printed an ungrounded PASS marker.
+DISTRUSTED_MARKER_NOT_EVIDENCE_NOTE = (
+    "The program's \"[VERIFICATION] PASS\" line was not used as evidence (ungrounded: no written file contains the "
+    "\"[VERIFICATION] FAIL\" branch). This unit is decided by the independent grading of the actual output and exit status; the "
+    "verification authority bound to this run still decides its requirements at the terminal gates. Grading: "
+)
+
+
 async def _resolve_runtime_verification_grade(
     deps: RuntimeDeps, ctx: AttemptCtx, state: ContractVerdictState,
     contract_verdict: Optional[Dict[str, Any]], grade_kwargs: Dict[str, Any],
@@ -297,6 +315,29 @@ async def _resolve_runtime_verification_grade(
     except Exception as e:
         deps.logger.warning(f"Run Verifier grade() call failed during distrusted-evidence disclosure: {e}")
         grade = {"passed": False, "reasoning": f"Grader call failed: {e}", "likely_files": []}
+    # DISTRUSTED-MARKER-NOT-A-VETO-001 (owner P0 ruling 2026-11-19; Stage C run 20261119T125126-20dc890c).
+    # OLD ASSUMPTION (VER-006, 2026-09-10): the captured output is this path's only evidence channel, so with an ungrounded PASS
+    #   marker in it nothing independent exists and every grade must be forced to non-PASS.
+    # NEW EVIDENCE (MEASURED, sealed run): the application exited 0 and printed the goal's own "[RESULT] ... equals=true" line; the
+    #   grader, told of the distrust by the notice above, judged PASS on that line. The marker is Kriya's own soft convention
+    #   (retry_prompts.VERIFICATION_CONTRACT_HEADER), not a requirement of the goal. Forcing non-PASS stopped the verification
+    #   unit, so the operator's bound verification authority - the independent judge of the run's behaviour requirements, which
+    #   runs only at the terminal gates after every unit completed - never ran. An optional marker vetoed the stronger authority.
+    # REQUIRED CORRECTION: the ungrounded marker is NON-EVIDENCE, not a veto. Only where the operator's verification authority is
+    #   bound to the run and covers behaviour (AttemptContext.terminal_behavior_authority_bound, set from the one existing
+    #   binding, authority_bundle.bound_authority_bundle), a PASS of the independent grading stands, under the existing "llm"
+    #   authority - exactly the authority a run with no marker at all already has. Nothing else moves: a grade that is not PASS,
+    #   a grader that could not be asked, and every run WITHOUT such an authority are forced to non-PASS below as before; a
+    #   nonzero exit or a timeout still outranks any grade (apply_runtime_disposition, at every caller); the marker is still
+    #   never evidence; the authority still closes only the requirements it covers, at the terminal gates, where its FAIL or
+    #   its absence blocks as before. No requirement is closed here.
+    if grade.get("passed") is True and getattr(ctx, "terminal_behavior_authority_bound", False) is True:
+        deps.logger.info(
+            "Runtime verification: the ungrounded '[VERIFICATION] PASS' marker was not used as evidence; the independent grading of "
+            "the actual output passed and decides this unit. The bound verification authority still decides at the terminal gates."
+        )
+        grade["reasoning"] = DISTRUSTED_MARKER_NOT_EVIDENCE_NOTE + str(grade.get("reasoning", ""))
+        return grade, "llm"
     if grade.get("passed"):
         deps.logger.info(
             "VER-006: LLM grader returned passed=true over deterministically distrusted "
@@ -313,11 +354,18 @@ async def _resolve_runtime_verification_grade(
     # assignment is only recorded, and the truthy grade.get("passed") read
     # later turned this forced non-PASS into a PASS (two cleanup tests passed
     # that way until their doubles were made strict).
+    # DISTRUSTED-MARKER-ACTIONABLE-FAILURE-001 (Stage C run 2, MEASURED: this text is what the reopened owner is shown; it said
+    # "ungrounded" without the rule, beside the grader's "independent evidence is present", and the owner answered by changing one
+    # comment). The message now states the rule the classifier applied (verification_contract.pass_verdict_is_grounded) and the
+    # correction. Text only: the predicate, the forced non-PASS, the authority label and every other failure message are unchanged.
+    # It stays ONE line: the gate output it is appended to is re-read for marker lines, which are whole lines.
     grade["reasoning"] = (
         "A deterministic check found a self-reported verification marker but rejected it as "
-        "ungrounded (present but never demonstrated to gate on anything). No independent "
+        "ungrounded (present but never demonstrated to gate on anything). "
+        + DISTRUSTED_MARKER_FAILED_RULE
+        + " No independent "
         "corroborating evidence exists on this verification path, so this cannot pass on LLM "
-        f"judgment over that same distrusted evidence alone. Grader's own verdict: "
+        f"judgment over that same distrusted evidence alone. Grader's own verdict (overridden, not a result): "
         f"{grade.get('reasoning', '')}"
     )
     grade["passed"] = False
