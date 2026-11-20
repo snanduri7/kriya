@@ -176,3 +176,47 @@ def test_the_once_per_file_veto_budget_is_unchanged(tmp_path):
     state.budgets.last_failure_signature = RUN_FAILURE
     state.budgets.diagnosis_mismatch_veto_counts[POM] = 1
     assert _diagnosis_mismatch_bypass_reason(state, _minimal_attempt_ctx(tmp_path), POM, "<project/>") is not None
+
+
+# ------------------------------------------------------------ DIAGNOSIS-MISMATCH-RESPONSE-VALIDITY-001 (Stage C run 6, unit s2, attempt 2)
+#
+# MEASURED: the retry after a refused response (the protocol's unfilled template) answered with a correct EMPTY file; its analysis explained
+# the format error and named a caller and a property; the prose check demanded those names in the change and discarded the candidate. A
+# retry that answers only response-validity refusals has no finding about a file's content to be held to (the existing
+# _only_response_validity_failures family). Any gate, locator or source failure in the unit's history keeps the check exactly as it was.
+
+def _failed(state, *gate_types):
+    for gate_type in gate_types:
+        state.gate_outcomes.append({"type": gate_type, "success": False, "attempt": 1})
+
+
+@pytest.mark.parametrize(("signature", "failed", "bypassed"), [
+    (("operation_contract", ("INVALID_EDIT_PROTOCOL",)), ("operation_contract",), True),            # the run-6 s2 history
+    (("anchored_edit", ("anchor mismatch",)), ("operation_contract", "anchored_edit"), True),          # only response-shape failures
+    (("operation_contract", ("x",)), ("operation_contract", "run_verification"), False),              # MIXED: a runtime failure is in the history
+    (("operation_contract", ("x",)), ("regression_test", "operation_contract"), False),               # MIXED: a test failure is in the history
+    (("misdirected_edit", ("x",)), ("operation_contract",), False),                                    # the active family is not response validity
+    (RUN_FAILURE, (), False), (("goal_spec_compliance", ("x",)), (), False), (None, (), False),       # as before: a source or runtime retry, or no failure at all
+])
+def test_only_a_retry_answering_response_validity_refusals_alone_skips_the_prose_check(tmp_path, signature, failed, bypassed):
+    from test_workflow import _minimal_attempt_ctx  # noqa: PLC0415
+
+    state = GenerationState()
+    state.budgets.last_failure_signature = signature
+    _failed(state, *failed)
+    reason = _diagnosis_mismatch_bypass_reason(state, _minimal_attempt_ctx(tmp_path), "src/main/resources/system.properties", "")
+    assert (reason is not None) is bypassed, reason
+    if bypassed:
+        assert "response validity" in reason
+
+
+def test_a_deterministic_gate_retry_keeps_its_own_reason_and_a_mixed_history_with_one_still_defers_to_that_gate(tmp_path):
+    """The existing deferral is unchanged and independent: a compile-triggered retry defers to the compile gate whatever else failed."""
+    from test_workflow import _minimal_attempt_ctx  # noqa: PLC0415
+
+    state = GenerationState()
+    state.budgets.last_failure_signature = ("compile", ("x",))
+    _failed(state, "operation_contract", "compile")
+    reason = _diagnosis_mismatch_bypass_reason(state, _minimal_attempt_ctx(tmp_path), POM, "<project/>")
+    assert reason is not None and "deterministic gate" in reason and "response validity" not in reason
+

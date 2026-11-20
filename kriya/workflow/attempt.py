@@ -2117,6 +2117,18 @@ def _diagnosis_mismatch_bypass_reason(
             "per the bounded-veto policy, it never rejects the same file twice "
             "regardless of failure type; the real downstream gate decides instead"
         )
+    # DIAGNOSIS-MISMATCH-RESPONSE-VALIDITY-001 (Stage C run 20261120T070741-bcce2d0b, unit s2, attempt 2, MEASURED): the first answer for
+    # a new file was the protocol's unfilled template and was refused as a response; the retry answered correctly with an EMPTY file, and
+    # its analysis explained the format error, naming the caller and a configuration property. The check then demanded those names in the
+    # change - which an empty file can never hold - and discarded the whole candidate, the valid sibling with it. When every failure of
+    # this unit so far judged only the SHAPE of a response (the existing response-validity family: _only_response_validity_failures), no
+    # finding about any file's content exists for an analysis to be held to; the candidate's own gates judge it. A unit with any gate,
+    # locator or source failure is not this case and is checked as before.
+    if _only_response_validity_failures(state):
+        return (
+            "every failure of this unit so far judged only the shape of a Developer response (response validity); there is no "
+            "finding about the file's content for the analysis to be held to - the candidate's own gates decide"
+        )
     sig = state.budgets.last_failure_signature
     if not sig:
         return None

@@ -1,0 +1,3 @@
+<<<KRIYA:FILE path="src/main/resources/system.properties">>>
+<the complete file content>
+<<<KRIYA:END_FILE>>>

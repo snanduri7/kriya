@@ -435,6 +435,7 @@ EXCEPTIONS: Dict[str, Tuple[str, str]] = {'tests/state_machine/test_sm_attempt_m
  'tests/test_file_template_returned_unfilled_001.py::test_the_unfilled_template_is_refused_the_developer_is_told_and_the_empty_answer_then_passes': ('S', 'M'),
  'tests/test_file_template_returned_unfilled_001.py::test_run5_s1_the_two_valid_siblings_of_a_refused_answer_complete_the_unit_without_being_generated_again': ('S', 'M'),
  'tests/test_file_template_returned_unfilled_001.py::test_a_sibling_answered_after_the_refused_file_was_never_checked_and_is_generated_again': ('S', 'M'),
+ 'tests/test_file_template_returned_unfilled_001.py::test_run6_s2_the_corrected_empty_file_and_the_reused_configuration_are_accepted_together_on_the_second_attempt': ('S', 'M'),
  'tests/test_d8_terminal_toolchain_authority.py::test_an_unchanged_declaration_runs_the_named_test_with_the_callers_authority[False]': ('N', 'C'),
  'tests/test_d8_terminal_toolchain_authority.py::test_an_unchanged_declaration_runs_the_named_test_with_the_callers_authority[True]': ('N', 'C'),
  'tests/test_d8_terminal_toolchain_authority.py::test_the_earlier_unit_gate_still_refuses_an_unauthorized_toolchain_change': ('N', 'C'),

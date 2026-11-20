@@ -387,3 +387,45 @@ def test_a_sibling_answered_after_the_refused_file_was_never_checked_and_is_gene
     assert result["quality_gates_passed"] is True, why
     assert (workspace / S1_POM).read_text() == POM_TEXT and (workspace / S1_CONFIG).read_text() == CONFIG_TEXT, why
     assert (workspace / PATH).read_bytes() == b"", why
+
+
+# ------------------------------------------------------ DIAGNOSIS-MISMATCH-RESPONSE-VALIDITY-001: the sealed run-6 s2 answers, through a real unit
+#
+# MEASURED (Stage C run 20261120T070741-bcce2d0b, unit s2): attempt 1 = a valid broker configuration and the unfilled template; attempt 2 =
+# the correct empty file, with an analysis that explains the format error and names `SystemLauncher` and `initialSystemPropertiesLocation`.
+# The prose check refused attempt 2 (those names are not in an empty file), the reused configuration was lost with it, and the unit needed
+# four attempts and five Developer answers. The three answers below are the run's own bytes (tests/fixtures/stage_c_run6, digest-checked).
+
+RUN6_FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "stage_c_run6")
+RUN6_S2_ANSWERS = {
+    "developer_answer.s2.attempt1.qpid_initial_config.txt": "7e254d96d48b7d897a2b164369a4140b17c6ce1e345daf148b5178ae692e0026",
+    "developer_answer.s2.attempt1.system_properties.txt": "67b76ad47d1049dfd7e8704c32b6d980550afa8a6421d4af7fe44c34de237ca0",
+    "developer_answer.s2.attempt2.system_properties.txt": "7dfc20762c982efc7ce083432fce7cd54ce85fe97753ca7bffb8b1dcead8ebef",
+}
+
+
+def _run6_answer(name):
+    with open(os.path.join(RUN6_FIXTURES, name), "rb") as handle:
+        data = handle.read()
+    assert hashlib.sha256(data).hexdigest() == RUN6_S2_ANSWERS[name], f"{name} is not the sealed run-6 content"
+    return data.decode("utf-8")
+
+
+@_scripted_success
+def test_run6_s2_the_corrected_empty_file_and_the_reused_configuration_are_accepted_together_on_the_second_attempt(tmp_path):
+    config_answer = _run6_answer("developer_answer.s2.attempt1.qpid_initial_config.txt")
+    corrected = _run6_answer("developer_answer.s2.attempt2.system_properties.txt")
+    assert "SystemLauncher" in corrected and "initialSystemPropertiesLocation" in corrected          # the analysis the prose check tripped on
+    assert corrected.endswith(f"{OPEN}\n{CLOSE}") or f"{OPEN}\n{CLOSE}" in corrected               # and the answer IS the empty file
+    workspace, requests, events, result, why = _run_the_s1_unit(tmp_path, {
+        S1_CONFIG: [config_answer], PATH: [_run6_answer("developer_answer.s2.attempt1.system_properties.txt"), corrected]},
+        order=(S1_CONFIG, PATH))
+    assert requests == [S1_CONFIG, PATH, PATH], f"three answers, two attempts: nothing is asked for again - {why}"
+    assert [event.details["paths"] for event in _reused(events)] == [[S1_CONFIG]], why
+    assert not [event for event in events if "DIAGNOSIS MISMATCH" in str(getattr(event, "message", ""))], why
+    assert result["quality_gates_passed"] is True, why
+    assert sorted(result["files"]) == sorted([S1_CONFIG, PATH]), why
+    assert (workspace / PATH).read_bytes() == b"", why
+    expected_config = config_answer.split(f'<<<KRIYA:FILE path="{S1_CONFIG}">>>\n', 1)[1].split("<<<KRIYA:END_FILE>>>", 1)[0]
+    assert (workspace / S1_CONFIG).read_text(encoding="utf-8") == expected_config, why
+
