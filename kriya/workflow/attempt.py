@@ -3291,6 +3291,24 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 f"file(s) - scoping to their dependency closure "
                 f"{', '.join(known_target_files)} instead of the full file set."
             )
+        elif (ctx.structured_plan is not None and ctx.current_subtask_id
+              and ctx.write_scope_mode is WriteScopeMode.ALLOWLIST and ctx.expected_files_upfront):
+            # RETRY-REQUEST-SCOPE-001 (Stage C run 20261120T070741-bcce2d0b, unit s6, MEASURED): a full-set RETRY of a
+            # plan unit had no file list, so the Developer's own file-list step asked the model which files to write.
+            # The fallback model named five (four outside the unit's write scope, one of them invented); each was
+            # generated, and the whole attempt - the planned file's answer included - was refused, twice. A plan
+            # unit's files are the plan's decision, on a retry exactly as on its first attempt: the unit's own planned
+            # files that its write allow-list holds. Never wider than the allow-list; nothing is added to it. The two
+            # branches above keep their precedence (the first attempt, a grounded failure's dependency closure), and a
+            # run without a plan or without an allow-list still asks the model, as before.
+            allowed = set(ctx.allowed_write_relpaths or ())
+            planned_in_scope = [path for path in ctx.expected_files_upfront if path in allowed]
+            if planned_in_scope:
+                known_target_files = planned_in_scope
+                logger.info(
+                    "Full-set retry of plan unit %s: requesting its own planned file(s) %s (no model file list).",
+                    ctx.current_subtask_id, ", ".join(planned_in_scope),
+                )
 
         # CTX-001 P1 WP4/WP7: ctx.worktree_path (current-source invariant),
         # matched/related filtered to exclude known-target paths (which get

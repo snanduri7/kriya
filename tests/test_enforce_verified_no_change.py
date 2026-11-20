@@ -20,6 +20,7 @@ workspace); the model is scripted at the transport, only the toolchain
 gates are stubbed.
 """
 import asyncio
+import json
 import subprocess
 from unittest.mock import AsyncMock, patch
 
@@ -36,6 +37,7 @@ from kriya.workflow.workflow import WorkflowEngine
 
 SERVICE = "shop/service.py"
 CONTROLLER = "shop/controller.py"
+INVENTED = "shop/invented.py"
 SERVICE_SRC = "import functools\n\n\n@functools.lru_cache(maxsize=None)\ndef find_pet_types():\n    return ('cat', 'dog')\n"
 CONTROLLER_SRC = "from shop.service import find_pet_types\n\n\ndef populate_pet_types():\n    return find_pet_types()\n"
 GOAL = "Cache the pet types the same way the vets are cached."
@@ -69,8 +71,20 @@ def _git(repo, *args):
                    capture_output=True)
 
 
-def _run(tmp_path, *, criterion=TOOL_CRITERION, test_results=None, developer_answer=None):
-    """s2 of the plan; the Developer answers NO CHANGE for the controller."""
+def _asked_path(system_prompt, known=None):
+    """The file a structured Developer request is for (the path its response contract offers a FILE block for)."""
+    for path in known or (CONTROLLER, SERVICE, INVENTED):
+        if f'<<<KRIYA:FILE path="{path}">>>' in (system_prompt or ""):
+            return path
+    return CONTROLLER
+
+
+def _run(tmp_path, *, criterion=TOOL_CRITERION, test_results=None, developer_answer=None, file_list=None, seen=None,
+         compile_results=None, bounded=True):
+    """s2 of the plan; the Developer answers NO CHANGE for the controller. ``file_list``: what the Developer's file-list step is answered
+    (default: the controller only). ``seen``: a dict that receives the number of file-list requests and the path of every Developer request.
+    ``compile_results``: the compile gate's answers in order (the last repeats). ``bounded=False``: a direct run - no plan, no write
+    allow-list, no unit."""
     model_runtime.clear_model_runtime_cache()
     cfg = AppConfig()
     cfg.llm.model = "dev-model"
@@ -98,9 +112,13 @@ def _run(tmp_path, *, criterion=TOOL_CRITERION, test_results=None, developer_ans
         del llm, client, model, args, kwargs
         first = (system_prompt or "").splitlines()[0] if system_prompt else ""
         if "File List Planner" in first:
-            content = '{"files": ["%s"]}' % CONTROLLER
+            if seen is not None:
+                seen["file_list_calls"] = seen.get("file_list_calls", 0) + 1
+            content = json.dumps({"files": list(file_list or [CONTROLLER])})
         elif "Developer Agent" in first:
             developer.append(user_prompt)
+            if seen is not None:
+                seen.setdefault("developer_paths", []).append(_asked_path(system_prompt))
             answer = developer_answer or (lambda sp: sentinel(
                 CONTROLLER, analysis="populate_pet_types already calls the cached service.", no_change=True)
                 if wants_structured(sp) else "NO CHANGE NEEDED: already calls the cached service.")
@@ -126,19 +144,26 @@ def _run(tmp_path, *, criterion=TOOL_CRITERION, test_results=None, developer_ans
         events.append(event)
         return real_record(state, event)
 
+    compiles = list(compile_results or [{"success": True, "output": "ok"}])
+    compile_calls = []
+
+    def compile_gate(*args, **kwargs):
+        del args, kwargs
+        compile_calls.append(1)
+        return compiles[min(len(compile_calls), len(compiles)) - 1]
+
     plan = _plan(criterion)
+    scope = dict(allowed_write_relpaths=[CONTROLLER], structured_plan=plan, current_subtask_id="s2",
+                 required_verification=[{"type": "tool", "tool_name": "test", "description": "run the tests"}]) if bounded else {}
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
-               new=lambda *a, **k: {"success": True, "output": "ok"}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=compile_gate), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=tests):
         result = asyncio.run(engine.run_generation_workflow(
             goal=GOAL, workspace_path=str(workspace), predetermined_plan="use the cached pet types",
             predetermined_design="", predetermined_architect_files=[CONTROLLER],
-            allowed_write_relpaths=[CONTROLLER], structured_plan=plan, current_subtask_id="s2",
-            required_verification=[{"type": "tool", "tool_name": "test", "description": "run the tests"}],
-            approval_callback=AsyncMock(return_value=True)))
+            approval_callback=AsyncMock(return_value=True), **scope))
     return workspace, developer, events, result
 
 
@@ -408,6 +433,73 @@ def test_a_tool_criterion_that_is_not_proven_refuses_the_unit_even_when_the_runt
 def test_a_unit_with_no_criteria_is_still_refused_whatever_follows_it():
     binding, refusal = _verify(_plan_with_verifier(unit_claims=()), [_outcome("compile", True, "ok")])
     assert binding is None and refusal["code"] == "ACCEPTANCE_COVERAGE_UNAVAILABLE"
+
+
+# ------------------------------------------------------------ RETRY-REQUEST-SCOPE-001: a plan unit's full-set retry asks for its own files
+#
+# MEASURED (Stage C run 20261120T070741-bcce2d0b, unit s6): after a refused no-change and a targeted retry, the full-set retry had no file
+# list; the Developer's file-list step asked the (fallback) model, which named five files - four outside the unit's write scope, one
+# invented. All five were generated twice and each attempt was refused whole. The scripted file-list answer below is that shape: the
+# unit's own file, another unit's file and an invented one.
+
+RUN6_FILE_LIST = [CONTROLLER, SERVICE, INVENTED]
+UNLOCATED_COMPILE_FAILURE = {"success": False, "output": "BUILD FAILURE: the build did not complete"}      # names no file: nothing to target
+CHANGED_CONTROLLER = CONTROLLER_SRC + "\n\ndef pet_type_count():\n    return len(find_pet_types())\n"
+
+
+def _writes_whatever_it_is_asked_for():
+    """A scripted Developer that writes the file each request is for; every answer differs (a retry is never an identical rewrite)."""
+    calls = []
+
+    def answer(system_prompt):
+        calls.append(1)
+        path = _asked_path(system_prompt)
+        content = (CHANGED_CONTROLLER if path == CONTROLLER else f"# {path}\nVALUE = 1\n") + f"# answer {len(calls)}\n"
+        return sentinel(path, analysis="write the file.", content=content) if wants_structured(system_prompt) else content
+    return answer
+
+
+def _said(result, seen):
+    keys = ("status", "failure_category", "quality_gates_passed", "no_progress_reason", "files", "error")
+    return f"seen={seen} result={ {key: str(result.get(key))[:200] for key in keys if result.get(key) is not None} }"
+
+
+def test_a_plan_units_full_set_retry_requests_only_its_own_planned_file_and_never_asks_the_model_for_a_file_list(tmp_path):
+    """The compile gate fails once with an output that names no file, so the retry is a full-set one. The unit (allow-list: the controller)
+    is asked for the controller again - no file-list request, no request for another unit's or an invented file."""
+    seen = {}
+    _, developer, _, result = _run(tmp_path, developer_answer=_writes_whatever_it_is_asked_for(), file_list=RUN6_FILE_LIST, seen=seen,
+                                   compile_results=[UNLOCATED_COMPILE_FAILURE, {"success": True, "output": "ok"}])
+    assert len(developer) >= 2, f"a retry happened - {_said(result, seen)}"
+    assert seen.get("file_list_calls", 0) == 0, f"the model is never asked which files a plan unit writes - {_said(result, seen)}"
+    assert set(seen["developer_paths"]) == {CONTROLLER}, _said(result, seen)
+    assert result["quality_gates_passed"] is True and result["files"] == [CONTROLLER], _said(result, seen)
+
+
+def test_control_a_direct_run_without_a_plan_still_asks_the_model_for_its_file_list_on_a_full_set_retry(tmp_path):
+    """Negative control: the same failure in a run with no plan, no unit and no write allow-list. Nothing bounds its files, so the retry's
+    file list is the model's, as before."""
+    seen = {}
+    _, developer, _, result = _run(tmp_path, developer_answer=_writes_whatever_it_is_asked_for(), file_list=RUN6_FILE_LIST, seen=seen,
+                                   compile_results=[UNLOCATED_COMPILE_FAILURE, {"success": True, "output": "ok"}], bounded=False)
+    assert len(developer) >= 2, f"a retry happened - {_said(result, seen)}"
+    assert seen.get("file_list_calls", 0) >= 1, f"an unbounded run still discovers its files - {_said(result, seen)}"
+    assert INVENTED in seen["developer_paths"], _said(result, seen)
+
+
+def test_run6_s6_shape_a_refused_no_change_is_retried_within_the_unit_only_and_the_repetition_is_measured(tmp_path):
+    """The run-6 sequence on a unit no later runtime verifier covers (so it is still refused): NO CHANGE on every attempt. Every Developer
+    request of every attempt is for the unit's own file and no file list is requested. MEASUREMENT (C7-2 item 5), reported in the assertion
+    message and asserted last: the existing retry-progress counter ends the repetition with its own typed reason before the attempt cap."""
+    seen = {}
+    _, developer, events, result = _run(tmp_path, criterion=JUDGMENT_CRITERION, file_list=RUN6_FILE_LIST, seen=seen)
+    vectors = [(e.attempt, e.details.get("classification"), e.details.get("consecutive_no_progress_attempts"))
+               for e in events if e.kind == "retry.progress_vector"]
+    terminal = [e.message for e in events if e.kind == "retry.no_progress_terminal"]
+    measured = f"attempts={len(developer)} progress_vectors={vectors} no_progress_terminal={terminal} {_said(result, seen)}"
+    assert result["quality_gates_passed"] is not True, measured
+    assert seen.get("file_list_calls", 0) == 0 and set(seen["developer_paths"]) == {CONTROLLER}, measured
+    assert terminal and result.get("no_progress_reason") == "RETRY_NO_PROGRESS_EXHAUSTED", f"MEASUREMENT - the counter did not end it: {measured}"
 
 
 UNCACHED_SERVICE = "def find_pet_types():\n    return ('cat', 'dog')\n"
