@@ -426,9 +426,10 @@ class GenerationState:
     # each path, updated on EVERY attempt regardless of that attempt's own
     # gate outcome - a real, legitimate edit to one file must survive even
     # when the SAME batch is rejected for an unrelated reason in a
-    # different file. Consumed only while state.api_contract_recovery is
+    # different file. Consumed while state.api_contract_recovery is
     # active (kriya/workflow/attempt.py's own run_attempt(), just before the
-    # brownfield ownership check) to fold an untouched-this-round expected
+    # brownfield ownership check; the one other reader is the S1-SIBLING-
+    # REUSE-001 fold-in beside it, under the stamps below) to fold an untouched-this-round expected
     # file's own last real content back into a recovery attempt's narrowed
     # `files` list, so the generic completeness check doesn't mistake a
     # deliberately narrowed recovery round for the Developer silently
@@ -436,6 +437,16 @@ class GenerationState:
     # never actually generated in any attempt (get() returns None; the
     # caller does not fall back to baseline).
     last_candidate_contents: Dict[str, str] = field(default_factory=dict)
+    # S1-SIBLING-REUSE-001 (Stage C run 20261119T200403-218cbbf6, unit s1):
+    # path -> the attempt whose operation-contract loop cleared the content
+    # last_candidate_contents holds for it, and the last attempt that loop
+    # refused (before anything was written). Together they say "this content
+    # cleared the contract in the attempt just refused for ANOTHER file, and
+    # nothing has been written since" - the only case in which run_attempt()
+    # hands a planned, still absent file's content back to the next attempt
+    # (see the fold-in there). An older stamp is never reused.
+    candidate_contents_cleared_at: Dict[str, int] = field(default_factory=dict)
+    pre_write_refused_attempt: int = 0
     # VAL-001 G1 D1 (2026-09-18): path -> the ContextItem actually shown to the
     # Developer for that file THIS attempt, whenever it was built through
     # build_known_target_context() (attempt.py's own known_target_package/

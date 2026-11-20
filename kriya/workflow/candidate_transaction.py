@@ -775,6 +775,7 @@ def _check_operation_contracts(deps: CandidateDeps, state: RunState, ctx: Attemp
                 ),
                 attempt=state.attempt_number,
             )
+            state.pre_write_refused_attempt = state.attempt_number   # S1-SIBLING-REUSE-001: refused here, nothing written
             state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         # VAL-001 G1 D1-A (2026-09-18): independent of `mandatory_patch`
@@ -838,6 +839,7 @@ def _check_operation_contracts(deps: CandidateDeps, state: RunState, ctx: Attemp
                 attempt=state.attempt_number,
             )
             deps._record_edit_protocol_failure(state, filepath, failure.type)
+            state.pre_write_refused_attempt = state.attempt_number   # S1-SIBLING-REUSE-001: refused here, nothing written
             state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if actual_operation in (deps.CodeOperation.CREATE_FULL_FILE, deps.CodeOperation.REPAIR_WITH_FULL_FILE):
@@ -853,6 +855,7 @@ def _check_operation_contracts(deps: CandidateDeps, state: RunState, ctx: Attemp
         _candidate_content = file_obj.get("content")
         if _candidate_content is not None:
             state.last_candidate_contents[filepath] = _candidate_content
+            state.candidate_contents_cleared_at[filepath] = state.attempt_number   # S1-SIBLING-REUSE-001
         if actual_operation is not expected_operation:
             state.record_event(RunEvent(
                 kind="operation.fallback",

@@ -3629,6 +3629,53 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "filepath": expected_path, "content": cumulative_content,
                     "_kriya_carried_forward_content": True,
                 })
+    # S1-SIBLING-REUSE-001 (Stage C run 20261119T200403-218cbbf6, unit s1,
+    # MEASURED): attempt 1 returned a valid pom.xml and broker configuration
+    # and an unfilled template for the third planned file. The operation-
+    # contract loop refused the whole attempt before any write (deliberate:
+    # all or nothing); the retry asked for the refused file only, the
+    # completeness check then reported the two siblings "never written", and
+    # a third attempt generated both again. The siblings' content had cleared
+    # the contract loop and is in state.last_candidate_contents; it is handed
+    # back here, to the SAME `files` list every later step reads, so the
+    # complete unit goes through the contract loop, staging, every gate and
+    # the completeness check together. Only when ALL of these hold:
+    # - the attempt immediately before this one was refused by that loop
+    #   (nothing was written, so the tree is the one the content cleared on);
+    # - the content cleared the loop in that same attempt (an older entry is
+    #   stale and stays out - the file is then reported missing as before);
+    # - this attempt did not return the file (a fresh answer always wins);
+    # - the file does not exist in the candidate tree or the workspace (a
+    #   planned creation; an existing file's replacement is NOT carried).
+    # The entry is NOT marked `_kriya_carried_forward_content`: it takes the
+    # contract loop's ordinary path again, with no authority exemption. The
+    # refused file and any file after it were never recorded and are never
+    # carried. API-contract recovery keeps its own fold-in above.
+    refused_attempt = state.attempt_number - 1
+    if state.api_contract_recovery is None and refused_attempt >= 1 and state.pre_write_refused_attempt == refused_attempt:
+        returned_paths = {file_obj["filepath"] for file_obj in files}
+        reused_siblings = []
+        for expected_path in ctx.architect_files:
+            if (expected_path in returned_paths
+                    or state.candidate_contents_cleared_at.get(expected_path) != refused_attempt
+                    or _target_exists(ctx, expected_path)):
+                continue
+            cleared_content = state.last_candidate_contents.get(expected_path)
+            if cleared_content is None:
+                continue
+            files.append({"filepath": expected_path, "content": cleared_content})
+            reused_siblings.append(expected_path)
+        if reused_siblings:
+            logger.info("Reusing the content attempt %d returned for %s: it cleared the operation contract there and "
+                        "nothing was written since.", refused_attempt, ", ".join(reused_siblings))
+            state.record_event(RunEvent(
+                kind="candidate.siblings_reused", attempt=state.attempt_number,
+                source="attempt.run_attempt", authority=EventAuthority.AUTHORITATIVE,
+                message=(f"{', '.join(reused_siblings)}: content returned in attempt {refused_attempt} (refused before "
+                         "any write for another file) is part of this attempt's candidate"),
+                details={"paths": reused_siblings, "cleared_in_attempt": refused_attempt,
+                         "returned_this_attempt": sorted(returned_paths)},
+            ))
     # VAL-001 G1 D1-B (2026-09-18): this cache is recorded further down,
     # inside the per-file operation-authority enforcement loop, ONLY after
     # that file's own actual returned mutation shape has cleared

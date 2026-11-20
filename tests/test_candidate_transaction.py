@@ -178,6 +178,9 @@ def test_a_valid_sibling_before_an_invalid_response_is_refused_with_it(tmp_path)
     assert run.state.files_written == ["sentinel.py"]
     assert run.state.candidate_digests == {}
     assert run.state.last_candidate_contents == {C: "C = 3\n"}
+    # S1-SIBLING-REUSE-001: what the next attempt's fold-in reads - C cleared in THIS attempt, and this attempt was refused before a write
+    assert run.state.candidate_contents_cleared_at == {C: run.state.attempt_number}
+    assert run.state.pre_write_refused_attempt == run.state.attempt_number
     assert set(run.state.edit_failure_capability) == {B}   # C's accepted whole-file edit cleared its failure
     assert run.state.all_original_raw == {}                # originals are captured only after the contract loop
     assert run.state.gate_outcomes[-1]["type"] == "operation_contract"
@@ -192,8 +195,36 @@ def test_an_invalid_first_response_refuses_before_its_valid_sibling_is_evaluated
     run = _Run(tmp_path, [{"filepath": B, **INVALID}, {"filepath": C, "content": "C = 3\n"}], architect=[B, C])
     run.run()
     assert run.failure is not None and (run.failure.type, run.failure.likely_files) == ("operation_contract", [B])
-    assert run.state.last_candidate_contents == {}
+    assert run.state.last_candidate_contents == {} and run.state.candidate_contents_cleared_at == {}   # unchecked: nothing to reuse
+    assert run.state.pre_write_refused_attempt == run.state.attempt_number
     assert run.disk() == BASELINE and run.state.candidate_digests == {}
+
+
+@pytest.mark.parametrize("refused,cleared,reused", [
+    (2, 2, True),     # the positive twin: cleared in the attempt just refused
+    (2, 1, False),    # STALE STAMP: the previous attempt was refused, but C's content cleared one attempt earlier
+    (1, 1, False),    # the refusal itself is old: the attempt right before this one was not refused by the contract loop
+])
+def test_only_content_cleared_in_the_attempt_just_refused_is_reused(tmp_path, refused, cleared, reused):
+    """S1-SIBLING-REUSE-001, the fold-in's stamp conditions through the real ``run_attempt`` (attempt 3): the Developer returns the new
+    file D only; C (planned, absent) has earlier content on record. (Every planned file is a creation: MEASURED in owner check
+    a-prep/check.v2, a later attempt that plans an EXISTING file stops at the edit-capability decision before the Developer is asked.) It joins the candidate only when that content cleared the contract loop in the
+    attempt just refused; otherwise it stays unwritten and is reported missing, as before. (``pkg/missing.py`` ends every case at the
+    completeness check, before an executing gate.)"""
+    new_file = "pkg/d.py"
+    run = _Run(tmp_path, [{"filepath": new_file, "content": "D = 4\n"}], architect=[new_file, C, "pkg/missing.py"])
+    run.state.attempt_number = 2
+    run.state.pre_write_refused_attempt = refused
+    run.state.last_candidate_contents = {C: "C = 3\n"}
+    run.state.candidate_contents_cleared_at = {C: cleared}
+    run.run()
+    assert isinstance(run.error, IncompleteGenerationError), (run.error, run.failure)
+    assert run.state.attempt_number == 3
+    assert (run.worktree / new_file).read_bytes() == b"D = 4\n"
+    assert run.disk()[C] == (raw_digest(b"C = 3\n") if reused else None)
+    assert ("c.py" in run.error.missing_files) is (not reused)
+    assert "missing.py" in run.error.missing_files
+    assert run.state.files_written == ([new_file, C] if reused else [new_file])
 
 
 # --------------------------------------------------------------------- staging refusal (the per-file write loop)
@@ -216,6 +247,7 @@ def test_a_valid_anchored_edit_before_a_failing_one_is_never_staged(tmp_path):
     assert run.state.candidate_digests == {}
     assert run.state.budgets.anchor_failure_counts == {A: 0, B: 1}
     assert run.state.budgets.diagnosis_mismatch_veto_counts == {B: 1}
+    assert run.state.pre_write_refused_attempt == 0   # S1-SIBLING-REUSE-001: only an operation-contract refusal sets it; this is a staging refusal
     assert set(run.state.all_original_raw) == {A, B}
     assert run.state.all_original_raw[A] == A_SRC.encode()
     assert "candidate.change" not in run.kinds()

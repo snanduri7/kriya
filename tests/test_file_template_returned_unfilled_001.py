@@ -16,6 +16,7 @@ Sealed bytes: tests/fixtures/stage_c_run3 (digest-checked). The run-2 answer for
 """
 import asyncio
 import hashlib
+import json
 import os
 import subprocess
 from unittest.mock import AsyncMock, patch
@@ -34,6 +35,7 @@ from kriya.core import model_runtime
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.plan_schema import EngineeringPlan
+from kriya.workflow.state import GenerationState
 from kriya.workflow.workflow import WorkflowEngine
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "stage_c_run3")
@@ -226,3 +228,162 @@ def test_the_unfilled_template_is_refused_the_developer_is_told_and_the_empty_an
     assert result["quality_gates_passed"] is True, why
     assert (workspace / PATH).read_bytes() == b"", why
     assert FILE_CONTENT_PLACEHOLDER.encode() not in (workspace / PATH).read_bytes()
+
+
+# ------------------------------------------------------ S1-SIBLING-REUSE-001: the valid siblings of a refused answer, through a real unit
+#
+# MEASURED (Stage C run 20261119T200403-218cbbf6, unit s1, generate.terminal.log 20:07-20:10): the unit planned three new files. Attempt 1
+# returned a pom.xml and a broker configuration and, for system.properties, the unfilled template; the operation contract refused the
+# attempt before any write. Attempt 2 (targeted) wrote system.properties only and failed "INCOMPLETE GENERATION ... never written:
+# pom.xml, qpid-initial-config.json". Attempt 3 generated both files again and passed. Six Developer answers for three files.
+#
+# The correction (attempt.run_attempt's fold-in): content that cleared the operation contract in the attempt just refused for ANOTHER
+# file is part of the next attempt's candidate, so the whole unit is checked, staged, gated and applied together. The same real engine as
+# above; only the model transport and the validator commands are scripted. NOT claimed: reuse after a refusal later than the operation
+# contract, of a file that already exists, or across two consecutive refusals (each of those regenerates, as before).
+
+S1_POM, S1_CONFIG = "pom.xml", "src/main/resources/qpid-initial-config.json"
+S1_FILES = [S1_POM, S1_CONFIG, PATH]
+S1_DESCRIPTION = "Create the Maven project, the broker's initial configuration and its system.properties resource"
+S1_VERIFICATION = {"type": "tool", "tool_name": "compile", "description": "the project compiles"}
+POM_TEXT = ('<project xmlns="http://maven.apache.org/POM/4.0.0">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>com.example</groupId>\n'
+            "  <artifactId>app</artifactId>\n  <version>1.0</version>\n  <properties>\n"
+            "    <maven.compiler.release>17</maven.compiler.release>\n  </properties>\n</project>\n")
+CONFIG_TEXT = '{\n  "name": "broker",\n  "modelVersion": "9.0"\n}\n'
+PLACEHOLDER_ANSWER = f"{OPEN}\n{FILE_CONTENT_PLACEHOLDER}\n{CLOSE}\n"
+
+
+def _s1_plan(order):
+    return EngineeringPlan.model_validate({
+        "plan_id": "p", "kind": "task", "global_invariants": [{"id": "gi1", "statement": "the broker starts on localhost port 5672"}],
+        "acceptance_criteria": [],
+        "subtasks": [{"id": "s1", "description": S1_DESCRIPTION, "execution_method": "model",
+                      "planned_files": [{"path": path, "action": "create"} for path in order], "provides": ["project"],
+                      "relevant_global_invariant_ids": ["gi1"], "verification": [dict(S1_VERIFICATION)]}]})
+
+
+def _asked_for(system_prompt, user_prompt):
+    """The one planned file a Developer request is for: the file whose FILE block the response contract offers, else the one the request
+    names (first mention when several are named)."""
+    offered = [path for path in S1_FILES if f'<<<KRIYA:FILE path="{path}">>>' in (system_prompt or "")]
+    if len(offered) == 1:
+        return offered[0]
+    text = (system_prompt or "") + "\n" + (user_prompt or "")
+    named = [path for path in S1_FILES if path in text]
+    assert named, f"a Developer request that names none of {S1_FILES}: {text[:400]}"
+    return min(named, key=text.find)
+
+
+def _run_the_s1_unit(tmp_path, answers, order=tuple(S1_FILES)):
+    """Unit s1 (three planned creations in ``order``, nothing of them on disk) through ``WorkflowEngine.run_generation_workflow``.
+    ``answers`` maps a path to the Developer's answers for it, in order (the last one repeats). Returns the workspace, the path of every Developer request in
+    order, the events, the result, and the run's own account for assertion messages."""
+    model_runtime.clear_model_runtime_cache()
+    cfg = AppConfig()
+    cfg.llm.model = "dev-model"
+    cfg.llm.context_window = 32768
+    cfg.llm.extra_body = {}
+    cfg.llm_chain = []
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    cfg.knowledge.offline_mode = True               # no registry lookup from a test
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.logging.file_enabled = False
+    cfg.logging.run_file_enabled = False
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "README.md").write_text("base\n")
+    _git(workspace, "init", "-q")
+    _git(workspace, "add", "-A")
+    _git(workspace, "commit", "-qm", "base")
+    requests, structured, other, events = [], [], [], []
+
+    async def transport(llm, client, model, system_prompt, user_prompt, *args, **kwargs):
+        del llm, client, model, args, kwargs
+        first = (system_prompt or "").splitlines()[0] if system_prompt else ""
+        if "File List Planner" in first:
+            content = json.dumps({"files": list(order)})
+        elif "Developer Agent" in first:
+            path = _asked_for(system_prompt, user_prompt)
+            requests.append(path)
+            structured.append(wants_structured(system_prompt))
+            given = answers[path]
+            content = given[min(requests.count(path), len(given)) - 1]
+        else:
+            other.append(first[:80])
+            content = "Review: Approved"
+        tokens = len(((system_prompt or "") + (user_prompt or "")).encode()) * 2 // 7
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": tokens, "completion_tokens": 5,
+                "finish_reason": "stop", "provider_metadata": {}}
+
+    real_record = GenerationState.record_event
+
+    def record(state, event):
+        events.append(event)
+        return real_record(state, event)
+
+    passing = {"success": True, "output": "ok"}
+    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    with patch.object(LLMClient, "_request_once", new=transport), \
+         patch.object(GenerationState, "record_event", new=record), \
+         patch("kriya.tools.lsp.find_jdtls", return_value=None), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: dict(passing)), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", new=lambda *a, **k: dict(passing)), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests",
+               new=lambda *a, **k: {"success": True, "output": "no tests ran"}):
+        result = asyncio.run(engine.run_generation_workflow(
+            goal="Create the Maven project with the broker's configuration resources.", workspace_path=str(workspace),
+            predetermined_plan=S1_DESCRIPTION, predetermined_design="", predetermined_architect_files=list(order),
+            allowed_write_relpaths=list(order), structured_plan=_s1_plan(order), current_subtask_id="s1",
+            required_verification=[dict(S1_VERIFICATION)], approval_callback=AsyncMock(return_value=True),
+            knowledge_risk_confirmed=True))      # see _run_the_unit: a unit of a resolved plan
+    said = {key: str(result.get(key))[:600] for key in ("status", "failure_category", "error", "quality_gates_passed", "files",
+                                                        "environment_failure", "no_progress_reason", "gap_report", "last_failure")
+            if isinstance(result, dict) and result.get(key) is not None}
+    reuse = [(event.attempt, event.details) for event in events if event.kind == "candidate.siblings_reused"]
+    why = f"developer requests={requests} structured={structured} other model calls={other} result={said} reuse events={reuse}"
+    assert all(structured), why
+    return workspace, requests, events, result, why
+
+
+def _reused(events):
+    return [event for event in events if event.kind == "candidate.siblings_reused"]
+
+
+@_scripted_success
+def test_run5_s1_the_two_valid_siblings_of_a_refused_answer_complete_the_unit_without_being_generated_again(tmp_path):
+    """The sealed sequence: two valid files and the unfilled template, then the empty file. The siblings are asked for once."""
+    workspace, requests, events, result, why = _run_the_s1_unit(tmp_path, {
+        S1_POM: [sentinel(S1_POM, content=POM_TEXT)], S1_CONFIG: [sentinel(S1_CONFIG, content=CONFIG_TEXT)],
+        PATH: [PLACEHOLDER_ANSWER, sentinel(PATH, content="")]})
+    assert requests == [S1_POM, S1_CONFIG, PATH, PATH], f"one answer per sibling, two for the refused file - {why}"
+    [reuse] = _reused(events)
+    assert reuse.details == {"paths": [S1_POM, S1_CONFIG], "cleared_in_attempt": 1, "returned_this_attempt": [PATH]}, why
+    assert reuse.attempt == 2, why
+    assert result["quality_gates_passed"] is True, why
+    assert sorted(result["files"]) == sorted(S1_FILES), why                      # the complete unit, applied together
+    assert (workspace / S1_POM).read_text() == POM_TEXT and (workspace / S1_CONFIG).read_text() == CONFIG_TEXT, why
+    assert (workspace / PATH).read_bytes() == b"", why
+    [verified] = result["verification_results"]
+    assert (verified["type"], verified["tool_name"], verified["passed"]) == ("tool", "compile", True), why
+
+
+@_scripted_success
+def test_a_sibling_answered_after_the_refused_file_was_never_checked_and_is_generated_again(tmp_path):
+    """Negative control (unchecked content is never carried). MEASURED (owner check a-prep/check.v1): the Developer answers this unit's
+    files in the order pom.xml, broker configuration, system.properties, whatever order the plan lists them in. Here the SECOND answer
+    is the unfilled template, so the third file's answer of attempt 1 was never evaluated by the operation contract: only the first
+    file is reused; the third is asked for again."""
+    unfilled_config = f'<<<KRIYA:FILE path="{S1_CONFIG}">>>\n{FILE_CONTENT_PLACEHOLDER}\n{CLOSE}\n'
+    workspace, requests, events, result, why = _run_the_s1_unit(tmp_path, {
+        S1_POM: [sentinel(S1_POM, content=POM_TEXT)], S1_CONFIG: [unfilled_config, sentinel(S1_CONFIG, content=CONFIG_TEXT)],
+        PATH: [sentinel(PATH, content="")]})
+    assert requests[:3] == [S1_POM, S1_CONFIG, PATH], f"the scenario: the refused answer is followed by another file's - {why}"
+    assert requests.count(S1_POM) == 1, f"the checked sibling is asked for once - {why}"
+    assert [event.details["paths"] for event in _reused(events)] == [[S1_POM]], f"the unchecked sibling is never reused - {why}"
+    assert requests.count(PATH) == 2, f"the unchecked sibling is generated again - {why}"
+    assert result["quality_gates_passed"] is True, why
+    assert (workspace / S1_POM).read_text() == POM_TEXT and (workspace / S1_CONFIG).read_text() == CONFIG_TEXT, why
+    assert (workspace / PATH).read_bytes() == b"", why
