@@ -527,6 +527,9 @@ class GenerationState:
     # fallback selection, triage and routing read); the primary has its own flag because nothing else can skip it.
     unavailable_candidates: Dict[str, str] = field(default_factory=dict)
     primary_candidate_unavailable: Optional[str] = None
+    # OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001: the invocation's initial escalation position was a preference no fallback could
+    # serve; the selection (fallback_decision, its one writer) stayed on the primary and the position is the retry count again.
+    initial_escalation_declined: bool = False
     # PRD-021: grounded ownership findings for this run's planned new files
     # (kriya/workflow/ownership_findings.py) - advisory evidence for the
     # Developer and the Reviewer, never a gate.

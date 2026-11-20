@@ -422,6 +422,7 @@ class StageContext:
     strict_spec_compliance: bool = False
     execution_scope: str = ""
     reopened_owner: bool = False
+    initial_escalation_position: int = 0     # the enforce loop's repeated-recovery preference (fallback_decision.escalation_position)
     dependent_verification_pending: bool = False   # an owner reopened in an unsettled recovery episode: no stage-7 learning from its local success
     carried_candidate: Any = None            # verifier_replay.ReplayHandle or None (see run_generation_workflow)
     capture_refused_candidate: bool = False

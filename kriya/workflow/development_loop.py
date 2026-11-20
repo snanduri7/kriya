@@ -563,6 +563,7 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
         strict_spec_compliance=strict_spec_compliance,
         execution_scope=execution_scope,
         reopened_owner=reopened_owner,
+        initial_escalation_position=ctx.initial_escalation_position,
         carried_candidate=ctx.carried_candidate,
         capture_refused_candidate=ctx.capture_refused_candidate,
         verifier_repair=ctx.verifier_repair,

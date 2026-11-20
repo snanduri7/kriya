@@ -1640,6 +1640,9 @@ class AttemptContext:
     # The enforce controller's owner reopen (verification_owner_recovery): read by
     # workflow.py's no-change settlement (an identical regeneration is a stop).
     reopened_owner: bool = False
+    # OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001: the llm_chain position this invocation's full-set attempts start from (0 = the
+    # primary). Set by the enforce loop only; read only by fallback_decision.escalation_position.
+    initial_escalation_position: int = 0
     # Verifier replay (kriya/workflow/verifier_replay.py): the handle whose files replace generation on attempt 1, and whether a
     # stopping unit keeps its refused candidate for the enforce loop.
     carried_candidate: Optional[Any] = None

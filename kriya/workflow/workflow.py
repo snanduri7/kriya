@@ -2309,6 +2309,9 @@ class WorkflowEngine:
         # so an identical regeneration is a typed no-progress stop, never a
         # repairable no-change refusal.
         reopened_owner: bool = False,
+        # OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001: the llm_chain position this invocation's full-set attempts start from
+        # (0 = the primary); only the enforce loop passes another value (fallback_decision.escalation_position reads it).
+        initial_escalation_position: int = 0,
         # OWNER-RECOVERY-LOCAL-SUCCESS-KNOWLEDGE-PROMOTED-BEFORE-DEPENDENT-VERIFICATION-001 (run 9): this invocation is an owner reopened
         # inside a recovery episode whose dependent verification has not run yet. Its local success is not a verified success, so the
         # learning of stage 7 (skill accrual, lesson extraction) is not performed for it.
@@ -3151,6 +3154,7 @@ class WorkflowEngine:
             authorized_semantic_regions=authorized_semantic_regions, required_verification=required_verification,
             runtime_verification_required=runtime_verification_required, strict_spec_compliance=strict_spec_compliance,
             execution_scope=execution_scope, reopened_owner=reopened_owner, migration_resolution=migration_resolution,
+            initial_escalation_position=initial_escalation_position,
             dependent_verification_pending=dependent_verification_pending,
             carried_candidate=carried_candidate, capture_refused_candidate=capture_refused_candidate,
             verifier_repair=verifier_repair, verifier_semantic=verifier_semantic, mutation_approvals=mutation_approvals,

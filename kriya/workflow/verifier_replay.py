@@ -121,6 +121,20 @@ def regressed_tests(before: Optional[RefusedCandidate], after: Optional[RefusedC
     return tuple(sorted(f"{path}::{identity}" for path, identity in before.passed_tests() & after.failed_tests()))
 
 
+def repeated_failed_tests(before: Optional[RefusedCandidate], after: Optional[RefusedCandidate]) -> Tuple[str, ...]:
+    """OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001: the test identities that FAILED when ``before`` was refused and are exactly the
+    failures of ``after``, as ``path::identity``. Under ``regressed_tests``'s own conditions (the SAME verifier bytes, per-test outcomes on
+    both sides) and only when the two failing sets are equal and not empty; otherwise () - a changed, wider, narrower or unknown failure
+    is not a repetition."""
+    if before is None or after is None or not before.test_outcomes or not after.test_outcomes:
+        return ()
+    same = {file.path: file.raw_sha256 for file in before.files} == {file.path: file.raw_sha256 for file in after.files}
+    failed = before.failed_tests()
+    if not same or not before.files or not failed or failed != after.failed_tests():
+        return ()
+    return tuple(sorted(f"{path}::{identity}" for path, identity in failed))
+
+
 def capture_refused_candidate(state: Any, worktree_path: str, outcomes: Optional[Iterable[Mapping[str, Any]]] = None) -> Optional[RefusedCandidate]:
     """The refused candidate of a unit that is stopping, read from its sandbox before the sandbox is removed. None unless EVERY written file is
     captured exactly (strict UTF-8, no newline translation: the PRD-008 rule for a reusable candidate) and its bytes still have the raw digest

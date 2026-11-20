@@ -668,3 +668,88 @@ def test_the_regression_reason_codes_are_a_closed_table():
     assert verifier_replay.OWNER_REPAIR_REGRESSION_CODES == ("OWNER_REPAIR_REGRESSED_ACCEPTED_VERIFIER", "OWNER_REPAIR_REGRESSED_RESTORE_UNAVAILABLE")
     assert verifier_replay.OWNER_REPAIR_REGRESSION_FAILURE_CATEGORY == "owner_repair_regressed"
     assert verifier_replay.OWNER_REPAIR_RESTORE_ROLE == "owner_repair_restore"
+
+
+# ----------------------------------------------------------------------------- OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001
+
+HEADER = "com.example.ProtocolParserTest.testHeader"
+ROUND_TRIP_FAILS = (TEST, (ROUND_TRIP, HEADER), (ROUND_TRIP,))
+BOTH_FAIL_OUTPUT = "[ERROR] Tests run: 2, Failures: 0, Errors: 2\njava.nio.BufferOverflowException at testRoundTrip, testHeader\n"
+ESCALATION_ROLES = ["planned", "planned", "owner_recovery", "verifier_replay", "owner_recovery", "verifier_replay",
+                    "owner_recovery", "verifier_replay"]
+
+
+def _owner_positions(shape: Run7Shape) -> List[Any]:
+    return [call.get("initial_escalation_position") for call in shape.calls if call["execution_scope"].endswith("role=owner_recovery")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcomes,expected", [
+    ({OVERFLOW: ROUND_TRIP_FAILS}, [0, 1, 1]),      # the run-7 shape: every repair is followed by the same failing test
+    ({}, [0, 0, 0]),                                # control: no per-test outcome is known, so nothing is a repetition
+])
+async def test_run7_shape_only_a_repair_followed_by_the_same_failing_tests_prefers_the_fallback(tmp_path, outcomes, expected):
+    """The first recovery of the key is the primary's. A later recovery of the SAME (consumer, owner, files) key, after a locally accepted
+    repair that the same verifier bytes answered with the same non-empty failing set, starts at chain position 1. Nothing else moves: the
+    same eight invocations, the same roles, the same cap, and no other invocation is given a position."""
+    shape = Run7Shape(NEVER_FIXED, _overflow_until_fixed, refuse=_refused_with(outcomes))
+    result = await _run(tmp_path, shape)
+
+    assert shape.roles() == ESCALATION_ROLES and shape.units() == OLD_BEHAVIOUR["unit_invocations"], shape.roles()
+    assert _owner_positions(shape) == expected, shape.roles()
+    assert [call.get("initial_escalation_position") for call in shape.calls
+            if not call["execution_scope"].endswith("role=owner_recovery")] == [0, 0, 0, 0, 0]
+    assert shape.units().count("s3") == 1 + _MAX_PLAN_SCOPE_REVISION_ATTEMPTS == 4          # the convergence limit is unchanged
+    assert result.legacy_result["status"] != "success"
+    assert [event["owner_recovery_passed"] for event in result.legacy_result["plan_recovery_events"]] == OLD_BEHAVIOUR["owner_recovery_passed"]
+
+
+@pytest.mark.asyncio
+async def test_a_repair_followed_by_a_different_failing_set_stays_on_the_primary_until_that_set_repeats(tmp_path):
+    """Two tests fail before the first repair, one after it: a CHANGED failure, so the second recovery is the primary's again. The same one
+    test fails after the second repair too: that is a repetition, and only the third recovery prefers the fallback."""
+    def verdict(parser_text: str, replayed: bool) -> Any:
+        return ("owner", BOTH_FAIL_OUTPUT if parser_text == NEVER_FIXED[0] else OVERFLOW)
+
+    shape = Run7Shape(NEVER_FIXED, verdict, refuse=_refused_with({
+        BOTH_FAIL_OUTPUT: (TEST, (ROUND_TRIP, HEADER), (ROUND_TRIP, HEADER)), OVERFLOW: ROUND_TRIP_FAILS}))
+    await _run(tmp_path, shape)
+
+    assert _owner_positions(shape) == [0, 0, 1], shape.roles()
+
+
+def test_a_repetition_is_the_same_verifier_bytes_failing_exactly_the_same_non_empty_set():
+    def refused(text: str, failed: Any, executed: Any = (ROUND_TRIP, HEADER)) -> RefusedCandidate:
+        return RefusedCandidate(files=(CarriedFile(TEST, text, raw_digest(text.encode("utf-8"))),), binding_digest="binding",
+                                failure_type="targeted_test", failure_digest="digest",
+                                test_outcomes=((TEST, tuple(executed), tuple(failed)),) if executed else ())
+
+    before = refused("verifier", (ROUND_TRIP,))
+    assert verifier_replay.repeated_failed_tests(before, refused("verifier", (ROUND_TRIP,))) == (f"{TEST}::{ROUND_TRIP}",)
+    assert verifier_replay.repeated_failed_tests(before, refused("another verifier", (ROUND_TRIP,))) == ()   # other bytes
+    assert verifier_replay.repeated_failed_tests(before, refused("verifier", (HEADER,))) == ()                # another test
+    assert verifier_replay.repeated_failed_tests(before, refused("verifier", (ROUND_TRIP, HEADER))) == ()      # a wider set
+    assert verifier_replay.repeated_failed_tests(refused("verifier", (ROUND_TRIP, HEADER)), before) == ()      # a narrower set
+    assert verifier_replay.repeated_failed_tests(refused("verifier", ()), refused("verifier", ())) == ()       # nothing failed
+    assert verifier_replay.repeated_failed_tests(before, refused("verifier", (ROUND_TRIP,), executed=())) == ()  # no per-test outcome
+    assert verifier_replay.repeated_failed_tests(None, before) == () == verifier_replay.repeated_failed_tests(before, None)
+
+
+
+@pytest.mark.asyncio
+async def test_an_unaccepted_byte_identical_owner_repair_ends_the_episode_and_no_recovery_is_given_a_preference(tmp_path, caplog):
+    """Negative control (MEASURED): the first recovery returns the owner's file byte-identical. That is RECOVERY_NO_PROGRESS, not a locally
+    accepted repair, and the episode ends there: no replay, no further recovery of the key. So a repair that was not accepted never
+    reaches the comparison that gives a later recovery its fallback preference, and the one recovery that ran is the primary's."""
+    unchanged_first = [NEVER_FIXED[0], NEVER_FIXED[0], *NEVER_FIXED[1:]]
+    shape = Run7Shape(unchanged_first, _overflow_until_fixed, refuse=_refused_with({OVERFLOW: ROUND_TRIP_FAILS}))
+    with caplog.at_level("WARNING", logger="kriya.workflow.workflow_controller"):
+        result = await _run(tmp_path, shape)
+
+    assert shape.roles() == ["planned", "planned", "owner_recovery"] and shape.units() == ["s3", "s6", "s3"], shape.roles()
+    assert _owner_positions(shape) == [0]
+    assert [call.get("initial_escalation_position") for call in shape.calls] == [0, 0, 0]
+    refusals = [message for message in caplog.messages if message.startswith("RECOVERY_NO_PROGRESS ")]
+    assert len(refusals) == 1 and "owner=s3 generation=0" in refusals[0] and PARSER in refusals[0], caplog.messages
+    assert shape.replayed == []                                              # the unaccepted repair was never checked by a replay
+    assert result.legacy_result["status"] != "success" and _statuses(result)["s6"] != "completed"

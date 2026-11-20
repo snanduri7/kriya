@@ -105,6 +105,19 @@ def _raise_fallback_incompatible(deps: FallbackDeps, state: RunState, requested:
     ))
 
 
+def escalation_position(state: RunState, ctx: AttemptCtx, retry_count: int) -> int:
+    """OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001: the llm_chain position (resolve_fallback_model's own: 0 = the primary, n = from
+    the n-th configured fallback) of a full-set attempt whose retry-count position is ``retry_count``. The ONE place the invocation's
+    ``initial_escalation_position`` is read: the enforce loop sets it for a repeated recovery of an owner whose accepted repair was
+    followed by the same failing tests, and the position is then never below it - until the selection finds no fallback able to serve
+    that preference (``initial_escalation_declined``). The retry count itself is not touched. Selection (below) and failure triage
+    (retry_strategy) both read this, so they name the same model."""
+    initial = getattr(ctx, "initial_escalation_position", 0)
+    if not isinstance(initial, int) or initial <= 0 or state.initial_escalation_declined or not ctx.chain:
+        return retry_count
+    return max(retry_count, initial)
+
+
 def _select_developer_fallback(deps: FallbackDeps, state: RunState, ctx: AttemptCtx, retry_count: int, *,
                               targets: Iterable[str] = (), allow_primary: bool = False) -> Any:
     """PRD-017: the llm_chain fallback this attempt escalates to, chosen
@@ -123,9 +136,17 @@ def _select_developer_fallback(deps: FallbackDeps, state: RunState, ctx: Attempt
     verdict). When every remaining fallback was skipped for that reason
     alone and ``allow_primary`` (the full-set route), the attempt stays on
     the primary (None) instead of ending; a run-wide rejection among them
-    keeps PRD-017's terminal semantics."""
+    keeps PRD-017's terminal semantics.
+
+    OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001: the position is ``escalation_position``. When it is above ``retry_count`` only
+    because of the invocation's initial position, it is a PREFERENCE: with no fallback able to serve it the attempt stays on the
+    primary (None, recorded) and the preference is declined for the invocation - it never ends a unit the retry count alone would
+    have sent to the primary."""
     existing_target_sizes, fallback_incompatibilities, patch_only_files = deps.load_fallback_selection()
 
+    actual_retry_count = retry_count
+    retry_count = escalation_position(state, ctx, actual_retry_count)
+    preferred = retry_count > actual_retry_count
     if retry_count <= 0 or not ctx.chain:
         return None
     start = min(retry_count - 1, len(ctx.chain) - 1)
@@ -157,7 +178,11 @@ def _select_developer_fallback(deps: FallbackDeps, state: RunState, ctx: Attempt
         "newly_rejected": newly_rejected, "previously_rejected": sorted(
             model for model in state.incompatible_fallbacks if model not in {r["model"] for r in newly_rejected}),
         "patch_rejected": list(patch_rejected.values()),
+        # the position above is the invocation's initial one, not retry history: both are stated
+        **({"initial_escalation_position": retry_count, "actual_retry_count": actual_retry_count} if preferred else {}),
     })
+    if preferred and selected is None:
+        state.initial_escalation_declined = True
     if selected is requested:
         return selected
     evaluated_now = {item["model"]: item for item in newly_rejected}
@@ -170,7 +195,7 @@ def _select_developer_fallback(deps: FallbackDeps, state: RunState, ctx: Attempt
                 "model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model]),
             }
     rejected = list(rejected.values())
-    stays_on_primary = selected is None and allow_primary and all(r["model"] in patch_rejected for r in rejected)
+    stays_on_primary = selected is None and allow_primary and (preferred or all(r["model"] in patch_rejected for r in rejected))
     deps._record_fallback_selection(state, phase="escalation", requested=requested.model,
                                selected=selected.model if selected is not None else None, rejected=rejected,
                                primary_route=stays_on_primary)

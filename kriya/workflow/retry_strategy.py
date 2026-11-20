@@ -66,6 +66,7 @@ from kriya.workflow.failure_grounding import (
     resolve_repository_locator_files,
     resolve_unique_locator_artifacts,
 )
+from kriya.workflow.fallback_decision import escalation_position
 from kriya.workflow.file_resolution import (
     IncompleteGenerationError,
     classify_api_recovery_file_roles,
@@ -1480,7 +1481,8 @@ async def _record_attempt_failure(
             attribution = await attribute_failure(
                 failure,
                 known_attribution_files,
-                state.budgets.retry_count,
+                # the position the Developer's full-set selection used (fallback_decision), not a second formula
+                escalation_position(state, ctx, state.budgets.retry_count),
                 ctx.chain,
                 ctx.developer.llm,
                 lambda fp: read_worktree_file(ctx.worktree_path, fp),

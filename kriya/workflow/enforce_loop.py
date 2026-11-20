@@ -105,6 +105,7 @@ from kriya.workflow.verifier_replay import (
     ReplayHandle,
     failure_identity,
     regressed_tests,
+    repeated_failed_tests,
     replay_facts_block,
 )
 from kriya.workflow.verifier_replay import goal_digest as replay_goal_digest
@@ -1879,6 +1880,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # episode as it was BEFORE the first owner reopen (its per-test outcomes against the unrepaired owner); the record of a refused
         # regressive repair for the run's result; and the typed stop that ends the run when one was refused.
         pre_repair_verifiers: Dict[str, RefusedCandidate] = {}
+        # OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001: (consumer, owner, files) -> the consumer's refused candidate an owner repair
+        # of that key was locally ACCEPTED against. In memory only: a resumed run starts every key on the primary again.
+        accepted_repair_refusals: Dict[Tuple[str, str, Tuple[str, ...]], RefusedCandidate] = {}
         owner_repair_regression_record: Optional[Dict[str, Any]] = None
         owner_repair_regression_stop: Optional[Dict[str, Any]] = None
         # VERIFIER-SEMANTIC-AUTHORITY-001 (kriya/workflow/verifier_semantic.py): the run's ONE generated-verifier semantic ledger. Every unit
@@ -2011,6 +2015,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             carried_candidate: Optional[ReplayHandle] = None,
             mutation_scope: Optional[Sequence[str]] = None,
             verifier_repair: Optional[VerifierRepairTransaction] = None,
+            initial_escalation_position: int = 0,
         ) -> Dict[str, Any]:
             target_goal = deps.build_subtask_goal_text(
                 target, target_position, total, plan=plan, grounding_goal=goal,
@@ -2122,6 +2127,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # The owner's local success is not a verified success while the unit that reopened it has not been verified again:
                 # stage-7 learning is not performed for these invocations.
                 dependent_verification_pending=execution_role in DEPENDENT_VERIFICATION_PENDING_ROLES,
+                initial_escalation_position=initial_escalation_position,
                 grounding_goal=goal,
                 migration_resolution=migration_resolution,
                 # Verifier replay (kriya/workflow/verifier_replay.py): a unit that owns files hands its refused candidate back when
@@ -3908,10 +3914,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             required_owner_files=must_change_files,
                             scope_conflict=scope_conflict,
                         )
+                    # OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001: an earlier repair of this exact key was locally accepted and
+                    # the consumer then failed the SAME non-empty set of tests of the same verifier bytes: this recovery prefers the
+                    # first configured fallback. The retry count, every budget and the convergence limit are as they were; the
+                    # selection owner decides whether a fallback can serve it (fallback_decision.escalation_position).
+                    consumer_refused = replay_handles.get(subtask.id)
+                    consumer_refused_candidate = consumer_refused.candidate if consumer_refused is not None else None
+                    repeated_failure = repeated_failed_tests(
+                        accepted_repair_refusals.get(generation_key), consumer_refused_candidate)
+                    if repeated_failure:
+                        deps.logger.warning(
+                            "OWNER_RECOVERY_FALLBACK_PREFERRED requirement_id=%s owner=%s generation=%d repeated_failed_tests=%s",
+                            candidate_requirement_id, owner_id, generation, list(repeated_failure))
                     if owner_result is None:
                         owner_result = await _invoke_bounded_subtask(
                             owner, owner_position, recovery_context=recovery_context,
                             execution_role="owner_recovery", mutation_scope=required_owner_files,
+                            initial_escalation_position=1 if repeated_failure else 0,
                         )
                     owner_declared = {pf.path for pf in owner.planned_files}
                     owner_undeclared = sorted(
@@ -3951,6 +3970,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         and not recovery_no_progress
                         and deps._evaluate_subtask_verification(owner, owner_result)[0] == deps.SubtaskStatus.COMPLETED
                     )
+                    if owner_local_accepted and consumer_refused_candidate is not None:
+                        accepted_repair_refusals[generation_key] = consumer_refused_candidate
+                    else:
+                        accepted_repair_refusals.pop(generation_key, None)
                     if recovery_no_progress:
                         deps.logger.warning(
                             "RECOVERY_NO_PROGRESS requirement_id=%s owner=%s generation=%d - "

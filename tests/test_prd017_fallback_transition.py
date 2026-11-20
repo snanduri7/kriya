@@ -680,3 +680,137 @@ async def test_a_required_fallback_that_none_can_serve_ends_typed_with_primary_c
     selection = [e["details"] for e in events if e["kind"] == "model.fallback_selection"]
     assert selection and selection[-1]["selected"] is None
     assert selection[-1]["rejected"][0]["model"] == "fallback-1"
+
+
+# ----------------------------------------------------------------------------- OWNER-RECOVERY-REPEATED-FAILURE-ESCALATION-001
+
+def _preferring(tmp_path, cfg, position=1):
+    ctx = _ctx(str(tmp_path), cfg, DeveloperAgent("developer", LLMClient(cfg)))
+    ctx.initial_escalation_position = position      # what the enforce loop passes for a repeated owner recovery
+    return ctx
+
+
+def _decisions(monkeypatch):
+    from kriya.core.attempt_evidence import scope as attempt_evidence_scope
+
+    recorded = []
+    monkeypatch.setattr(attempt_evidence_scope, "record_fallback_decision", recorded.append)
+    return recorded
+
+
+def test_an_initial_escalation_position_selects_the_first_fallback_while_the_retry_count_stays_zero(tmp_path, monkeypatch):
+    from kriya.workflow.attempt import _select_developer_fallback
+    from kriya.workflow.attribution import resolve_fallback_model
+    from kriya.workflow.fallback_decision import escalation_position
+
+    _exact_ollama(monkeypatch)
+    cfg, recorded = _two_fallback_cfg(), _decisions(monkeypatch)
+    ctx, state = _preferring(tmp_path, cfg), GenerationState()
+
+    selected = _select_developer_fallback(state, ctx, state.budgets.retry_count, targets=[], allow_primary=True)
+
+    assert selected is not None and selected.model == FALLBACK
+    # no history is invented and no budget is charged by the selection: the count is still zero, the allowance untouched
+    assert (state.budgets.retry_count, state.budgets.fallback_attempts_used, state.initial_escalation_declined) == (0, 0, False)
+    (decision,) = recorded
+    assert (decision["selected"], decision["initial_escalation_position"], decision["actual_retry_count"]) == (FALLBACK, 1, 0)
+    # failure triage reads the same position, so it names the same model
+    position = escalation_position(state, ctx, state.budgets.retry_count)
+    assert position == 1 and resolve_fallback_model(position, ctx.chain, state.incompatible_fallbacks).model == FALLBACK
+    # control: the same call for an invocation with no initial position is the primary's and records nothing, as before
+    plain, recorded[:] = _ctx(str(tmp_path), cfg, DeveloperAgent("developer", LLMClient(cfg))), []
+    assert _select_developer_fallback(GenerationState(), plain, 0, targets=[], allow_primary=True) is None and recorded == []
+    assert escalation_position(GenerationState(), plain, 0) == 0
+
+
+def test_an_initial_escalation_position_no_fallback_can_serve_stays_on_the_primary_and_is_declined(tmp_path, monkeypatch):
+    """The preference never ends a unit: with every configured fallback proven unable to serve, the attempt is the primary's (no typed
+    terminal), the preference is declined for the invocation, and triage is on the primary too. The ordinary ladder is untouched: the
+    same state at a REAL retry count of 1 still ends on PRD-017's typed failure."""
+    from kriya.workflow.attempt import _select_developer_fallback
+    from kriya.workflow.attribution import resolve_fallback_model
+    from kriya.workflow.fallback_decision import escalation_position
+
+    _exact_ollama(monkeypatch)
+    cfg = _two_fallback_cfg()
+    cfg.runtime_profile = "production"
+    _qualify(cfg, FALLBACK, anchored_edit_protocol=mq.FAIL)
+    ctx, state = _preferring(tmp_path, cfg), GenerationState()
+    state.attempt_number = 1
+
+    assert _select_developer_fallback(state, ctx, 0, targets=[], allow_primary=True) is None
+    assert state.initial_escalation_declined is True and set(state.incompatible_fallbacks) == {FALLBACK, SECOND}
+    assert (state.budgets.retry_count, state.budgets.fallback_attempts_used) == (0, 0)
+    (event,) = [e for e in state.run_events if e.kind == "model.fallback_selection"]
+    assert (event.details["selected"], event.details["primary_route"]) == (None, True)
+    position = escalation_position(state, ctx, 0)
+    assert position == 0 and resolve_fallback_model(position, ctx.chain, state.incompatible_fallbacks) is None
+    assert _select_developer_fallback(state, ctx, 0, targets=[], allow_primary=True) is None      # declined: asked nothing again
+    assert len([e for e in state.run_events if e.kind == "model.fallback_selection"]) == 1
+    with pytest.raises(QualityGateFailure) as refused:
+        _select_developer_fallback(state, ctx, 1, targets=[], allow_primary=True)
+    assert refused.value.failure.diagnostics["reason_code"] == FALLBACK_MODEL_INCOMPATIBLE
+
+
+def test_the_escalation_position_is_never_below_the_retry_count_and_reads_only_a_real_initial_position(tmp_path):
+    from kriya.workflow.fallback_decision import escalation_position
+
+    cfg = _two_fallback_cfg()
+    ctx, state = _preferring(tmp_path, cfg), GenerationState()
+    assert [escalation_position(state, ctx, count) for count in (0, 1, 2, 3)] == [1, 1, 2, 3]
+    ctx.initial_escalation_position = 0
+    assert [escalation_position(state, ctx, count) for count in (0, 1, 2)] == [0, 1, 2]
+    ctx.initial_escalation_position = MagicMock()                    # a bare double's truthy attribute is not a position
+    assert escalation_position(state, ctx, 0) == 0
+    ctx.initial_escalation_position = 1
+    state.initial_escalation_declined = True
+    assert escalation_position(state, ctx, 0) == 0
+    state.initial_escalation_declined, ctx.chain = False, []
+    assert escalation_position(state, ctx, 0) == 0                   # no configured fallback: nothing to prefer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("position,first_developer_model", [(1, "fallback-1"), (0, None)])
+async def test_a_real_unit_sends_its_first_developer_request_to_the_invocations_escalation_position(
+        tmp_path, monkeypatch, position, first_developer_model):
+    """End to end through WorkflowEngine, the same scripted run as the escalation test above (nothing disqualified): with an initial
+    position of 1 the unit's FIRST Developer request goes to the first configured fallback; with 0 (every ordinary invocation) it goes to
+    the primary, as before. Planner and Architect are the primary's either way."""
+    from kriya.workflow.workflow import WorkflowEngine
+
+    _exact_ollama(monkeypatch)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm_chain = [FallbackModelConfig(model="fallback-1"), FallbackModelConfig(model="fallback-2")]
+    cfg.paths.skills = str(tmp_path / "skills")
+    llm = LLMClient(cfg)
+    model_overrides = []
+
+    async def mock_complete(*args, **kwargs):
+        model_overrides.append(kwargs.get("model_override"))
+        n = len(model_overrides)
+        if n == 1:
+            return "Step 1: Write code"
+        if n == 2:
+            return "Design: Write math.py"
+        system = args[0] if args else kwargs.get("system_prompt", "")
+        if n == 3:
+            return as_requested("def add(a,b)\n    return a+b", system, "math.py")
+        if n in (4, 5, 6, 7):
+            return as_requested("FILE CONTENT:\ndef add(a,b)\n    return a+b", system, "math.py")
+        if n == 8:
+            return as_requested("FILE CONTENT:\ndef add(a,b):\n    return a+b", system, "math.py")
+        return "Review: Approved"
+
+    llm.complete = mock_complete
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    res = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(
+        goal="Create math library with fallback chain", workspace_path=str(workspace), initial_escalation_position=position,
+    )
+
+    seen = (res.get("status"), res.get("failure_category"), model_overrides)
+    assert len(model_overrides) >= 3 and model_overrides[:2] == [None, None], seen
+    assert model_overrides[2] == first_developer_model, seen
+
