@@ -18,6 +18,7 @@ build output directory; the JVM's answer is the sealed output.
 import hashlib
 import json
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -301,6 +302,31 @@ def test_no_entry_point_is_required_of_a_library_and_an_ambiguous_plan_says_noth
     assert "planned_entrypoint" not in build_subtask_semantic_context(library, library.subtask_by_id("s1"))
     two = _plan(_unit("s1", "pom.xml"), _unit("s2", APP, ["s1"]), _unit("s3", "src/main/java/com/example/BrokerServer.java", ["s1"]))
     assert all(planned_entrypoint_for(two, unit) is None for unit in two.subtasks)
+
+
+def test_one_entry_point_file_planned_by_two_units_is_still_one_entry_point():
+    """PLANNED-ENTRYPOINT-ONE-FILE-SEVERAL-UNITS-001: a file is counted once however many units plan it. Two DIFFERENT entry-point
+    files stay ambiguous (the test above)."""
+    plan = _plan(_unit("s1", "pom.xml"), _unit("s2", APP, ["s1"]), _unit("s3", "src/main/java/com/example/Protocol.java", ["s1"]),
+                 _unit("s4", APP, ["s1", "s2"]))
+    fact = {"file": APP, "planned_by": "s2", "java_main_class": REAL, "authority": PLANNED_ENTRYPOINT_AUTHORITY}
+    assert [planned_entrypoint_for(plan, plan.subtask_by_id(sid)) for sid in ("s1", "s2", "s4")] == [fact, fact, fact]
+    assert planned_entrypoint_for(plan, plan.subtask_by_id("s3")) is None                 # it concerns nobody else
+
+
+def test_run7_plan_the_pom_owner_is_told_the_entry_point_two_units_plan():
+    """MEASURED (Stage C run 20261120T102800-54953f31, the saved plan): s5 and s7 both plan ProtocolApplication.java; s1 wrote the pom
+    without the fact and named com.example.QpidApplication. Now s1, s5 and s7 get the same one fact; no other unit does."""
+    saved = json.loads((Path(__file__).parent / "fixtures" / "stage_c_run7" / "plan.json").read_text(encoding="utf-8"))
+    plan = EngineeringPlan.model_validate(saved)
+    owners = [unit.id for unit in plan.subtasks if any(f.path == APP for f in unit.planned_files)]
+    assert owners == ["s5", "s7"] and [f.path for f in plan.subtask_by_id("s1").planned_files] == ["pom.xml"]
+    fact = {"file": APP, "planned_by": "s5", "java_main_class": REAL, "authority": PLANNED_ENTRYPOINT_AUTHORITY}
+    for sid in ("s1", "s5", "s7"):
+        assert _context(plan, sid)["planned_entrypoint"] == fact, sid
+    for sid in ("s2", "s3", "s4", "s6", "s8"):
+        assert "planned_entrypoint" not in build_subtask_semantic_context(plan, plan.subtask_by_id(sid)), sid
+    assert "QpidApplication" not in json.dumps(_context(plan, "s1"))                    # nothing about the run's wrong name is built in
 
 
 def test_only_a_java_source_under_the_maven_root_implies_a_class_name():

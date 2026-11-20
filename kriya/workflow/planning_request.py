@@ -335,20 +335,25 @@ def planned_entrypoint_for(plan: EngineeringPlan, subtask: Subtask) -> Optional[
 
     The plan's entry point as a fact for ``subtask``, or None. ONE source: the plan's own planned files, read with the existing role
     classifier (``generation_manifest.classify_file_role``). It is established only when EXACTLY ONE planned file of the whole plan
-    has the entry-point role (none: a library, nothing is required of it; two or more: ambiguous, nothing is said). It is given only
-    to the units it concerns: the owner of a build file, and the owner of the entry-point file itself. For a file under Maven's
+    has the entry-point role (none: a library, nothing is required of it; two or more: ambiguous, nothing is said). A FILE is counted
+    once however many units plan it (PLANNED-ENTRYPOINT-ONE-FILE-SEVERAL-UNITS-001, Stage C run 20261120T102800-54953f31: two units
+    planned the same ``ProtocolApplication.java``, the count of planned-file ENTRIES was two, the plan was read as ambiguous, the unit
+    writing ``pom.xml`` was told nothing and named ``com.example.QpidApplication``). It is given only to the units it concerns: the
+    owner of a build file, and every unit that plans the entry-point file itself. For a file under Maven's
     ``src/main/java/`` the class name the path implies is stated too (the path IS that name by the language's convention); for
     anything else only the path. A fact of the plan for the Developer: it closes nothing and is no verdict."""
     planned = [(owner.id, planned_file.path) for owner in plan.subtasks for planned_file in owner.planned_files
                if planned_file.action != FileAction.DELETE and classify_file_role(planned_file.path) is FileRole.ENTRYPOINT]
-    if len(planned) != 1:
+    files = {path.replace("\\", "/") for _owner_id, path in planned}       # one file, however many units plan it
+    if len(files) != 1:
         return None
-    owner_id, path = planned[0]
-    concerns = owner_id == subtask.id or any(
+    owner_ids = list(dict.fromkeys(owner_id for owner_id, _path in planned))   # in plan order
+    path = planned[0][1]
+    concerns = subtask.id in owner_ids or any(
         classify_file_role(planned_file.path) is FileRole.BUILD for planned_file in subtask.planned_files)
     if not concerns:
         return None
-    fact: Dict[str, Any] = {"file": path, "planned_by": owner_id, "authority": PLANNED_ENTRYPOINT_AUTHORITY}
+    fact: Dict[str, Any] = {"file": path, "planned_by": owner_ids[0], "authority": PLANNED_ENTRYPOINT_AUTHORITY}
     normalized = path.replace("\\", "/")
     if normalized.endswith(".java") and _JAVA_MAIN_SOURCE_ROOT in normalized:
         relative = normalized.split(_JAVA_MAIN_SOURCE_ROOT, 1)[1][:-len(".java")]
