@@ -189,7 +189,6 @@ export function CurrentRun() {
   const outcome0 = run.outcome;
   const decided = run.status?.launch.pending_approval?.status;
   const pendingKind = run.status?.launch.pending_approval?.kind;
-  const finishing = !finished && !run.review && !run.runtimeReview && !run.verifierReview && run.status?.launch.phase === 'RUNNING' && decided === 'APPROVED' && pendingKind !== 'runtime_command' && pendingKind !== 'verifier_defect_repair_authorization';
   const viewDetails = (tab?: (typeof OPEN_TARGETS)[keyof typeof OPEN_TARGETS]) => {
     if (finished && run.outcome?.traceRunId) dispatch({ type: 'selectRun', runId: run.outcome.traceRunId });
     else dispatch({ type: 'selectLiveRun', launchId: run.launchId });
@@ -201,13 +200,13 @@ export function CurrentRun() {
   const byYou = finished && phase.state === 'STOPPED' && stoppedByYou(run);
   const cancelHeading = cancelled && ex.cancelState.phase === 'settled' ? (ex.cancelState.folder.kind === 'clean' ? 'Cancelled' : ex.cancelState.folder.kind === 'recovery' ? 'Cancelled — recovery required' : 'Cancelled — folder state not confirmed') : null;
   const completedWords = requirementTruthWords(requirementTruthOf(run.status?.launch.ended));   // ALL_VERIFIED / not recorded: 'Run completed'; open or contradicted: never ordinary green
-  const heading = cancelHeading ?? (cancelling ? 'Cancelling…' : finished ? (phase.state === 'COMPLETED' ? completedWords.heading : phase.state === 'STOPPED' ? (byYou ? 'Stopped by you' : 'Run stopped') : 'Run failed') : finishing ? 'Finishing your change' : phase.label);
+  const heading = cancelHeading ?? (cancelling ? 'Cancelling…' : finished ? (phase.state === 'COMPLETED' ? completedWords.heading : phase.state === 'STOPPED' ? (byYou ? 'Stopped by you' : 'Run stopped') : 'Run failed') : phase.label);
   const live = !finished && !cancelled;
   // A finished, completed run whose requirement truth carries no extra badge already says everything in its heading ("Completed — verified", or plain "Completed"): a second green "Run succeeded"
   // pill beside it is noise (owner ruling 2026-11-09). The process outcome stays in the details; every other state keeps its badge (open requirements, failure, cancelled, in progress, needs you).
   const showOutcomeBadge = !(finished && !cancelled && !byYou && phase.state === 'COMPLETED' && completedWords.badge === null);
   const goalLine = ex.goal.trim() ? <div className="ck-goalline"><span className="muted">Goal</span><div>{ex.goal}</div></div> : null;
-  const nowText = live ? activityText(phase.state, finishing, phase.verifyingApplication === true) : null;
+  const nowText = live ? activityText(phase.state, phase.terminalActivity ?? null, phase.verifyingApplication === true) : null;
   const recent = live ? entries.slice(-RECENT_ACTIVITY) : [];
   // Recover Project is offered only when Kriya itself says the folder needs recovery (never inferred from the run having failed).
   const needsRecovery = ex.preflight.state === 'ready' && ex.preflight.data.recovery.status === 'RECOVERY_AVAILABLE';
@@ -226,7 +225,7 @@ export function CurrentRun() {
       {!live && goalLine}
       {phase.steps && live ? <RunStepper steps={phase.steps} waiting={phase.needsAction} /> : null}
       {live && goalLine}
-      {live && finishing ? <p className="ck-detail" data-testid="finishing-note">{phase.detail}</p> : null}
+      {live && phase.terminalActivity ? <p className="ck-detail" data-testid="terminal-stage-note">{phase.detail}</p> : null}
       {live && !run.review && !run.runtimeReview && !run.verifierReview && nowText ? <div className="ck-now" data-testid="current-activity"><span className="ck-now-label">What Kriya is doing now</span><p>{nowText}</p></div> : null}
       {live && !run.review && !run.runtimeReview && !run.verifierReview && recent.length ? (
         <div className="ck-recent" data-testid="recent-activity">

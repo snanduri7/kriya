@@ -93,8 +93,8 @@ describe('the review of a change: the EXACT change first, then why, verification
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     expect(host.exec!.decisions[0]).toEqual({ workspace: '/fixture/workspace', launch_id: LAUNCH_ID, review_id: REVIEW_ID, candidate_digest: REVIEW_DIGEST, decision: 'approve' });
     expect(Object.keys(host.exec!.decisions[0]!).sort()).toEqual(['candidate_digest', 'decision', 'launch_id', 'review_id', 'workspace']);
-    await within(bar).findByText(/Your change was approved\. Kriya is running final checks\./);
-    expect(within(bar).queryByRole('region', { name: 'Change review' })).toBeNull();
+    await waitFor(() => expect(within(bar).queryByRole('region', { name: 'Change review' })).toBeNull());
+    expect(within(bar).queryByText(/final checks|Finishing|Your change was approved/)).toBeNull();   // an approval is not a stage: nothing claims final checks after it
     expect(bar).toHaveAttribute('data-outcome', ''); // no outcome yet
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));
@@ -122,8 +122,7 @@ describe('the review of a change: the EXACT change first, then why, verification
     fireEvent.click(approve);
     await waitFor(() => expect(host.exec!.decisions.length).toBeGreaterThan(0));
     expect(host.exec!.decisions).toHaveLength(1);
-    await within(bar).findByText(/Your change was approved/);
-    expect(within(bar).queryByRole('button', { name: 'Approve & Continue' })).toBeNull();
+    await waitFor(() => expect(within(bar).queryByRole('button', { name: 'Approve & Continue' })).toBeNull());   // the decision was recorded and the review is gone
     expect(within(bar).queryByRole('button', { name: 'Reject' })).toBeNull();
   });
 

@@ -122,7 +122,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
           </>
         ) : null}
       </div>
-      {decision.state === 'accepted' ? <div className="muted small">Your decision was recorded. Kriya {decision.decision === 'approve' ? 'is running its final checks' : 'is ending the run'}.</div> : null}
+      {decision.state === 'accepted' ? <div className="muted small">Your decision was recorded. Kriya {decision.decision === 'approve' ? 'is continuing the run' : 'is ending the run'}.</div> : null}
       {decision.state === 'refused' && !staleRefusal ? <div role="alert"><strong>Kriya did not accept the decision</strong> ({decision.code}): {decision.message}{REFUSAL_HELP[decision.code] ? ` ${REFUSAL_HELP[decision.code]}` : ''}</div> : null}
     </section>
   );

@@ -203,8 +203,10 @@ export function currentChangeVerification(gates: readonly GateFact[]): Verificat
 // ------------------------------------------------------------------ the current run, in words
 
 /** "Current activity": one plain sentence per user-facing state. It restates the STATE the records support; it adds no detail the records do not carry. */
-export function activityText(state: string, finishingAfterApproval: boolean, verifyingApplication = false): string | null {
-  if (finishingAfterApproval) return 'Running final regression and safety checks…';
+export function activityText(state: string, terminalActivity: 'verifying' | 'applying' | null, verifyingApplication = false): string | null {
+  // The terminal stage is the run record's lifecycle state (runPhase), never "a review was approved": an approval says nothing about what runs next.
+  if (terminalActivity === 'verifying') return 'Running the final checks on the complete change…';
+  if (terminalActivity === 'applying') return 'Applying the verified change to your project…';
   if (verifyingApplication) return 'Running the commands you approved in an isolated worktree and checking what they print…';
   switch (state) {
     case 'STARTING': return 'Starting the run…';

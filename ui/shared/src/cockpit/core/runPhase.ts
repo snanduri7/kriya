@@ -1,7 +1,15 @@
 /**
  * The user-facing phase of the run this window started: the smallest truthful set of states, derived ONLY from what the cockpit already reads from Kriya
- * (the launch record, the pending review, the derived outcome and the tallies of the verified evidence records). Nothing is predicted and nothing is counted
- * that was not recorded: no percentage, no "step n of m", no test count while a run executes. If the records do not say, the state is the coarse RUNNING.
+ * (the launch record, the run record's lifecycle state, the pending review, the derived outcome and the tallies of the verified evidence records). Nothing is
+ * predicted and nothing is counted that was not recorded: no percentage, no "step n of m", no test count while a run executes. If the records do not say, the
+ * state is the coarse RUNNING.
+ *
+ * The GLOBAL step (Planning, Implementing, Verifying, Complete) is the run record's own lifecycle state (kriya/control/run_record.py), never an inference from an
+ * approval: every unit's implementation, build, review and checks happen while the lifecycle is CANDIDATE (Implementing); VERIFYING is the run-wide terminal
+ * verification and the approval of the complete change that follows it; COMMIT_ELIGIBLE / COMMITTED are the application of the verified change; Complete is only
+ * the authoritative successful outcome. A run may go back from VERIFYING to CANDIDATE (a recovery builds another candidate) and the step follows it. Without a
+ * readable lifecycle state nothing is promoted: an approved review never means "final checks", and the checklist is omitted where the records cannot place the run.
+ * This module is the ONE projection of the phase; no component repeats it.
  *
  * Deliberately absent: an "understanding the repository" state. No recorded kind distinguishes repository analysis from the start of planning, so it is not drawn.
  */
@@ -29,6 +37,8 @@ export interface RunPhase {
   lastStage: string | null;
   /** The person approved the reviewed runtime commands and Kriya is executing them: the one running state that has its own sentence for the current-activity line. */
   verifyingApplication?: boolean;
+  /** The run record places the run in its terminal stage and no decision is pending: the run-wide verification is running, or the verified change is being applied. */
+  terminalActivity?: 'verifying' | 'applying';
 }
 
 /** The customer's four words for the four authoritative phases (ids unchanged: planning, editing, validating, finished). */
@@ -39,7 +49,16 @@ const CHECKING_ROLES = new Set(['reviewer', 'run_verifier', 'spec_compliance']);
 const GATE_KINDS = new Set(['gate.result', 'mirror.gate_outcome']);
 const STOPPED_OUTCOMES = new Set(['rejected', 'review_expired', 'approval_required']);
 
+/** The global step of each staged lifecycle state. NEW / RUNNING (not staged yet) and the terminal states (the outcome decides those) have none. */
+const LIFECYCLE_RANK: Readonly<Record<string, 1 | 2 | 3>> = { PLANNING: 1, CANDIDATE: 2, VERIFYING: 3, COMMIT_ELIGIBLE: 3, COMMITTED: 3 };
+
 const count = (p: RunProgress, kind: string): number => p.kinds[kind] ?? 0;
+
+/** The run record's lifecycle state as Kriya reported it in the last status read, or null when no readable run record carries one. */
+export function lifecycleOf(run: RunView): string | null {
+  const record = run.status?.run_record;
+  return record && record.found === true && typeof record.lifecycle_state === 'string' ? record.lifecycle_state : null;
+}
 
 /** How far the recorded evidence shows the run got: 0 nothing read, 1 planning, 2 an attempt opened, 3 a gate outcome recorded for an attempt. */
 export function stageReached(p: RunProgress): 0 | 1 | 2 | 3 {
@@ -67,17 +86,32 @@ export function runPhase(run: RunView): RunPhase {
     if (STOPPED_OUTCOMES.has(kind)) return { ...base, state: 'STOPPED', label: 'Stopped', detail: run.outcome.detail, tone: 'warn', terminal: true, steps: null, lastStage };
     return { ...base, state: 'FAILED', label: 'Failed', detail: run.outcome.detail, tone: 'bad', terminal: true, steps: null, lastStage };
   }
+  const lifecycle = lifecycleOf(run);
+  const rank = lifecycle !== null ? LIFECYCLE_RANK[lifecycle] ?? null : null;
+  const terminalStage = rank === 3;
+  // A decision is asked inside the stage the run record names. A review asked while the run is not in its terminal stage belongs to Implementing: it concerns one
+  // unit's change, commands, or verifier - never the run-wide verification.
+  const reviewSteps = steps(terminalStage ? 3 : 2);
   if (run.review) {
-    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your approval', detail: 'Kriya paused the run and applies nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(2) };   // the change under review is the Implementing stage's product; verification has not started
+    const detail = lifecycle === 'VERIFYING' ? 'Kriya is waiting for your decision on the complete change and applies nothing until you decide.' : 'Kriya paused the run and applies nothing until you decide.';
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your approval', detail, tone: 'warn', needsAction: true, steps: reviewSteps };
   }
   if (run.runtimeReview) {
-    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for permission to run commands', detail: 'Kriya paused the run and runs nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(3) };
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for permission to run commands', detail: 'Kriya paused the run and runs nothing until you decide.', tone: 'warn', needsAction: true, steps: reviewSteps };
   }
   if (run.verifierReview) {
-    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your decision about a verifier', detail: 'Kriya paused the run. A verifier is never repaired unless you decide it conflicts with the contract.', tone: 'warn', needsAction: true, steps: steps(3) };
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your decision about a verifier', detail: 'Kriya paused the run. A verifier is never repaired unless you decide it conflicts with the contract.', tone: 'warn', needsAction: true, steps: reviewSteps };
   }
   if (run.semanticReview) {
-    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your decision about what a verifier expects', detail: 'Kriya paused the run. A generated verifier is evidence, not the truth: only your decision gives its expectation authority.', tone: 'warn', needsAction: true, steps: steps(3) };
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your decision about what a verifier expects', detail: 'Kriya paused the run. A generated verifier is evidence, not the truth: only your decision gives its expectation authority.', tone: 'warn', needsAction: true, steps: reviewSteps };
+  }
+  // The run record places the run in its terminal stage and nothing is waiting for the person. This is read from the lifecycle state alone, never from a decided review.
+  if (lifecycle === 'VERIFYING') {
+    return { ...base, state: 'VALIDATING', label: 'Verifying', detail: 'Kriya is running its final checks on the complete change.', tone: 'info', steps: steps(3), terminalActivity: 'verifying' };
+  }
+  if (lifecycle === 'COMMIT_ELIGIBLE' || lifecycle === 'COMMITTED') {
+    const detail = lifecycle === 'COMMIT_ELIGIBLE' ? 'Kriya is applying the verified change to your project.' : 'Kriya applied the change and is recording the result.';
+    return { ...base, state: 'VALIDATING', label: 'Applying', detail, tone: 'info', steps: steps(3), terminalActivity: 'applying' };
   }
   const pendingApproval = run.status?.launch.pending_approval;
   if (pendingApproval?.kind === 'verifier_semantic_review' && run.status?.launch.phase === 'RUNNING' && pendingApproval.status !== 'PENDING') {
@@ -86,18 +120,17 @@ export function runPhase(run: RunView): RunPhase {
       : word === 'expectation_invalid' ? 'You recorded that the verifier expectation is invalid. Kriya regenerates that verifier once.'
         : word === 'cannot_decide' ? 'You recorded that you cannot decide. Kriya changes nothing and sends the run to review.'
           : 'The verifier semantic review ended with no decision. Kriya changes nothing and sends the run to review.';
-    return { ...base, state: 'RUNNING', label: 'Verifying', detail, tone: 'info', steps: steps(3) };
+    return { ...base, state: 'RUNNING', label: 'Verifying', detail, tone: 'info', steps: steps(2) };
   }
   const approved = pendingApproval?.status === 'APPROVED' && run.status?.launch.phase === 'RUNNING';
   if (approved && pendingApproval?.kind === 'runtime_command') {
-    return { ...base, state: 'RUNNING', label: 'Verifying your application', detail: 'You allowed the reviewed commands. Kriya is running them in its isolated worktree and checking the result.', tone: 'info', steps: steps(3), verifyingApplication: true };
+    return { ...base, state: 'RUNNING', label: 'Verifying your application', detail: 'You allowed the reviewed commands. Kriya is running them in its isolated worktree and checking the result.', tone: 'info', steps: steps(2), verifyingApplication: true };
   }
   if (pendingApproval?.kind === 'verifier_defect_repair_authorization' && run.status?.launch.phase === 'RUNNING' && pendingApproval.status !== 'PENDING') {
-    return { ...base, state: 'RUNNING', label: 'Verifying', detail: approved ? 'You authorized one repair of the verifier. Kriya is repairing and re-checking it.' : 'No verifier repair was authorized. Kriya continues the run.', tone: 'info', steps: steps(3) };
+    return { ...base, state: 'RUNNING', label: 'Verifying', detail: approved ? 'You authorized one repair of the verifier. Kriya is repairing and re-checking it.' : 'No verifier repair was authorized. Kriya continues the run.', tone: 'info', steps: steps(2) };
   }
-  if (approved) {
-    return { ...base, state: 'VALIDATING', label: 'Finishing', detail: 'Your change was approved. Kriya is running final checks.', tone: 'info', steps: steps(3) };
-  }
+  // An approved CHANGE review says only that the person approved that change. It is not a stage: what Kriya does next is read from the lifecycle state (above) and
+  // from the recorded evidence (below). There is deliberately no "approved, so the final checks are running" state.
   if (run.stage === 'starting' || p.lastSeq === 0) {
     return { ...base, state: 'STARTING', label: 'Starting', detail: 'Starting the run…', tone: 'info', steps: steps(0) };
   }
@@ -111,11 +144,12 @@ export function runPhase(run: RunView): RunPhase {
   if (open && latest) {
     const checking = GATE_KINDS.has(latest.kind) || (latest.role !== null && CHECKING_ROLES.has(latest.role));
     const n = attempt ?? 1;
-    if (checking) return { ...base, state: 'VALIDATING', label: 'Verifying', detail: `Attempt ${n}: Kriya is checking the candidate change.`, tone: 'info', steps: steps(3) };
+    // The checks of ONE unit's change (its build, tests and Kriya's own review call) are part of Implementing; the global Verifying step is the lifecycle state's alone.
+    if (checking) return { ...base, state: 'VALIDATING', label: 'Checking this change', detail: `Attempt ${n}: Kriya is checking this unit's change.`, tone: 'info', steps: steps(2) };
     if (n >= 2) return { ...base, state: 'REPAIRING', label: 'Repairing', detail: `Attempt ${n}: Kriya is making another attempt after an earlier one did not complete the unit.`, tone: 'info', steps: steps(2) };
     return { ...base, state: 'EDITING', label: 'Implementing', detail: `Attempt ${n}: Kriya is producing a candidate change.`, tone: 'info', steps: steps(2) };
   }
   // Running, but the records do not place it in one stage (between attempts, or after the last attempt closed): say only that it runs.
-  const reached = stageReached(p);
-  return { ...base, state: 'RUNNING', label: 'Running', detail: 'Kriya is working; the records do not place it in a single stage right now.', tone: 'info', steps: steps(reached) };
+  // The checklist follows the lifecycle state when there is one; without it the records cannot place the run in a stage, so no checklist is drawn.
+  return { ...base, state: 'RUNNING', label: 'Running', detail: 'Kriya is working; the records do not place it in a single stage right now.', tone: 'info', steps: rank !== null ? steps(rank) : null };
 }

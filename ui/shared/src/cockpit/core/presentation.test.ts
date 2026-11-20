@@ -111,13 +111,17 @@ describe('verificationGroups: mechanism -> meaning, and nothing unmapped is dres
 
 describe('activityText and changeSummary', () => {
   it('describes the state in plain words without a mechanism term', () => {
-    for (const s of ['STARTING', 'PLANNING', 'EDITING', 'REPAIRING', 'VALIDATING', 'WAITING_FOR_APPROVAL']) expect(activityText(s, false)).not.toMatch(/candidate|attempt|gate|digest|seq/i);
-    expect(activityText('RUNNING', false, true)).toMatch(/commands you approved/);
+    for (const s of ['STARTING', 'PLANNING', 'EDITING', 'REPAIRING', 'VALIDATING', 'WAITING_FOR_APPROVAL']) expect(activityText(s, null)).not.toMatch(/candidate|attempt|gate|digest|seq/i);
+    expect(activityText('RUNNING', null, true)).toMatch(/commands you approved/);
     // no placeholder: when the records do not say what it is doing, there is no line at all
-    expect(activityText('RUNNING', false)).toBeNull();
-    expect(activityText('COMPLETED', false)).toBeNull();
-    expect(activityText('EDITING', false)).toBe('Creating or changing files…');
-    expect(activityText('VALIDATING', true)).toBe('Running final regression and safety checks…');
+    expect(activityText('RUNNING', null)).toBeNull();
+    expect(activityText('COMPLETED', null)).toBeNull();
+    expect(activityText('EDITING', null)).toBe('Creating or changing files…');
+    expect(activityText('VALIDATING', null)).toBe('Running the build, tests and checks…');
+    // the terminal stage is named only when the phase owner read it from the run record's lifecycle state; no state and no approval implies it
+    expect(activityText('VALIDATING', 'verifying')).toBe('Running the final checks on the complete change…');
+    expect(activityText('VALIDATING', 'applying')).toBe('Applying the verified change to your project…');
+    for (const s of ['STARTING', 'PLANNING', 'EDITING', 'REPAIRING', 'VALIDATING', 'WAITING_FOR_APPROVAL', 'RUNNING']) expect(activityText(s, null) ?? '').not.toMatch(/final|approved/i);
   });
   it('says created / removed / changed from the recorded change types', () => {
     const f = (changeType: 'added' | 'deleted' | 'modified' | null) => ({ path: 'x', additions: 1, deletions: 0, changeType });

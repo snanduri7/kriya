@@ -144,7 +144,7 @@ describe('E/F. Start Run turns the page into the run, with only supported states
     expect(screen.queryByRole('button', { name: /^Stop/ })).toBeNull(); // the host has no stop operation, so none is offered
   });
 
-  it('the state follows the records: Starting, Implementing, Verifying - and says nothing a record does not say', async () => {
+  it('the state follows the records: Starting, Implementing, then checking this unit (still Implementing) - and says nothing a record does not say', async () => {
     const { host, run } = await startRun({ outcome: 'success' });
     const progress = () => within(run).getByRole('list', { name: 'Progress' });
     act(() => host.exec!.advance());
@@ -158,7 +158,9 @@ describe('E/F. Start Run turns the page into the run, with only supported states
     expect(within(progress()).getByText(/Planning/).closest('li')).toHaveAttribute('data-status', 'done');
     act(() => host.exec!.advance());
     await waitFor(() => expect(run).toHaveAttribute('data-state', 'VALIDATING'));
-    expect(within(progress()).getByText(/Verifying/).closest('li')).toHaveAttribute('aria-current', 'step');
+    // a unit's own gates are part of Implementing: the global Verifying step is the run record's lifecycle state alone (runPhase)
+    expect(within(progress()).getByText(/Implementing/).closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(within(progress()).getByText(/Verifying/).closest('li')).toHaveAttribute('data-status', 'pending');
     expect(within(progress()).getByText(/Complete/).closest('li')).toHaveAttribute('data-status', 'pending');
     expect(run.textContent).not.toMatch(/\d+\s*%|step \d+ of|of \d+ tests/i); // no invented percentage or counter
   });
