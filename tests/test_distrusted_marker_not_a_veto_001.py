@@ -20,6 +20,7 @@ import os
 from unittest.mock import MagicMock
 
 import pytest
+from _strict_doubles import strict_engine
 from test_ver006_distrust_containment import _FakeRunVerifier
 
 from kriya.workflow.attempt import AttemptContext, _resolve_runtime_verification_grade
@@ -80,7 +81,7 @@ def _bundle(*claims):
 
 
 def _engine(bundle):
-    engine = MagicMock()
+    engine = strict_engine()          # tests/_strict_doubles.py: a real, validated config behind engine.kernel (never a bare MagicMock)
     engine.verification_authority_bundle = bundle
     return engine
 

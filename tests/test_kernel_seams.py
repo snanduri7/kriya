@@ -45,6 +45,9 @@ KINDS: Dict[Tuple[str, str], str] = {
     (A, '_build_targeted_retry_prompt'): 'function',
     (A, '_code_intelligence_for'): 'function',
     (A, '_developer_request_profile'): 'function',
+    # the S8 work grant, looked up on the attempt module by _ensure_generation_time_budget before every Developer pass (patch-point row
+    # added at 61c93e7; this table was not updated then)
+    (A, 'grant_developer_attempt'): 'function',
     (A, '_ensure_generation_time_budget'): 'function',
     (A, '_enter_developer_model'): 'function',
     (A, '_execute_managed_service_verification'): 'async function',
@@ -178,6 +181,8 @@ KINDS: Dict[Tuple[str, str], str] = {
 CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "legacy_success": (
         (A, "_developer_request_profile"), (A, "_ensure_generation_time_budget"),
+        # TRACED: _ensure_generation_time_budget calls the grant whenever the pass is admitted (no budget, or enough of it left)
+        (A, "grant_developer_attempt"),
         (A, "_enter_developer_model"),
         # E14 characterization (MEASURED: these two are reached by every scripted attempt; the other two it patches are not)
         (A, "_fallback_routing"), (A, "_has_authoritative_full_source"),
