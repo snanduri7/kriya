@@ -66,6 +66,18 @@ describe('gate A-1 hardening settings (every one checked)', () => {
   it('the real kriya is launched only with the child environment policy (child_env.ts), never with the host environment', () => {
     expect(mainTs).toContain('buildKriyaChildEnv(process.env)');
     expect(mainTs).not.toMatch(/env:\s*process\.env|\.\.\.process\.env/);
+    // The child environment (KRIYA_AUTHORITY_HOME included) has ONE input: the host process's own environment as it was started. Every
+    // call site passes exactly process.env, and no host source ever writes process.env, so no renderer request, IPC message or setting
+    // can select the authority home.
+    const calls = mainTs.match(/buildKriyaChildEnv\([^)]*\)/g) ?? [];
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    for (const call of calls) expect(call).toBe('buildKriyaChildEnv(process.env)');
+    for (const f of readdirSync(MAIN).filter((n) => n.endsWith('.ts'))) {
+      const src = read(join(MAIN, f));
+      expect(src, f).not.toMatch(/process\.env(\.[A-Za-z_]+|\[[^\]]+\])\s*=[^=]/);
+      expect(src, f).not.toMatch(/Object\.assign\(\s*process\.env|delete\s+process\.env/);
+      if (f !== 'child_env.ts') expect(src, f).not.toContain('KRIYA_AUTHORITY_HOME');
+    }
     const runner = read(join(MAIN, 'kriya_process.ts'));
     expect(runner).not.toMatch(/\.\.\.process\.env/);
     expect(runner).toContain('KRIYA_CHILD_PATH');

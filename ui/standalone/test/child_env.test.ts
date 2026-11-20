@@ -4,7 +4,7 @@ import { KRIYA_CHILD_ENV_KEYS, KRIYA_CHILD_PATH, buildKriyaChildEnv, resolveConf
 
 const HOSTILE = {
   HOME: '/Users/op', PATH: '/evil/bin:/usr/bin', PYTHONDONTWRITEBYTECODE: '0', PYTHONPATH: '/evil/site', PYTHONHOME: '/evil/py',
-  KRIYA_TRUST_FILE: '/tmp/trust.json', KRIYA_AUTHORITY_HOME: '/tmp/auth', KRIYA_CONFIG: '/tmp/kriya.yaml', KRIYA_LOG_DIR: '/tmp/logs',
+  KRIYA_TRUST_FILE: '/tmp/trust.json', KRIYA_MCP_APPROVAL_HOME: '/tmp/mcp', KRIYA_QUALIFICATION_HOME: '/tmp/qual', KRIYA_CONFIG: '/tmp/kriya.yaml', KRIYA_LOG_DIR: '/tmp/logs',
   OPENAI_API_KEY: 'sk-secret', OLLAMA_HOST: 'http://evil:11434', HTTP_PROXY: 'http://proxy', LANG: 'en_US.UTF-8', TMPDIR: '/tmp', SHELL: '/bin/zsh',
 };
 
@@ -14,18 +14,43 @@ describe('buildKriyaChildEnv', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.env).toEqual({ PATH: KRIYA_CHILD_PATH, PYTHONDONTWRITEBYTECODE: '1', HOME: '/Users/op' });
-    for (const k of ['PYTHONPATH', 'PYTHONHOME', 'KRIYA_TRUST_FILE', 'KRIYA_AUTHORITY_HOME', 'KRIYA_CONFIG', 'KRIYA_LOG_DIR', 'OPENAI_API_KEY', 'OLLAMA_HOST', 'HTTP_PROXY', 'LANG', 'TMPDIR', 'SHELL']) expect(r.env).not.toHaveProperty(k);
+    for (const k of ['PYTHONPATH', 'PYTHONHOME', 'KRIYA_TRUST_FILE', 'KRIYA_AUTHORITY_HOME', 'KRIYA_MCP_APPROVAL_HOME', 'KRIYA_QUALIFICATION_HOME', 'KRIYA_CONFIG', 'KRIYA_LOG_DIR', 'OPENAI_API_KEY', 'OLLAMA_HOST', 'HTTP_PROXY', 'LANG', 'TMPDIR', 'SHELL']) expect(r.env).not.toHaveProperty(k);
     expect(KRIYA_CHILD_PATH).toBe('/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin');
     expect(Object.keys(r.env).every((k) => (KRIYA_CHILD_ENV_KEYS as readonly string[]).includes(k))).toBe(true);
   });
   it('an operator KRIYA_STATE_DIR passes through only when absolute; a relative or control-character value refuses the launch', () => {
     const ok = buildKriyaChildEnv({ ...HOSTILE, KRIYA_STATE_DIR: '/Volumes/work/state' });
     expect(ok.ok && ok.env.KRIYA_STATE_DIR).toBe('/Volumes/work/state');
-    expect(ok.ok && Object.keys(ok.env).sort()).toEqual([...KRIYA_CHILD_ENV_KEYS].sort());
+    expect(ok.ok && Object.keys(ok.env).sort()).toEqual(KRIYA_CHILD_ENV_KEYS.filter((k) => k !== 'KRIYA_AUTHORITY_HOME').sort());
     for (const bad of ['relative/state', '~/state', '.kriya-state', '', '/a\nb', '/a\u0000b']) {
       const r = buildKriyaChildEnv({ ...HOSTILE, KRIYA_STATE_DIR: bad });
       expect(r.ok, JSON.stringify(bad)).toBe(false);
       if (!r.ok) expect(r.message).toContain('KRIYA_STATE_DIR');
+    }
+  });
+  it('an operator KRIYA_AUTHORITY_HOME passes through unchanged only when it is a normalized absolute path; anything else refuses the launch', () => {
+    const ok = buildKriyaChildEnv({ ...HOSTILE, KRIYA_AUTHORITY_HOME: '/Volumes/work/run9 authority' });
+    expect(ok.ok && ok.env).toEqual({ PATH: KRIYA_CHILD_PATH, PYTHONDONTWRITEBYTECODE: '1', HOME: '/Users/op', KRIYA_AUTHORITY_HOME: '/Volumes/work/run9 authority' });
+    const both = buildKriyaChildEnv({ ...HOSTILE, KRIYA_STATE_DIR: '/Volumes/work/state', KRIYA_AUTHORITY_HOME: '/Volumes/work/authority' });
+    expect(both.ok && Object.keys(both.env).sort()).toEqual([...KRIYA_CHILD_ENV_KEYS].sort());
+    for (const bad of ['relative/authority', '~/authority', '.kriya/authority', '', '/', '/a/', '/a//b', '/a/./b', '/a/../b', '/a/..', '/a\nb', '/a\u0000b', '/a\u007fb']) {
+      const r = buildKriyaChildEnv({ ...HOSTILE, KRIYA_AUTHORITY_HOME: bad });
+      expect(r.ok, JSON.stringify(bad)).toBe(false);
+      if (!r.ok) expect(r.message).toContain('KRIYA_AUTHORITY_HOME');
+    }
+  });
+  it('an unset KRIYA_AUTHORITY_HOME is never invented: the child gets no such variable and HOME decides, as before', () => {
+    const r = buildKriyaChildEnv({ HOME: '/Users/op' });
+    expect(r.ok && r.env).toEqual({ PATH: KRIYA_CHILD_PATH, PYTHONDONTWRITEBYTECODE: '1', HOME: '/Users/op' });
+  });
+  it('the result depends on the host environment argument alone (no ambient process.env, no other input)', () => {
+    const before = process.env.KRIYA_AUTHORITY_HOME;
+    process.env.KRIYA_AUTHORITY_HOME = '/ambient/authority';
+    try {
+      const r = buildKriyaChildEnv({ HOME: '/Users/op' });
+      expect(r.ok && r.env).not.toHaveProperty('KRIYA_AUTHORITY_HOME');
+    } finally {
+      if (before === undefined) delete process.env.KRIYA_AUTHORITY_HOME; else process.env.KRIYA_AUTHORITY_HOME = before;
     }
   });
   it('without an absolute HOME the launch is refused rather than guessed', () => {

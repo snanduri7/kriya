@@ -2875,12 +2875,37 @@ def _bind_acceptance(cfg: AppConfig, acceptance_path: str, requirement_goal: str
                            resolve_state_directory(cfg)[0])
 
 
+VERIFICATION_AUTHORITY_SOURCE_CONFLICT = "VERIFICATION_AUTHORITY_SOURCE_CONFLICT"
+
+
+def _verification_authority_selection(cfg: Any, cli_path: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
+    """Which sealed verification authority this run binds, from its ONE source: ``(manifest path, expected sha256 or None)``, or None
+    when there is none. The sources are the operator-approved configuration section (``verification_authority``: SEC-009 has already
+    refused it unless approved, and its ``sha256`` must match the manifest's bytes) and the explicit ``--verification-authority`` (no
+    expected digest: the operator names the file on the command line). Both at once is a typed refusal
+    (VERIFICATION_AUTHORITY_SOURCE_CONFLICT): there is no precedence between two operator statements. Raises AuthorityBundleError."""
+    from kriya.config.config import VerificationAuthorityConfig
+    from kriya.workflow.authority_bundle import AuthorityBundleError
+
+    configured = getattr(cfg, "verification_authority", None)
+    if not isinstance(configured, VerificationAuthorityConfig):
+        return (cli_path, None) if cli_path else None
+    if cli_path:
+        raise AuthorityBundleError(
+            VERIFICATION_AUTHORITY_SOURCE_CONFLICT,
+            "this folder's approved configuration already selects a verification authority (verification_authority.manifest) and "
+            "--verification-authority names one too; remove one of them (neither overrides the other)")
+    return configured.manifest, configured.sha256
+
+
 def _bind_verification_authority(cfg: AppConfig, authority_path: str, requirement_goal: str, workspace: str,
-                                 contract: Any = None) -> Any:
+                                 contract: Any = None, *, expected_sha256: Optional[str] = None) -> Any:
     """VERIFICATION-CONTRACT-003 (D2): reads, validates and stores the
     operator's sealed external verification authority before any model call,
     bound to the goal, the authoritative requirement set, the workspace's
-    HEAD and the project's language. Raises AuthorityBundleError."""
+    HEAD and the project's language. ``expected_sha256`` is the approved
+    configuration's digest of the manifest (None for the command-line
+    source). Raises AuthorityBundleError."""
     from kriya.core.state_paths import resolve_state_directory
     from kriya.workflow.authority_bundle import load_authority_bundle
     from kriya.workflow.requirement_contract import requirement_set_for
@@ -2890,6 +2915,7 @@ def _bind_verification_authority(cfg: AppConfig, authority_path: str, requiremen
         authority_path, requirement_set_for(requirement_goal, contract), requirement_goal,
         state_root=resolve_state_directory(cfg)[0], workspace=workspace, base_revision=_workspace_head(workspace),
         project_language=_project_language(admission_tracked_workspace_paths(workspace)),
+        expected_sha256=expected_sha256,
     )
 
 
@@ -3241,15 +3267,18 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     f"{', '.join(acceptance_artifact.requirement_ids)})", dim=True, err=True)
 
     authority_bundle = None
-    if verification_authority:
-        from kriya.workflow.authority_bundle import AuthorityBundleError
-        try:
-            authority_bundle = _bind_verification_authority(cfg, verification_authority, requirement_goal or "",
-                                                            os.getcwd(), contract_artifact)
-        except AuthorityBundleError as e:
-            click.secho(f"[Verification authority refused] {e}", bold=True, fg="red")
-            output.fail_with(e)
-            sys.exit(1)
+    from kriya.workflow.authority_bundle import AuthorityBundleError
+    try:
+        # the ONE source of this run's authority: the approved configuration section or --verification-authority, never both
+        authority_selection = _verification_authority_selection(cfg, verification_authority)
+        if authority_selection is not None:
+            authority_bundle = _bind_verification_authority(cfg, authority_selection[0], requirement_goal or "", os.getcwd(),
+                                                            contract_artifact, expected_sha256=authority_selection[1])
+    except AuthorityBundleError as e:
+        click.secho(f"[Verification authority refused] {e}", bold=True, fg="red")
+        output.fail_with(e)
+        sys.exit(1)
+    if authority_bundle is not None:
         click.secho(f"Verification authority bound: {authority_bundle.authority_id} sha256 {authority_bundle.digest[:12]} "
                     f"(covers {', '.join(f'{rid}:{c.claim}' for rid in sorted(authority_bundle.covers) for c in authority_bundle.covers[rid])}; "
                     "operator sufficiency, not a proof; runs "

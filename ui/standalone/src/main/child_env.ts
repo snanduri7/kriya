@@ -8,13 +8,20 @@
  *                            __pycache__ into the Kriya tree (sys.dont_write_bytecode inside the command is too late)
  *   HOME                     the operator's own HOME (Kriya's default state, authority and approval roots hang off it)
  *   KRIYA_STATE_DIR          only when the operator set it, and only an absolute path (Kriya refuses a relative one)
+ *   KRIYA_AUTHORITY_HOME     only when the operator set it in the HOST's own launch environment (owner ruling 2026-11-20), and
+ *                            only a normalized absolute path. It RELOCATES Kriya's authority home (approvals, launch records,
+ *                            human decisions) exactly as HOME already does by default; it grants nothing by itself: an empty
+ *                            home holds no approval, and Kriya refuses a home that resolves inside the workspace. Every kriya
+ *                            child (the service that approves and revokes, and the launched run) is built by this ONE function
+ *                            from the same host environment, so they always agree on it. Unset = not passed (HOME decides).
  *
- * Nothing else: no PYTHONPATH / PYTHONHOME, no KRIYA_TRUST_FILE or other authority-granting variable, no model or
+ * Nothing else: no PYTHONPATH / PYTHONHOME, no KRIYA_TRUST_FILE (an approval ARTIFACT named by the environment), no model or
  * provider credentials, no arbitrary variable, and no invented config-path variable - configuration discovery stays
  * Kriya's own (working directory, then install directory). Fixture knobs for the stand-in live in main.ts::fakeEnv.
+ * The only input is the host process's environment as it was started: no renderer request, setting or IPC message is read here.
  */
 export const KRIYA_CHILD_PATH = '/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin';
-export const KRIYA_CHILD_ENV_KEYS = ['PATH', 'PYTHONDONTWRITEBYTECODE', 'HOME', 'KRIYA_STATE_DIR'] as const;
+export const KRIYA_CHILD_ENV_KEYS = ['PATH', 'PYTHONDONTWRITEBYTECODE', 'HOME', 'KRIYA_STATE_DIR', 'KRIYA_AUTHORITY_HOME'] as const;
 
 export type ChildEnvResult = { ok: true; env: Record<string, string> } | { ok: false; message: string };
 
@@ -28,6 +35,15 @@ export function buildKriyaChildEnv(operator: Readonly<Record<string, string | un
     // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
     if (typeof stateDir !== 'string' || !stateDir.startsWith('/') || /[\u0000-\u001f]/.test(stateDir)) return { ok: false, message: `KRIYA_STATE_DIR must be an absolute path without control characters (got ${JSON.stringify(stateDir)})` };
     env.KRIYA_STATE_DIR = stateDir;
+  }
+  const authorityHome = operator.KRIYA_AUTHORITY_HOME;
+  if (authorityHome !== undefined) {
+    // Strict: absolute, no control characters, already normalized (no empty, "." or ".." segment, no trailing slash) and not the
+    // filesystem root. A value that fails is a refused launch, never a silent fall back to the default home.
+    const segments = typeof authorityHome === 'string' && authorityHome.startsWith('/') ? authorityHome.slice(1).split('/') : [];
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+    if (segments.length === 0 || /[\u0000-\u001f\u007f]/.test(authorityHome) || segments.some((s) => s === '' || s === '.' || s === '..')) return { ok: false, message: `KRIYA_AUTHORITY_HOME must be a normalized absolute path without control characters (got ${JSON.stringify(authorityHome)})` };
+    env.KRIYA_AUTHORITY_HOME = authorityHome;
   }
   return { ok: true, env };
 }

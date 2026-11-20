@@ -450,3 +450,115 @@ def test_a_verify_that_never_started_is_never_a_verdict_whatever_status_it_answe
     # the control: the same status from a verifier that DID start keeps its protocol meaning
     run = ab.run_authority_bundle(bundle, str(ws), state_root=state, validator_factory=lambda r: _Validator(r, [_ok, _fail]))
     assert run.verdict == ab.VERDICT_FAIL
+
+
+# ---------------------------------------------------------------- SEC-009 selection: the approved configuration section
+def _load_expecting(tmp_path, manifest, reqs, base, workspace, expected):
+    return ab.load_authority_bundle(str(manifest), reqs, GOAL, state_root=str(tmp_path / "state"), workspace=str(workspace),
+                                    base_revision=base, project_language="python", expected_sha256=expected)
+
+
+def test_13_an_expected_manifest_digest_must_be_the_digest_of_the_exact_bytes(tmp_path):
+    ws, base = _workspace(tmp_path)
+    reqs = derive_requirements(GOAL)
+    manifest = _bundle_dir(tmp_path, reqs, base) / "manifest.json"
+    approved = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert _load_expecting(tmp_path, manifest, reqs, base, ws, approved).digest == approved
+    with pytest.raises(ab.AuthorityBundleError) as refused:
+        _load_expecting(tmp_path, manifest, reqs, base, ws, "0" * 64)
+    assert refused.value.reason_code == ab.AUTHORITY_DIGEST_MISMATCH, refused.value
+    # the same manifest with one byte more is still valid JSON for the same goal - and no longer what was approved
+    manifest.write_bytes(manifest.read_bytes() + b"\n")
+    changed = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert changed != approved
+    with pytest.raises(ab.AuthorityBundleError) as refused:
+        _load_expecting(tmp_path, manifest, reqs, base, ws, approved)
+    assert refused.value.reason_code == ab.AUTHORITY_DIGEST_MISMATCH, refused.value
+    assert not os.path.exists(tmp_path / "state" / ab.AUTHORITY_STORE_DIR / changed)  # a refused manifest is never stored
+    # the digest is checked before the bytes are interpreted
+    manifest.write_bytes(b"not json")
+    with pytest.raises(ab.AuthorityBundleError) as refused:
+        _load_expecting(tmp_path, manifest, reqs, base, ws, approved)
+    assert refused.value.reason_code == ab.AUTHORITY_DIGEST_MISMATCH, refused.value
+    with pytest.raises(ab.AuthorityBundleError) as refused:
+        _load_expecting(tmp_path, manifest, reqs, base, ws, None)  # no expected digest (the command-line source): the old typed refusal
+    assert refused.value.reason_code == ab.AUTHORITY_INVALID, refused.value
+
+
+def test_14_the_authority_has_one_source_the_configuration_or_the_command_line_never_both():
+    from kriya.cli import VERIFICATION_AUTHORITY_SOURCE_CONFLICT, _verification_authority_selection
+    from kriya.config.config import AppConfig
+
+    plain = AppConfig()
+    assert plain.verification_authority is None
+    assert _verification_authority_selection(plain, None) is None
+    assert _verification_authority_selection(plain, "/cli/manifest.json") == ("/cli/manifest.json", None)
+    configured = AppConfig(verification_authority={"manifest": "/operator/manifest.json", "sha256": "a" * 64})
+    assert _verification_authority_selection(configured, None) == ("/operator/manifest.json", "a" * 64)
+    for cli_path in ("/cli/manifest.json", "/operator/manifest.json"):  # the same file named twice is still two sources
+        with pytest.raises(ab.AuthorityBundleError) as refused:
+            _verification_authority_selection(configured, cli_path)
+        assert refused.value.reason_code == VERIFICATION_AUTHORITY_SOURCE_CONFLICT, refused.value
+
+
+def _generate(args):
+    from click.testing import CliRunner
+
+    from kriya.cli import main
+
+    result = CliRunner().invoke(main, ["generate", GOAL, "--json", *args])
+    return result.exit_code, result.output + (getattr(result, "stderr", "") if getattr(result, "stderr_bytes", None) else "")
+
+
+def test_15_generate_binds_the_approved_configuration_authority_and_refuses_before_any_run(tmp_path, monkeypatch):
+    """The command path: unapproved -> SEC-009 refuses the load; approved with a digest that is not the manifest's -> typed refusal at the
+    binding; approved and matching -> the ONE binder is called with the configured path and digest; with --verification-authority too ->
+    the source conflict. Every case ends before a run exists (the binder is stopped where it would bind)."""
+    import yaml
+
+    import kriya.cli as cli
+    from kriya.config.authority_approval import grant_local_approval
+    from kriya.config.config import resolve_config_state
+
+    ws, base = _workspace(tmp_path)
+    reqs = derive_requirements(GOAL)
+    manifest = _bundle_dir(tmp_path, reqs, base) / "manifest.json"
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    monkeypatch.delenv("KRIYA_TRUST_FILE", raising=False)
+    monkeypatch.chdir(ws)
+
+    def select(sha256):
+        (ws / "kriya.yaml").write_text(yaml.safe_dump({"verification_authority": {"manifest": str(manifest), "sha256": sha256}}))
+        return resolve_config_state(None)
+
+    def approve(state):
+        grant_local_approval(state.violations, state.config_dict, state.workspace_root)
+
+    state = select("0" * 64)
+    assert [v.field_path for v in state.violations] == ["verification_authority.manifest", "verification_authority.sha256"]
+    code, out = _generate([])
+    assert code == 1 and "verification_authority.manifest" in out and "AUTHORITY_DIGEST_MISMATCH" not in out, out  # unapproved: the load refuses
+
+    approve(state)
+    code, out = _generate([])
+    assert code == 1 and "AUTHORITY_DIGEST_MISMATCH" in out, out  # approved, but the approved digest is not the manifest's
+
+    state = select(digest)
+    code, out = _generate([])
+    assert code == 1 and "verification_authority.sha256" in out and "AUTHORITY_DIGEST_MISMATCH" not in out, out  # a changed value is unapproved again
+    approve(state)
+
+    bound = []
+
+    def stop_at_the_binder(cfg, authority_path, requirement_goal, workspace, contract=None, *, expected_sha256=None):
+        bound.append((authority_path, expected_sha256, requirement_goal.strip(), os.path.realpath(workspace)))
+        raise ab.AuthorityBundleError("TEST_STOP_AT_BINDER", "stopped where the bundle would bind")
+
+    monkeypatch.setattr(cli, "_bind_verification_authority", stop_at_the_binder)
+    code, out = _generate([])
+    assert code == 1 and "TEST_STOP_AT_BINDER" in out, out
+    assert bound == [(str(manifest), digest, GOAL.strip(), os.path.realpath(ws))], bound
+
+    code, out = _generate(["--verification-authority", str(manifest)])
+    assert code == 1 and "VERIFICATION_AUTHORITY_SOURCE_CONFLICT" in out, out
+    assert len(bound) == 1, bound  # the conflict is refused before anything binds

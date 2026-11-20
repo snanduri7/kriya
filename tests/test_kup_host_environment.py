@@ -36,12 +36,19 @@ def test_host_child_env_is_exactly_the_policy_and_refuses_relative_state_dirs(tm
     env = host_child_env(str(tmp_path))
     assert env == {"PATH": HOST_CHILD_PATH, "PYTHONDONTWRITEBYTECODE": "1", "HOME": str(tmp_path)}
     env = host_child_env(str(tmp_path), str(tmp_path / "s"))
-    assert set(env) == set(HOST_CHILD_ENV_KEYS) and env["KRIYA_STATE_DIR"] == str(tmp_path / "s")
+    assert set(env) == set(HOST_CHILD_ENV_KEYS) - {"KRIYA_AUTHORITY_HOME"} and env["KRIYA_STATE_DIR"] == str(tmp_path / "s")
     for bad in ("relative/state", "", "~/state", ".kriya/state"):
         with pytest.raises(ValueError):
             host_child_env(str(tmp_path), bad)
     with pytest.raises(ValueError):
         host_child_env("home")
+    # the operator's authority home (owner ruling 2026-11-20): passed unchanged when normalized and absolute, refused otherwise, absent when unset
+    isolated = host_child_env(str(tmp_path), authority_home=str(tmp_path / "authority"))
+    assert isolated == {"PATH": HOST_CHILD_PATH, "PYTHONDONTWRITEBYTECODE": "1", "HOME": str(tmp_path), "KRIYA_AUTHORITY_HOME": str(tmp_path / "authority")}
+    assert set(host_child_env(str(tmp_path), str(tmp_path / "s"), str(tmp_path / "authority"))) == set(HOST_CHILD_ENV_KEYS)
+    for bad in ("relative/authority", "", "~/authority", "/", "/a/", "/a//b", "/a/./b", "/a/../b", "/a\nb", "/a\x7fb"):
+        with pytest.raises(ValueError):
+            host_child_env(str(tmp_path), authority_home=bad)
     # by construction nothing else can get in: the policy never reads the ambient environment
     assert "PYTHONPATH" not in env and "KRIYA_TRUST_FILE" not in env and "PYTHONHOME" not in env
 

@@ -148,13 +148,14 @@ def file_names(directory: str) -> Iterable[str]:
 # environment the real app provides, never a more permissive test-only one.
 # ---------------------------------------------------------------------------------------------------------------
 HOST_CHILD_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
-HOST_CHILD_ENV_KEYS = ("PATH", "PYTHONDONTWRITEBYTECODE", "HOME", "KRIYA_STATE_DIR")
+HOST_CHILD_ENV_KEYS = ("PATH", "PYTHONDONTWRITEBYTECODE", "HOME", "KRIYA_STATE_DIR", "KRIYA_AUTHORITY_HOME")
 
 
-def host_child_env(home: str, state_dir: Optional[str] = None) -> dict:
+def host_child_env(home: str, state_dir: Optional[str] = None, authority_home: Optional[str] = None) -> dict:
     """Fixed approved PATH; fixed PYTHONDONTWRITEBYTECODE=1 (set before the interpreter imports anything, which
     `sys.dont_write_bytecode` inside the command cannot do); the operator's HOME; optionally the operator's
-    KRIYA_STATE_DIR, absolute only. Nothing else: no PYTHONPATH/PYTHONHOME, no KRIYA_TRUST_FILE, no credentials, no
+    KRIYA_STATE_DIR, absolute only; optionally the operator's KRIYA_AUTHORITY_HOME (owner ruling 2026-11-20), a normalized
+    absolute path only. Nothing else: no PYTHONPATH/PYTHONHOME, no KRIYA_TRUST_FILE, no credentials, no
     config-path variable (configuration discovery stays Kriya's own: CWD, then the install directory)."""
     if not isinstance(home, str) or not os.path.isabs(home):
         raise ValueError("HOME must be an absolute path")
@@ -163,6 +164,11 @@ def host_child_env(home: str, state_dir: Optional[str] = None) -> dict:
         if not isinstance(state_dir, str) or not os.path.isabs(state_dir):
             raise ValueError("KRIYA_STATE_DIR must be an absolute path")
         env["KRIYA_STATE_DIR"] = state_dir
+    if authority_home is not None:
+        segments = authority_home[1:].split("/") if isinstance(authority_home, str) and authority_home.startswith("/") else []
+        if not segments or any(ord(ch) < 32 or ord(ch) == 127 for ch in authority_home) or any(s in ("", ".", "..") for s in segments):
+            raise ValueError("KRIYA_AUTHORITY_HOME must be a normalized absolute path without control characters")
+        env["KRIYA_AUTHORITY_HOME"] = authority_home
     return env
 
 

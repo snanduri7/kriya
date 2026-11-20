@@ -213,3 +213,66 @@ def test_the_members_still_to_come_name_real_open_slices():
     assert set(ARRIVES_LATER) == {"fingerprint", "state_dir"}
     assert all(slice_id in SLICES and slice_id not in DONE_SLICES for slice_id in ARRIVES_LATER.values())
     assert not any(hasattr(ResolvedConfiguration, name) for name in ARRIVES_LATER), "a member arriving later must not exist as a stub"
+
+
+# ---------------------------------------------------------------- SEC-009 verification_authority (operator-selected sealed oracle)
+AUTHORITY_SECTION = {"manifest": "/operator/oracle/manifest.json", "sha256": "a" * 64}
+
+
+def test_an_absent_verification_authority_is_no_part_of_any_configuration_identity():
+    from kriya.config.config import AppConfig
+    from kriya.control.checkpoint import canonical_identity_config, compute_config_fingerprint
+
+    plain = AppConfig()
+    dump = plain.model_dump()
+    # absent, not null, in every serialized form: the dump is what every earlier fingerprint, golden and identity was taken from
+    assert plain.verification_authority is None
+    assert "verification_authority" not in dump and "verification_authority" not in plain.model_dump(mode="json")
+    assert "verification_authority" not in plain.model_copy(deep=True).model_dump()
+    assert "verification_authority" not in canonical_identity_config(dump)
+    assert AppConfig(**dump).model_dump() == dump  # and the dump still loads to the same configuration
+    # a present section IS identity: selecting an oracle, or another one, is a different configuration
+    selected = AppConfig(verification_authority=AUTHORITY_SECTION).model_dump()
+    other = AppConfig(verification_authority={**AUTHORITY_SECTION, "sha256": "b" * 64}).model_dump()
+    assert selected["verification_authority"] == AUTHORITY_SECTION == canonical_identity_config(selected)["verification_authority"]
+    assert AppConfig(**selected).verification_authority.model_dump() == AUTHORITY_SECTION
+    assert len({compute_config_fingerprint(dump), compute_config_fingerprint(selected), compute_config_fingerprint(other)}) == 3
+
+
+@pytest.mark.parametrize("section", [
+    {"manifest": "relative/manifest.json", "sha256": "a" * 64}, {"manifest": "~/oracle/manifest.json", "sha256": "a" * 64},
+    {"manifest": "/operator/a\nb.json", "sha256": "a" * 64}, {"manifest": "/operator/manifest.json", "sha256": "A" * 64},
+    {"manifest": "/operator/manifest.json", "sha256": "a" * 63}, {"manifest": "/operator/manifest.json"}, {"sha256": "a" * 64},
+    {"manifest": "/operator/manifest.json", "sha256": "a" * 64, "trusted": True},
+])
+def test_a_malformed_verification_authority_section_is_refused_by_the_schema(section):
+    from pydantic import ValidationError
+
+    from kriya.config.config import AppConfig
+
+    with pytest.raises(ValidationError):
+        AppConfig(verification_authority=section)
+
+
+def test_a_workspace_selected_verification_authority_needs_the_operators_approval_and_stales_an_earlier_one(folders):
+    from kriya.config.authority_approval import grant_local_approval
+
+    folder = folders["protected"]
+    state = _resolve(folder).state
+    grant_local_approval(state.violations, state.config_dict, state.workspace_root)
+    assert _resolve(folder).authority.as_dict() == {"status": "approved", "fields": ["llm.base_url"]}  # the earlier approval, section absent
+    with open(os.path.join(folder, "kriya.yaml"), "w", encoding="utf-8") as handle:
+        yaml.safe_dump({**PROTECTED, "verification_authority": AUTHORITY_SECTION}, handle)
+    refused = _resolve(folder)
+    assert refused.app is None and refused.failure["code"] == CONFIG_AUTHORITY_REFUSED, refused.failure
+    assert [(f["field"], f["classification"]) for f in refused.authority.fields] == [
+        ("llm.base_url", "security_authority"), ("verification_authority.manifest", "security_authority"),
+        ("verification_authority.sha256", "security_authority")]
+    grant_local_approval(refused.state.violations, refused.state.config_dict, refused.state.workspace_root)
+    approved = _resolve(folder)
+    assert approved.failure is None and approved.app.verification_authority.model_dump() == AUTHORITY_SECTION
+    # the approval binds the VALUES: another digest for the same manifest is unapproved again
+    with open(os.path.join(folder, "kriya.yaml"), "w", encoding="utf-8") as handle:
+        yaml.safe_dump({**PROTECTED, "verification_authority": {**AUTHORITY_SECTION, "sha256": "b" * 64}}, handle)
+    changed = _resolve(folder)
+    assert changed.app is None and changed.failure["code"] == CONFIG_AUTHORITY_REFUSED, changed.failure

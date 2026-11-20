@@ -187,6 +187,8 @@ _PLATFORM_POLICY_FIELDS: frozenset = frozenset({
 })
 
 _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
+    # Which sealed oracle may close this workspace's requirements, and its exact bytes: operator authority only, never a repository's.
+    ("verification_authority", "manifest"), ("verification_authority", "sha256"),
     # Direct execution
     ("plugins", "directory"), ("plugins", "enabled"),
     # Security boundary

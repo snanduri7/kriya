@@ -111,6 +111,7 @@ _BUILD_TOOLS = frozenset({"maven", "gradle", "pip", "none"})
 GREENFIELD_BASE_REVISION = "GREENFIELD_NO_BASE_REVISION"
 
 AUTHORITY_INVALID = "AUTHORITY_INVALID"
+AUTHORITY_DIGEST_MISMATCH = "AUTHORITY_DIGEST_MISMATCH"
 AUTHORITY_GOAL_MISMATCH = "AUTHORITY_GOAL_MISMATCH"
 AUTHORITY_REQUIREMENT_SET_MISMATCH = "AUTHORITY_REQUIREMENT_SET_MISMATCH"
 AUTHORITY_BASE_MISMATCH = "AUTHORITY_BASE_MISMATCH"
@@ -290,12 +291,15 @@ def greenfield_baseline_run() -> AuthorityRun:
 
 def load_authority_bundle(
     path: str, requirement_set: RequirementSet, goal: str, *, state_root: str, workspace: str,
-    base_revision: Optional[str], project_language: Optional[str],
+    base_revision: Optional[str], project_language: Optional[str], expected_sha256: Optional[str] = None,
 ) -> AuthorityBundle:
     """Read, validate, store and bind the operator's bundle before any model
     call. Raises AuthorityBundleError (typed) for anything that does not bind
     exactly: the goal, the requirement set and each covered requirement's
-    text, the base revision, the project language, every asset digest."""
+    text, the base revision, the project language, every asset digest.
+    ``expected_sha256`` (the operator-approved ``verification_authority.sha256``)
+    must be the sha256 of the manifest's exact bytes - the SAME bytes that are
+    parsed, stored and digested below (one read) - else AUTHORITY_DIGEST_MISMATCH."""
     from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
     real = os.path.realpath(path)
@@ -305,8 +309,14 @@ def load_authority_bundle(
     try:
         with open(real, "rb") as handle:
             data = handle.read()
+    except OSError as error:
+        raise _refuse(AUTHORITY_INVALID, f"unreadable manifest: {error}") from error
+    if expected_sha256 is not None and _sha256(data) != expected_sha256:
+        raise _refuse(AUTHORITY_DIGEST_MISMATCH, f"the manifest's sha256 is {_sha256(data)}, the approved configuration names "
+                                                 f"{expected_sha256} (verification_authority.sha256)")
+    try:
         manifest = json.loads(data.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError) as error:
+    except (UnicodeDecodeError, ValueError) as error:
         raise _refuse(AUTHORITY_INVALID, f"unreadable manifest: {error}") from error
     if not isinstance(manifest, dict):
         raise _refuse(AUTHORITY_INVALID, "the manifest must be a JSON object")

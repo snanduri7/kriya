@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
 from kriya.config.environment import Environment, expand_user
 
@@ -1687,6 +1687,38 @@ class EvidenceConfig(BaseModel):
     attempt_recorder: AttemptRecorderConfig = Field(default_factory=AttemptRecorderConfig)
 
 
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+class VerificationAuthorityConfig(BaseModel):
+    """SEC-009 operator selection of the sealed verification authority (VERIFICATION-CONTRACT-003): the manifest's absolute path and the
+    sha256 of its exact bytes. Both leaves are SECURITY_AUTHORITY (kriya/config/authority.py): from a workspace ``kriya.yaml`` they load
+    only under the operator's durable approval, whose set digest binds both values. The section is absent by default (None), and an absent
+    section is not serialized at all (AppConfig._an_unset_verification_authority_is_not_serialized), so it is part of no dump and no
+    configuration identity. It selects, it never
+    validates: the manifest is read, compared to ``sha256`` and bound to the goal, the requirement set and the base revision by the one
+    loader (kriya/workflow/authority_bundle.py::load_authority_bundle) before any model call. The path is used exactly as written (no ``~``
+    expansion, never anchored to a directory), so the value SEC-009 digests is the value opened."""
+
+    model_config = ConfigDict(extra="forbid")
+    manifest: str
+    sha256: str
+
+    @field_validator("manifest")
+    @classmethod
+    def _manifest_is_an_absolute_path(cls, v: str) -> str:
+        if not os.path.isabs(v) or any(ord(ch) < 32 for ch in v):
+            raise ValueError("verification_authority.manifest must be an absolute path without control characters")
+        return v
+
+    @field_validator("sha256")
+    @classmethod
+    def _sha256_is_lowercase_hex(cls, v: str) -> str:
+        if _SHA256_HEX.fullmatch(v) is None:
+            raise ValueError("verification_authority.sha256 must be the 64 lowercase hexadecimal characters of the manifest's sha256")
+        return v
+
+
 class AppConfig(BaseModel):
     """runtime_profile (2026-08-25, external review P2) - a named
     preset in place of remembering which combination of independent
@@ -1745,6 +1777,7 @@ class AppConfig(BaseModel):
     static_analysis: StaticAnalysisConfig = Field(default_factory=StaticAnalysisConfig)
     model_qualification: ModelQualificationConfig = Field(default_factory=ModelQualificationConfig)
     evidence: EvidenceConfig = Field(default_factory=EvidenceConfig)
+    verification_authority: Optional[VerificationAuthorityConfig] = Field(default=None)
     runtime_profile: Optional[str] = Field(default=None)
     # PRD-019: the routing plan a workflow command applied to this (routed)
     # configuration, recorded by the run as model.route events. Not a
@@ -1755,6 +1788,16 @@ class AppConfig(BaseModel):
     # store refuses to open (PROJECT_IDENTITY_MISSING), it never falls back to a shared location.
     _project_identity: Optional[str] = PrivateAttr(default=None)
     _project_root: Optional[str] = PrivateAttr(default=None)
+
+    @model_serializer(mode="wrap")
+    def _an_unset_verification_authority_is_not_serialized(self, handler: Any) -> Any:
+        """An absent ``verification_authority`` is ABSENT from every serialized form, not a null: the section was added after configuration
+        identities, fingerprints and goldens were already recorded from ``model_dump()``, and a configuration that selects no authority is
+        the same configuration it was before the section existed. A present section is serialized (and is identity) like any other."""
+        data = handler(self)
+        if self.verification_authority is None and isinstance(data, dict):
+            data.pop("verification_authority", None)
+        return data
 
     def model_copy(self, *, update: Optional[Dict[str, Any]] = None, deep: bool = False) -> "AppConfig":
         """S16a: an ``autonomy`` replaced through ``update`` (pydantic validates nothing there) carries a valid mode."""

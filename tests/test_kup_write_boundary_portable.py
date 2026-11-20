@@ -118,7 +118,7 @@ def isolated(tmp_path):
     store = seed_store(os.path.join(state_dir, "traces.db"), 60)
     fresh = fresh_package_tree(os.path.join(root, "fresh"))
     env = host_child_env(home, state_dir)
-    assert set(env) == set(HOST_CHILD_ENV_KEYS)
+    assert set(env) == set(HOST_CHILD_ENV_KEYS) - {"KRIYA_AUTHORITY_HOME"}  # no operator authority home in this fixture
     return {"root": root, "state_dir": state_dir, "home": home, "store": store, "snapdir": os.path.join(state_dir, "kup-snapshots"), "fresh": fresh, "env": env, "cwd": cwd}
 
 
