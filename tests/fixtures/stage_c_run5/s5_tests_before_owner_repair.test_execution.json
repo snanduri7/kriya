@@ -1,0 +1,41 @@
+{
+ "cases": 3,
+ "cleared_reports": 0,
+ "completeness": "COMPLETE",
+ "gate_id": "25fd353199c0496e831190c161f00daf",
+ "reason": null,
+ "report_files": [
+  {
+   "path": "target/surefire-reports/TEST-com.example.ProtocolParserTest.xml",
+   "sha256": "668fb4e7197c31e24c355b5b9109e34274f8bf52f439cbb1462839ea26ad00af"
+  }
+ ],
+ "runner": "maven",
+ "status_counts": {
+  "failed": 1,
+  "passed": 2
+ },
+ "test_cases": [
+  {
+   "classname": "com.example.ProtocolParserTest",
+   "detail": "org.opentest4j.AssertionFailedError: expected: <null> but was: <[]>",
+   "identity": "com.example.ProtocolParserTest.testNullBody",
+   "name": "testNullBody",
+   "status": "failed"
+  },
+  {
+   "classname": "com.example.ProtocolParserTest",
+   "identity": "com.example.ProtocolParserTest.testEmptyBody",
+   "name": "testEmptyBody",
+   "status": "passed"
+  },
+  {
+   "classname": "com.example.ProtocolParserTest",
+   "identity": "com.example.ProtocolParserTest.testRoundTrip",
+   "name": "testRoundTrip",
+   "status": "passed"
+  }
+ ],
+ "version": 1,
+ "workspace": "/sealed/gate-view"
+}

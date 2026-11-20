@@ -103,7 +103,12 @@ CANDIDATE_BYTE_SOURCES = {
         "resume: the checkpoint's verified candidate (STATE-001 binding)",
     # ENFORCE-OWNER-RECOVERY-DEPENDENT-VERIFIER-REGENERATED-001 (R7-B; classified late - this audit was not in a focused gate): a verifier replay stages the
     # unit's OWN refused candidate, carried in memory and digest-checked before and after staging (verifier_replay.ReplayHandle, staged_bytes_mismatch).
-    "ctx.carried_candidate.generated_files()": "verifier replay: the unit's own refused candidate, exact bytes bound by raw digest",
+    # OWNER-REPAIR-REGRESSION-001 (2026-11-19): the same site also stages an owner unit's exact PRE-REPAIR bytes when its repair is refused for
+    # regressing an accepted verifier (verifier_repair.PreRepairOwner: read from the candidate tree before the repair, checked against the file-revision
+    # authority, carried in memory, digest-checked before and after staging). No new site, no new writer; never model text.
+    "ctx.carried_candidate.generated_files()": ("carried candidate: the unit's own refused candidate (verifier replay) or its own earlier exact bytes "
+                                                "(accepted-candidate replay on resume; pre-repair owner bytes of a refused regressive repair), "
+                                                "bound by raw digest"),
     "normalized_files": "path normalization of the entries above (no new bytes)",
     "list(deduped.values())": "de-duplication of the entries above (no new bytes)",
     "{'filepath': expected_path, 'content': cumulative_content, '_kriya_carried_forward_content': True}":

@@ -269,7 +269,12 @@ def _capture_final_contents_and_remove_sandbox(state: GenerationState, ctx: Any,
         # loop's verifier replay (kriya/workflow/verifier_replay.py). None unless every written file is captured exactly.
         from kriya.workflow.verifier_replay import capture_refused_candidate
 
-        state.refused_candidate = capture_refused_candidate(state, ctx.worktree_path)
+        # OWNER-REPAIR-REGRESSION-001: with the per-test outcomes of this attempt's run-authored verifiers, from the one policy owner that
+        # derives them (verifier_semantic.UnitSemantics); none when this invocation has no such owner.
+        executed_outcomes = getattr(getattr(ctx, "verifier_semantic", None), "executed_outcomes", None)
+        state.refused_candidate = capture_refused_candidate(
+            state, ctx.worktree_path,
+            executed_outcomes(sorted(state.all_files_written)) if executed_outcomes is not None else None)
     remove_git_worktree(ctx.workspace_path, ctx.worktree_path)
 
 

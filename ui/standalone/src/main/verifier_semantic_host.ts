@@ -32,7 +32,10 @@ export const SEMANTIC_CONFIRM_BUTTON: Readonly<Record<'expectation_valid' | 'exp
   expectation_valid: 'Record: Expectation Is Valid', expectation_invalid: 'Record: Expectation Is Invalid',
 };
 const SEMANTIC_CONFIRM_DETAIL: Readonly<Record<'expectation_valid' | 'expectation_invalid', string>> = {
-  expectation_valid: 'You are recording that the verifier EXPECTS THE RIGHT THING. This accepts its expectation for exactly these verifier bytes in this run. It does not say which code is wrong and authorizes no change.',
+  // VERIFIER-SEMANTIC-FAILING-EXPECTATION-001 (2026-11-19): the earlier text said this "authorizes no change". Since VERIFIER-FAILURE-OWNER-CORROBORATION-001 a valid decision on a
+  // FAILING verifier makes its failure evidence against the production code, and Kriya may reopen the one production owner that failure identifies. Kriya's own notice on the card
+  // (review.notice) states the same; this is the native confirmation's wording of it. No decision word, fingerprint or authority changes here.
+  expectation_valid: 'You are recording that the verifier EXPECTS THE RIGHT THING. This accepts its expectation for exactly these verifier bytes in this run. If the verifier is FAILING, its failure then counts against the production code: Kriya may reopen the one production owner that failure identifies and change that code, within its bounded recovery. It covers the failing expectation(s) of this review; a different failing set is asked again.',
   expectation_invalid: 'You are recording that the verifier EXPECTS THE WRONG THING. This permits ONE regeneration of exactly this verifier in this run; the new verifier is reviewed and gated as source. There is no second regeneration.',
 };
 export const SEMANTIC_CONFIRM_COMMIT_INDEX = 1;

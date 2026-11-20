@@ -203,7 +203,11 @@ describe('the native confirmation says which decision it records, in words', () 
     }
     expect(SEMANTIC_CONFIRM_BUTTON.expectation_valid).toContain('Valid');
     expect(SEMANTIC_CONFIRM_BUTTON.expectation_invalid).toContain('Invalid');
-    expect(semanticConfirmationDialog('expectation_valid').detail).toContain('authorizes no change');
+    // VERIFIER-SEMANTIC-FAILING-EXPECTATION-001: the stale statement is gone and the real consequence of a valid decision on a failing verifier is stated
+    expect(semanticConfirmationDialog('expectation_valid').detail).not.toContain('authorizes no change');
+    expect(semanticConfirmationDialog('expectation_valid').detail).toContain('may reopen the one production owner');
+    expect(semanticConfirmationDialog('expectation_valid').detail).toContain('a different failing set is asked again');
+    expect(semanticConfirmationDialog('expectation_invalid').detail).not.toContain('production owner');
     expect(semanticConfirmationDialog('expectation_invalid').detail).toContain('ONE regeneration');
     expect(isSemanticCommitResponse(SEMANTIC_CONFIRM_COMMIT_INDEX)).toBe(true);
     expect(isSemanticCommitResponse(0)).toBe(false);

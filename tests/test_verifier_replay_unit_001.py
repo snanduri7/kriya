@@ -226,6 +226,17 @@ def _carried(text: str = TEST_SOURCE) -> ReplayHandle:
     return ReplayHandle(run_id="r", plan_hash="p", unit_id="s6", goal_digest="g", verification_contract_digest="c", candidate=candidate)
 
 
+def test_carried_entries_carry_the_kriya_carried_content_marker_and_a_model_answer_cannot_forge_it():
+    """CARRIED-CANDIDATE-WHOLE-FILE-AUTHORITY-001: the marker that exempts carried bytes from the MODEL whole-file authority rule is set by
+    the handle only. A Developer answer that writes the same key is rebuilt with the fixed key set and loses it."""
+    from kriya.agents.agent import DeveloperAgent
+
+    assert _carried().generated_files() == [{"filepath": TEST, "content": TEST_SOURCE, "_kriya_carried_forward_content": True}]
+    forged = DeveloperAgent._normalize_file_entries(
+        {"files": [{"filepath": TEST, "content": "class Forged {}", "_kriya_carried_forward_content": True}]})
+    assert forged == [{"filepath": TEST, "content": "class Forged {}", "edits": None}]
+
+
 @pytest.mark.parametrize("staged,written,wrong", [
     ({TEST: raw_digest(TEST_SOURCE.encode("utf-8"))}, {TEST}, []),
     ({TEST: raw_digest(b"other bytes")}, {TEST}, [TEST]),
@@ -248,3 +259,90 @@ def test_the_attempt_refuses_a_staged_candidate_that_is_not_the_carried_one(stag
     assert refused.value.failure.type == "verifier_replay_refused"
     assert refused.value.failure.diagnostics["reason_code"] == verifier_replay.REPLAY_BYTES_MISMATCH
     assert len(outcomes) == 1
+
+
+# ----------------------------------------------------------------------------- OWNER-REPAIR-REGRESSION-001 on the REAL path (Stage C run 20261119T200403-218cbbf6)
+#
+# The loop's decision is pinned with scripted units in tests/test_enforce_owner_recovery_verifier_replay_001.py. Here the REAL controller and the REAL
+# units run the measured chain, with only the model transport and the toolchain gates scripted: a two-test verifier fails ONE test against the owner as
+# first written; the person accepts the expectation; the reopened owner's repair makes that test pass and turns the OTHER test - passing before - red;
+# the person then declares the verifier invalid (the sealed sequence). What is proven on the real path: the failed units hand their per-test outcomes
+# back with their refused candidate; the owner's exact pre-repair bytes are staged by the owner unit's own candidate authority with NO Developer
+# request, approved and gated like any candidate, and are the bytes of the plan tree afterwards; the run stops typed and commits nothing.
+
+TWO_TESTS = ("package com.example;\n\nclass LibTest {\n    @org.junit.jupiter.api.Test\n    void testRoundTrip() {\n"
+             "        org.junit.jupiter.api.Assertions.assertEquals(9, new Lib().encode(1L).length);\n    }\n\n"
+             "    @org.junit.jupiter.api.Test\n    void testEmpty() {\n"
+             "        org.junit.jupiter.api.Assertions.assertEquals(9, new Lib().encode(0L).length);\n    }\n}\n")
+PRE_REPAIR = _lib("public byte[] encode(long time) { return java.nio.ByteBuffer.allocate(9).putInt(0).putLong(time).array(); }  // PRE-REPAIR")
+REGRESSED = _lib("public byte[] encode(long time) { return time == 0 ? null : new byte[9]; }  // REGRESSED")
+ROUND_TRIP, EMPTY = "com.example.LibTest.testRoundTrip", "com.example.LibTest.testEmpty"
+
+
+def _two_test_report(failed: str) -> Dict[str, Any]:
+    return {"completeness": "COMPLETE", "runner": "maven", "test_cases": [
+        {"identity": identity, "classname": "com.example.LibTest", "name": identity.rsplit(".", 1)[1],
+         "status": "failed" if identity == failed else "passed", **({"detail": "java.lang.AssertionError: refused"} if identity == failed else {})}
+        for identity in (ROUND_TRIP, EMPTY)]}
+
+
+def _two_test_gate(validator: Any) -> Dict[str, Any]:
+    tree = Path(validator.workspace_path)
+    if not (tree / TEST).exists():
+        return PASSING                                           # an owner invocation: no verifier in its tree
+    if "REGRESSED" in (tree / LIB).read_text():                  # the repair: testRoundTrip passes now, testEmpty - passing before - fails
+        return {"success": False, "test_execution": _two_test_report(EMPTY), "output": (
+            "[ERROR] Tests run: 2, Failures: 0, Errors: 1, Skipped: 0 <<< FAILURE! -- in com.example.LibTest\n"
+            "[ERROR] com.example.LibTest.testEmpty -- Time elapsed: 0.01 s <<< ERROR!\njava.lang.NullPointerException\n"
+            "\tat com.example.LibTest.testEmpty(LibTest.java:11)\n")}
+    return {**_owner_located(tree), "test_execution": _two_test_report(ROUND_TRIP)}     # the owner as first written: testRoundTrip fails inside it
+
+
+def test_real_a_regressive_owner_repair_is_refused_and_the_owners_pre_repair_bytes_are_restored_by_the_owner_unit(tmp_path):
+    from kriya.policy.approval import TypedApprovalCallback, VerifierSemanticDecision
+    from kriya.workflow.workflow import WorkflowEngine
+
+    owner_sources, words, subjects = iter([PRE_REPAIR, REGRESSED]), iter(["expectation_valid", "expectation_invalid"]), []
+    restore_results: List[Dict[str, Any]] = []
+    tree_after_restore: List[str] = []
+
+    def semantic(subject: Any) -> Any:
+        subjects.append(subject)
+        word = next(words)
+        return VerifierSemanticDecision.decided_as(word, subject.fingerprint, "testEmpty is the expectation the goal supports" if word == "expectation_invalid" else None)
+
+    real_unit = WorkflowEngine.run_generation_workflow
+
+    async def observed_unit(engine: Any, *args: Any, **kwargs: Any) -> Any:
+        result = await real_unit(engine, *args, **kwargs)
+        if str(kwargs.get("execution_scope") or "").endswith("role=" + verifier_replay.OWNER_REPAIR_RESTORE_ROLE):
+            restore_results.append(result)
+            tree_after_restore.append((Path(kwargs["workspace_path"]) / LIB).read_text())
+        return result
+
+    callback = TypedApprovalCallback(lambda files, reason: True, lambda subject: None, None, semantic)
+    with patch("kriya.tools.lsp.find_jdtls", return_value=None), patch.object(WorkflowEngine, "run_generation_workflow", new=observed_unit):
+        run = run_enforce(tmp_path, plan=_plan(), goal="Write an encoder and its test", callback=callback, on_tests=_two_test_gate,
+                          units={"s3": (LIB, lambda: next(owner_sources)), "s6": (TEST, TWO_TESTS)},
+                          base_files={"pom.xml": POM, ".gitignore": "target/\n"})
+    legacy = run.result.legacy_result
+    why = {key: legacy.get(key) for key in ("status", "failure_type", "terminal_cause", "reason_codes", "owner_repair_regression", "verifier_repair")}
+
+    # the sealed sequence of reviews: each names the test that failed, and the second one - a new failing set of the same bytes - was asked
+    assert [[identity for identity, _detail in subject.failing_expectations] for subject in subjects] == [[ROUND_TRIP], [EMPTY]], why
+    record = legacy.get("owner_repair_regression")
+    assert record is not None, why
+    assert record["regressed_tests"] == [f"{TEST}::{EMPTY}"] and (record["subtask_id"], record["owner_subtask_id"]) == ("s6", "s3"), why
+    assert record["restored"] is True and record["reason_code"] == verifier_replay.OWNER_REPAIR_REGRESSED, why
+    assert record["owner_files_after"] == record["pre_repair_owner_files"] == {LIB: raw_digest(PRE_REPAIR.encode("utf-8"))}, why
+    # the restoration ran through the owner's REAL unit: no Developer request, the carried bytes staged by candidate authority, gates passed
+    assert run.developer_calls.count("s3") == 2 and run.developer_calls.count("s6") == 1, run.developer_calls
+    assert len(restore_results) == 1 and restore_results[0].get("quality_gates_passed") is True, restore_results
+    assert tree_after_restore == [PRE_REPAIR]                                    # the plan tree holds the exact pre-repair bytes again
+    staged = [event.details for event in _events(run, "verifier.replayed")]
+    assert staged and staged[-1]["paths"] == [LIB] and staged[-1]["digests"] == {LIB: raw_digest(PRE_REPAIR.encode("utf-8"))}, staged
+    assert [details["paths"] for details in staged] == [[TEST], [LIB]], staged   # the verifier replay, then the owner restoration: nothing else carried
+    # a refused repair is never success, and no verifier repair was offered for it
+    assert legacy["status"] != "success" and "verifier_repair" not in legacy, why
+    assert (legacy.get("terminal_cause") or {}).get("failure_category") == verifier_replay.OWNER_REPAIR_REGRESSION_FAILURE_CATEGORY, why
+    assert not (run.workspace / LIB).exists() and not (run.workspace / TEST).exists()        # nothing committed

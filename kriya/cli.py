@@ -3099,6 +3099,8 @@ def _verifier_semantic_decision(subject: Any, yes: bool) -> Any:
         EXPECTATION_INVALID,
         REVIEW_PHASE_FAILING,
         VERIFIER_SEMANTIC_DECISIONS,
+        VERIFIER_SEMANTIC_FAILING_IDENTITY_UNAVAILABLE,
+        VERIFIER_SEMANTIC_FAILING_QUESTION,
         VERIFIER_SEMANTIC_NOT_ASKED,
         VERIFIER_SEMANTIC_NOTICE,
         VERIFIER_SEMANTIC_QUESTION,
@@ -3120,6 +3122,19 @@ def _verifier_semantic_decision(subject: Any, yes: bool) -> Any:
     click.secho(f"\n[Verifier semantic review] A generated verifier {'FAILED' if failing else 'PASSED'}; neither outcome is the truth about the contract.",
                 bold=True, fg="yellow")
     click.echo(VERIFIER_SEMANTIC_NOTICE)
+    # VERIFIER-SEMANTIC-FAILING-EXPECTATION-001: what the decision is ABOUT comes first - the failing test(s) the gate's structured report named,
+    # each with the report's own detail. When the report named none that is said; nothing is inferred from the output text.
+    question = VERIFIER_SEMANTIC_QUESTION
+    if failing:
+        click.secho("\n--- FAILING expectation(s) this decision is about ---", bold=True, fg="red")
+        if subject.failing_expectations:
+            question = VERIFIER_SEMANTIC_FAILING_QUESTION
+            for identity, detail in subject.failing_expectations:
+                click.echo(f"  {identity}")
+                click.echo(f"      {detail or '(the report carries no detail for this test; see the gate output below)'}")
+            click.echo("Every other test of this verifier passed or did not run; this decision is not about them.")
+        else:
+            click.echo(VERIFIER_SEMANTIC_FAILING_IDENTITY_UNAVAILABLE)
     click.secho("\n--- Canonical contract ---", bold=True, fg="cyan")
     click.echo(subject.contract_text)
     for label, items in (("Acceptance criteria", subject.acceptance_criteria), ("Global invariants", subject.invariants)):
@@ -3134,7 +3149,7 @@ def _verifier_semantic_decision(subject: Any, yes: bool) -> Any:
         click.secho("\n--- The verifier's deterministic gate output ---", bold=True, fg="cyan")
         click.echo(redact_text(subject.outcome))
     try:
-        typed = click.prompt(f"\n{VERIFIER_SEMANTIC_QUESTION}\nType one of: {', '.join(VERIFIER_SEMANTIC_DECISIONS)}", default="", show_default=False)
+        typed = click.prompt(f"\n{question}\nType one of: {', '.join(VERIFIER_SEMANTIC_DECISIONS)}", default="", show_default=False)
     except (click.Abort, EOFError, KeyboardInterrupt):
         typed = ""
     word = typed.strip() if isinstance(typed, str) else ""

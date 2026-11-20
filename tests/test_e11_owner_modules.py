@@ -116,6 +116,12 @@ def test_the_semantic_context_payload():
 
 def test_the_subtask_plan_and_constraint_texts():
     assert wc.build_subtask_plan_text(st("s1", ["a.py"], description="add mul")) == "Implement: add mul"
+    # VERIFIER-SCOPE-001: only a unit that plans a runnable test file is told what a test may assert; every other unit's text is unchanged
+    from kriya.workflow.planning_request import VERIFIER_SCOPE_DIRECTIVE
+    with_test = wc.build_subtask_plan_text(st("s2", ["src/test/java/com/example/WidgetTest.java"], description="write the test"))
+    assert with_test == "Implement: write the test\n" + VERIFIER_SCOPE_DIRECTIVE
+    assert "not part of the contract" in VERIFIER_SCOPE_DIRECTIVE and "does not specify" in VERIFIER_SCOPE_DIRECTIVE
+    assert VERIFIER_SCOPE_DIRECTIVE not in wc.build_subtask_plan_text(st("s3", ["src/main/java/com/example/Widget.java", "pom.xml"], description="x"))
     assert wc.build_subtask_constraint_context("") == ""
     assert wc.build_subtask_constraint_context("G").startswith("Overall request constraints (context only; not this "
                                                                "stage's completion scope):\nG\n\n")

@@ -14,7 +14,9 @@ The unit side (no Developer call, exact bytes through the candidate writer, revi
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
 import pytest
@@ -445,3 +447,224 @@ async def test_zero_local_tests_of_the_owner_are_never_positive_dependent_eviden
     result = await _run(tmp_path, shape)
     assert not any(event["owner_recovery_passed"] for event in result.legacy_result["plan_recovery_events"])
     assert _statuses(result)["s3"] != "completed"
+
+
+# ----------------------------------------------------------------------------- OWNER-REPAIR-REGRESSION-001 (Stage C run 20261119T200403-218cbbf6)
+#
+# MEASURED in the sealed run: the consumer's verifier (three tests) failed testNullBody against the owner as first written; a person accepted the
+# expectation; the reopened owner made testNullBody pass by returning null for an empty body, which turned testEmptyBody - PASSING before the
+# repair - red in the replay of the same verifier bytes. The loop kept the repaired bytes in the candidate tree and every later step ran on them.
+# The per-test facts below are the sealed structured reports of that run (tests/fixtures/stage_c_run5), not a reconstruction.
+
+RUN5 = Path(__file__).parent / "fixtures" / "stage_c_run5"
+O0 = (RUN5 / "ProtocolParser.before_repair.java").read_text()
+O1 = (RUN5 / "ProtocolParser.after_repair.java").read_text()
+NULL_BODY, EMPTY_BODY, ROUND_TRIP = (f"com.example.ProtocolParserTest.{name}" for name in ("testNullBody", "testEmptyBody", "testRoundTrip"))
+
+
+def _sealed_outcome(name: str) -> Any:
+    cases = json.loads((RUN5 / name).read_text())["test_cases"]
+    return (TEST, tuple(sorted(case["identity"] for case in cases)),
+            tuple(sorted(case["identity"] for case in cases if case["status"] in ("failed", "error"))))
+
+
+BEFORE_REPAIR = _sealed_outcome("s5_tests_before_owner_repair.test_execution.json")
+AFTER_REPAIR = _sealed_outcome("s5_replay_after_owner_repair.test_execution.json")
+NULL_FAILS = "[ERROR] ProtocolParserTest.testNullBody: expected: <null> but was: <[]>\n\tat com.example.ProtocolParser.decode(ProtocolParser.java:58)\n"
+EMPTY_FAILS = "[ERROR] ProtocolParserTest.testEmptyBody: actual array was <null>\n"
+NULL_FAILS_AGAIN = "[ERROR] ProtocolParserTest.testNullBody: expected: <null> but was: <[0]>\n"
+
+
+def _refused_with(outcomes: Dict[str, Any]) -> Callable[[str, str], RefusedCandidate]:
+    """The refused candidate as the real unit hands it over: its per-test outcome is the one the structured report gave for that gate output."""
+    def refuse(text: str, failure: str) -> RefusedCandidate:
+        return RefusedCandidate(
+            files=(CarriedFile(TEST, text, raw_digest(text.encode("utf-8"))),), binding_digest="binding", failure_type="targeted_test",
+            failure_digest=verifier_replay.failure_identity("targeted_test", failure), test_outcomes=tuple(o for o in (outcomes.get(failure),) if o))
+    return refuse
+
+
+class Run5Shape(Run7Shape):
+    """Run7Shape plus the ONE thing the regression rule adds at the unit boundary: an owner invocation that CARRIES a candidate (the owner's
+    exact pre-repair bytes) stages those bytes instead of asking the Developer. ``restore_accepts`` False = the owner unit's gates refuse them."""
+
+    def __init__(self, *args: Any, restore_accepts: bool = True, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.restore_accepts, self.restores, self.parser_after_restore = restore_accepts, [], None
+
+    async def __call__(self, **kwargs: Any) -> Dict[str, Any]:
+        handle = kwargs.get("carried_candidate")
+        if kwargs["current_subtask_id"] != "s3" or handle is None:
+            return await super().__call__(**kwargs)
+        self.calls.append(kwargs)
+        self.restores.append(handle)
+        if not self.restore_accepts:
+            return {"status": "failed", "quality_gates_passed": False, "files": [],
+                    "last_failure": {"type": "compile", "message": "the gate refused the carried bytes", "raw_output": "refused"}}
+        path = Path(kwargs["workspace_path"]) / PARSER
+        path.write_bytes(handle.candidate.files[0].content.encode("utf-8"))
+        self.parser_after_restore = path.read_text()
+        return {"status": "success", "quality_gates_passed": True, "files": [PARSER], "verification_results": [COMPILE_EVIDENCE],
+                "gate_outcomes": [{"type": "compile", "success": True, "attempt": 1}, dict(ZERO_TESTS)]}
+
+
+def _run5_verdict(parser_text: str, replayed: bool) -> Any:
+    return ("owner", NULL_FAILS) if parser_text == O0 else ("other", EMPTY_FAILS)
+
+
+def test_the_sealed_run5_reports_are_a_regression_of_testEmptyBody_and_only_an_exact_comparison_says_so():
+    """Decision: WHEN a failed replay is a regression. Only the same verifier bytes with per-test outcomes on both sides."""
+    before, after = _refused_with({"x": BEFORE_REPAIR})("V0", "x"), _refused_with({"x": AFTER_REPAIR})("V0", "x")
+    assert BEFORE_REPAIR[2] == (NULL_BODY,) and AFTER_REPAIR[2] == (EMPTY_BODY,)                 # what the sealed run measured
+    assert verifier_replay.regressed_tests(before, after) == (f"{TEST}::{EMPTY_BODY}",)
+    assert verifier_replay.regressed_tests(before, before) == ()                                 # the same failure again: no regression
+    assert verifier_replay.regressed_tests(after, before) == (f"{TEST}::{NULL_BODY}",)           # the comparison has a direction
+    # fail closed: nothing is claimed without exact evidence on BOTH sides
+    assert verifier_replay.regressed_tests(before, _refused("V0", "x")) == ()                    # no per-test outcome after
+    assert verifier_replay.regressed_tests(_refused("V0", "x"), after) == ()                     # none before
+    assert verifier_replay.regressed_tests(before, _refused_with({"x": AFTER_REPAIR})("V1 other bytes", "x")) == ()   # not the same verifier bytes
+    assert verifier_replay.regressed_tests(None, after) == () and verifier_replay.regressed_tests(before, None) == ()
+    # a test that did not execute before is not "previously passing"
+    narrower = _refused_with({"x": (TEST, (NULL_BODY,), (NULL_BODY,))})("V0", "x")
+    assert verifier_replay.regressed_tests(narrower, after) == ()
+
+
+def test_a_refused_candidate_keeps_only_the_outcome_of_exactly_its_own_bytes(tmp_path):
+    """Decision: WHICH outcome a refused candidate carries. One for other bytes or another path is not kept (so it can never be compared)."""
+    (tmp_path / "src/test/java/com/example").mkdir(parents=True)
+    (tmp_path / TEST).write_text("class T {}\n")
+    digest = raw_digest(b"class T {}\n")
+    state = SimpleNamespace(all_files_written={TEST}, candidate_digests={TEST: digest}, last_failure=None, verified_candidate_binding=None)
+    exact = {"path": TEST, "sha256": digest, "identities": [EMPTY_BODY, NULL_BODY], "failed_identities": [NULL_BODY]}
+    kept = verifier_replay.capture_refused_candidate(state, str(tmp_path), [exact, {**exact, "path": "src/test/java/Other.java"}])
+    assert kept.test_outcomes == ((TEST, (EMPTY_BODY, NULL_BODY), (NULL_BODY,)),)
+    assert kept.passed_tests() == frozenset({(TEST, EMPTY_BODY)}) and kept.failed_tests() == frozenset({(TEST, NULL_BODY)})
+    assert verifier_replay.capture_refused_candidate(state, str(tmp_path), [{**exact, "sha256": "0" * 64}]).test_outcomes == ()
+    assert verifier_replay.capture_refused_candidate(state, str(tmp_path)).test_outcomes == ()        # the historical call: unchanged
+
+
+@pytest.mark.asyncio
+async def test_run5_a_repair_that_turns_a_previously_passing_test_red_is_refused_restored_exactly_and_stops(tmp_path):
+    """Decision: WHAT happens to a regressive repair. Refused; the owner's exact pre-repair bytes go back through the owner unit's own candidate
+    path (no Developer call); the episode stops typed; the owner is never reopened again on the failure its own repair caused."""
+    shape = Run5Shape([O0, O1], _run5_verdict, refuse=_refused_with({NULL_FAILS: BEFORE_REPAIR, EMPTY_FAILS: AFTER_REPAIR}))
+    result = await _run(tmp_path, shape)
+
+    assert shape.units() == ["s3", "s6", "s3", "s6", "s3"]
+    assert shape.roles() == ["planned", "planned", "owner_recovery", "verifier_replay", verifier_replay.OWNER_REPAIR_RESTORE_ROLE]
+    assert shape.parser == [] and len(shape.generated) == 1                  # no third Developer answer for the owner, no new verifier
+    (restore,) = shape.restores
+    assert [(file.path, file.content, file.raw_sha256) for file in restore.candidate.files] == [(PARSER, O0, raw_digest(O0.encode("utf-8")))]
+    assert restore.unit_id == "s3" and shape.parser_after_restore == O0 != O1
+    record = result.legacy_result["owner_repair_regression"]
+    assert record["reason_code"] == verifier_replay.OWNER_REPAIR_REGRESSED and record["restored"] is True
+    assert record["regressed_tests"] == [f"{TEST}::{EMPTY_BODY}"] and (record["subtask_id"], record["owner_subtask_id"]) == ("s6", "s3")
+    assert record["owner_files_after"] == record["pre_repair_owner_files"] == {PARSER: raw_digest(O0.encode("utf-8"))}
+    # a failed repair is never local or final success
+    legacy = result.legacy_result
+    assert legacy["status"] != "success" and not (tmp_path / TEST).exists()
+    assert legacy["terminal_cause"]["failure_category"] == verifier_replay.OWNER_REPAIR_REGRESSION_FAILURE_CATEGORY
+    assert legacy["terminal_cause"]["reason"].startswith(verifier_replay.OWNER_REPAIR_REGRESSED + ":")
+    assert [event["owner_recovery_passed"] for event in legacy["plan_recovery_events"]] == [False]
+    statuses = _statuses(result)
+    assert statuses["s3"] == "needs_review" and statuses["s6"] != "completed"
+
+
+@pytest.mark.asyncio
+async def test_a_replay_that_fails_differently_without_a_regression_still_goes_back_to_the_owner(tmp_path):
+    """Negative control for the rule above, with per-test outcomes present on both sides: the SAME test fails after the repair with another
+    message, nothing that passed before fails now. The existing bounded multi-step recovery is unchanged: no restore, the owner is reopened."""
+    same_test_fails = (TEST, BEFORE_REPAIR[1], (NULL_BODY,))
+
+    def verdict(parser_text: str, replayed: bool) -> Any:
+        if parser_text == O0:
+            return ("owner", NULL_FAILS)
+        return ("other", NULL_FAILS_AGAIN) if parser_text == O1 else None
+
+    shape = Run5Shape([O0, O1, "the second repair is right"], verdict,
+                      refuse=_refused_with({NULL_FAILS: BEFORE_REPAIR, NULL_FAILS_AGAIN: same_test_fails}))
+    result = await _run(tmp_path, shape)
+
+    assert shape.roles() == ["planned", "planned", "owner_recovery", "verifier_replay", "owner_recovery", "verifier_replay"]
+    assert shape.restores == [] and "owner_repair_regression" not in result.legacy_result
+    assert "The failure CHANGED after your repair" in shape.contexts("s3")[2]            # the new evidence reached the owner, as before
+    assert result.legacy_result["status"] == "success" and _statuses(result) == {"s3": "completed", "s6": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_a_regressive_repair_whose_pre_repair_bytes_cannot_be_restored_stops_typed_and_is_never_reported_restored(tmp_path):
+    """Decision: fail closed when restoration is not proven. The owner unit's gates refuse the carried bytes: the repair is still refused and the
+    episode still stops, with the reason code that says the refused bytes are still in the candidate tree."""
+    shape = Run5Shape([O0, O1], _run5_verdict, refuse=_refused_with({NULL_FAILS: BEFORE_REPAIR, EMPTY_FAILS: AFTER_REPAIR}), restore_accepts=False)
+    result = await _run(tmp_path, shape)
+
+    assert shape.roles() == ["planned", "planned", "owner_recovery", "verifier_replay", verifier_replay.OWNER_REPAIR_RESTORE_ROLE]
+    record = result.legacy_result["owner_repair_regression"]
+    assert record["restored"] is False and record["reason_code"] == verifier_replay.OWNER_REPAIR_REGRESSED_RESTORE_UNAVAILABLE
+    assert record["owner_files_after"] == {PARSER: raw_digest(O1.encode("utf-8"))} != record["pre_repair_owner_files"]
+    assert "could NOT be restored" in result.legacy_result["terminal_cause"]["reason"]
+    assert result.legacy_result["status"] != "success" and _statuses(result)["s3"] == "needs_review"
+    assert shape.parser == []                                                    # and the owner is not reopened again
+
+
+@pytest.mark.asyncio
+async def test_without_per_test_outcomes_the_existing_routing_is_unchanged(tmp_path):
+    """Decision: no evidence, no rule. The run-5 shape WITHOUT structured outcomes (the historical refused candidate) is not called a regression."""
+    shape = Run5Shape([O0, O1, O1 + "// second", O1 + "// third"], _run5_verdict)
+    result = await _run(tmp_path, shape)
+    assert shape.restores == [] and "owner_repair_regression" not in result.legacy_result
+    assert shape.roles() == ["planned", "planned"] + ["owner_recovery", "verifier_replay"] * 3
+
+
+OTHER = "src/main/java/com/example/ProtocolApplication.java"
+
+
+def _plan_with_another_dependent() -> EngineeringPlan:
+    """The run-7 plan plus s4: a second unit that depends on the owner and COMPLETED against its first bytes (the sealed run's s4)."""
+    base = _plan()
+    return EngineeringPlan(plan_id="run5shape", kind=ChangeKind.TASK, subtasks=[
+        base.subtasks[0],
+        Subtask(id="s4", description="create the application", execution_method=ExecutionMethod.MODEL, depends_on=["s3"],
+                planned_files=[PlannedFile(path=OTHER, action=FileAction.CREATE)], requires=["protocol-parser"], verification=[COMPILE]),
+        base.subtasks[1],
+    ])
+
+
+class Run5ShapeWithDependent(Run5Shape):
+    async def __call__(self, **kwargs: Any) -> Dict[str, Any]:
+        if kwargs["current_subtask_id"] != "s4":
+            return await super().__call__(**kwargs)
+        self.calls.append(kwargs)
+        path = Path(kwargs["workspace_path"]) / OTHER
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("class ProtocolApplication {}\n")
+        return {"status": "success", "quality_gates_passed": True, "files": [OTHER], "verification_results": [COMPILE_EVIDENCE],
+                "gate_outcomes": [{"type": "compile", "success": True, "attempt": 1}, dict(ZERO_TESTS)]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restore_accepts", [True, False])
+async def test_run5_dependent_state_follows_the_bytes_restored_exactly_or_not_at_all(tmp_path, restore_accepts):
+    """Decision: WHAT the other dependents of the owner are afterwards. s4 completed against the owner's first bytes and was invalidated when
+    the owner was reopened. Exact restoration puts its completed state and result back WITHOUT running it again (its evidence describes these
+    bytes); when the bytes are not restored it is NOT reported completed over the refused bytes."""
+    shape = Run5ShapeWithDependent([O0, O1], _run5_verdict, refuse=_refused_with({NULL_FAILS: BEFORE_REPAIR, EMPTY_FAILS: AFTER_REPAIR}),
+                                   restore_accepts=restore_accepts)
+    result = await _run(tmp_path, shape, _plan_with_another_dependent())
+
+    assert shape.units() == ["s3", "s4", "s6", "s3", "s6", "s3"], shape.roles()        # s4 ran once: never re-entered, restored or not
+    record = result.legacy_result["owner_repair_regression"]
+    assert record["restored"] is restore_accepts, record
+    statuses = _statuses(result)
+    if restore_accepts:
+        assert statuses.get("s4") == "completed", statuses
+        assert [item.subtask_id for item in result.subtask_results].count("s4") == 1
+    else:
+        assert statuses.get("s4") != "completed", statuses
+    assert statuses["s3"] == "needs_review" and result.legacy_result["status"] != "success", statuses
+
+
+def test_the_regression_reason_codes_are_a_closed_table():
+    assert verifier_replay.OWNER_REPAIR_REGRESSION_CODES == ("OWNER_REPAIR_REGRESSED_ACCEPTED_VERIFIER", "OWNER_REPAIR_REGRESSED_RESTORE_UNAVAILABLE")
+    assert verifier_replay.OWNER_REPAIR_REGRESSION_FAILURE_CATEGORY == "owner_repair_regressed"
+    assert verifier_replay.OWNER_REPAIR_RESTORE_ROLE == "owner_repair_restore"

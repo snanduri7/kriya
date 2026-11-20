@@ -423,8 +423,23 @@ def build_subtask_plan_text(subtask: Subtask) -> str:
     stop re-running a fresh Planner+Architect cycle for an already-validated
     Subtask. Deliberately short, plain prose: a plan is never a source of
     file content (FILE-INTEGRITY-CONTRACT-001B), so the subtask's files come
-    from an ordinary Developer generation call."""
-    return f"Implement: {subtask.description}"
+    from an ordinary Developer generation call.
+
+    VERIFIER-SCOPE-001 (Stage C run 20261119T200403-218cbbf6): MEASURED on the sealed request of the test-writing unit - the goal's sentence that
+    null-body behaviour "is not part of this contract" was in the request twice, and the model still wrote a test asserting a result for it; a
+    person then accepted that test and the production code was changed to satisfy it. A unit that plans a runnable test file is told the scope
+    of what a test may assert. Advisory request text only: it classifies nothing, and the goal stays the one statement of the contract."""
+    plan_text = f"Implement: {subtask.description}"
+    if any(is_runnable_test_file(planned.path) for planned in subtask.planned_files):
+        plan_text += "\n" + VERIFIER_SCOPE_DIRECTIVE
+    return plan_text
+
+
+VERIFIER_SCOPE_DIRECTIVE = (
+    "Test scope: a test written in this subtask asserts only behaviour the authoritative goal REQUIRES. Where the goal says a behaviour is not "
+    "part of the contract, or does not specify it, write no test that expects a particular result for it (no assertion on its return value, "
+    "exception or side effect). A test that pins unspecified behaviour is a defect in the test."
+)
 
 
 # PLANNER-WIRE-SCHEMA-ORDER-001: the CONTENT of the two example objects the authoritative Planner prompt shows. Their key order is not stated here - it is

@@ -4,7 +4,8 @@ Pinned here, model-free, with the REAL structural parser and report dicts in the
 - a generated-verifier subject is derived only from the structured report + the structural declaration + the run's write journal - never from a file
   name, a Planner declaration or a model;
 - one subject per run-authored source file; an unchanged pre-existing test that executed is not a subject; a mixed unit yields only its test file;
-- ``expectation_valid`` is authority for the exact verifier content under the exact contract and survives a phase or failure change, and nothing else;
+- ``expectation_valid`` is authority for the exact verifier content under the exact contract and survives a phase change; made while failing it covers
+  the failing expectations it was shown and a different failing set is asked again (ruling 1 as amended 2026-11-19);
 - ``expectation_invalid`` spends the one regeneration of that file's subject; another file has its own; there is no second regeneration;
 - ``cannot_decide``, no decision, an unattended run and a stale decision change nothing and end in needs-review;
 - a locator alone never selects a production owner: typed failure + locator to a non-verifier workspace artifact + ONE plan owner + no conflict does.
@@ -12,7 +13,10 @@ Pinned here, model-free, with the REAL structural parser and report dicts in the
 Generic synthetic names only. The loop seams that call this owner are pinned in their own tests."""
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import json
+import pathlib
 
 import pytest
 
@@ -26,6 +30,8 @@ from kriya.policy.approval import (
     VerifierRepairDecision,
     VerifierSemanticDecision,
     VerifierSemanticSubject,
+    failing_expectations_identity,
+    verifier_semantic_reviewable,
 )
 from kriya.workflow import verifier_semantic as vs
 from kriya.workflow.verifier_semantic import (
@@ -192,13 +198,50 @@ def test_any_change_of_semantic_content_is_another_authority_and_a_valid_decisio
     assert ledger.before_asking(drifted, attended=False).action is Action.NEEDS_REVIEW
 
 
-def test_valid_while_failing_settles_the_same_bytes_passing_and_a_later_different_failure_without_another_review():
+def test_valid_while_failing_settles_the_same_bytes_passing_but_a_later_different_failure_is_asked_again():
+    """WS3-C ruling 1 as amended 2026-11-19 (VERIFIER-SEMANTIC-FAILING-EXPECTATION-001): the decision covers the failing expectations it was shown.
+    It survives the verifier going from failing to passing and the SAME failure again; a different failing set of the same bytes is asked."""
     ledger, failing = VerifierSemanticLedger(), _subject()
     assert ledger.before_asking(failing, attended=True).action is Action.ASK
     assert ledger.after_decision(failing, _decided(EXPECTATION_VALID, failing)) == vs.SubjectDecision(Action.PROCEED, PATH)
-    for later in (_subject(review_phase=REVIEW_PHASE_PASSING, failure_identity=None), _subject(failure_identity="f2" * 32)):
+    for later in (_subject(review_phase=REVIEW_PHASE_PASSING, failure_identity=None), _subject(outcome="the same failure, another output")):
         assert ledger.before_asking(later, attended=True).action is Action.PROCEED       # no second card
         assert ledger.before_asking(later, attended=False).action is Action.PROCEED      # and an unattended continuation needs none either
+    another = _subject(failure_identity="f2" * 32)
+    assert another.semantic_authority_fingerprint == failing.semantic_authority_fingerprint      # the same content ...
+    assert not ledger.expectation_valid(another)                                                 # ... is not thereby the same decision
+    assert ledger.before_asking(another, attended=True).action is Action.ASK
+    assert (ledger.before_asking(another, attended=False).action, ledger.before_asking(another, attended=False).reason_code) == (
+        Action.NEEDS_REVIEW, vs.REASON_UNATTENDED)
+    # a decision on the new failing set covers it too, and the first one is still covered
+    assert ledger.after_decision(another, _decided(EXPECTATION_VALID, another)).action is Action.PROCEED
+    assert ledger.expectation_valid(another) and ledger.expectation_valid(failing)
+
+
+def _failing(*identities, **changes):
+    shown = tuple((identity, f"AssertionFailedError: {identity}") for identity in identities)
+    fields = {"failure_identity": failing_expectations_identity([identity for identity, _detail in shown]), "failing_expectations": shown}
+    fields.update(changes)
+    return _subject(**fields)
+
+
+def test_a_valid_decision_covers_the_shown_failing_identities_and_their_subsets_never_a_new_one():
+    ledger, shown = VerifierSemanticLedger(), _failing("t.a", "t.b")
+    assert ledger.after_decision(shown, _decided(EXPECTATION_VALID, shown)).action is Action.PROCEED
+    assert ledger.expectation_valid(_failing("t.a"))                  # one of the two shown still fails: nothing new to adjudicate
+    assert ledger.expectation_valid(_failing("t.a", "t.b"))
+    assert not ledger.expectation_valid(_failing("t.c"))              # never shown
+    assert not ledger.expectation_valid(_failing("t.a", "t.c"))       # one shown, one new: the new one was never accepted
+    # a review that could not name its failing identities covers only its own bound identity, and nothing covers an unnamed later set
+    unnamed = _subject(failure_identity="f3" * 32)
+    assert not ledger.expectation_valid(unnamed)
+
+
+def test_a_valid_decision_made_while_passing_keeps_the_authority_it_had():
+    """Passing-phase authority is preserved: a verifier accepted while every test passed is accepted for what it expects, whichever test fails later."""
+    ledger, passing = VerifierSemanticLedger(), _subject(review_phase=REVIEW_PHASE_PASSING, failure_identity=None, outcome="")
+    assert ledger.after_decision(passing, _decided(EXPECTATION_VALID, passing)).action is Action.PROCEED
+    assert ledger.expectation_valid(_subject()) and ledger.expectation_valid(_failing("t.a")) and ledger.expectation_valid(_subject(failure_identity="f2" * 32))
 
 
 def test_valid_while_passing_does_not_cover_later_verifier_bytes():
@@ -346,3 +389,98 @@ def test_a_locator_with_no_plan_ownership_never_selects_whatever_the_file_is_cal
     """The locator is grounding only: with no plan owner behind it nothing is selected, and a production-looking name changes nothing."""
     assert not _owner(owners_of=lambda p: []).selected
     assert not _owner(located_paths=["src/main/java/com/example/Service.java"], is_workspace_artifact=lambda p: True, owners_of=lambda p: []).selected
+
+
+# ------------------------------------------------------------------ the sealed Stage C run 20261119T200403-218cbbf6 (VERIFIER-SEMANTIC-FAILING-EXPECTATION-001)
+
+RUN5 = pathlib.Path(__file__).parent / "fixtures" / "stage_c_run5"
+RUN5_TEST = "src/test/java/com/example/ProtocolParserTest.java"
+RUN5_PARSER = "src/main/java/com/example/ProtocolParser.java"
+RUN5_BYTES = (RUN5 / "ProtocolParserTest.java").read_bytes()
+RUN5_GOAL = "an empty non-null body is valid; behavior for a null body is not part of this contract."
+
+
+def _run5_report(name):
+    return json.loads((RUN5 / name).read_text())
+
+
+def _run5_unit(answer, asked):
+    return vs.UnitSemantics(ledger=VerifierSemanticLedger(), run_id="r", plan_hash="p", unit_id="s5", goal=RUN5_GOAL, regenerable=True, attended=True,
+                            callback=_callback(answer, asked), read_bytes=lambda path: RUN5_BYTES if path == RUN5_TEST else None)
+
+
+async def _run5_failure(unit, report_name):
+    unit.results = []
+    unit.observe({"type": "tests", "success": False, "test_execution": _run5_report(report_name)})
+    return await unit.on_gate_failure(
+        written=[RUN5_TEST], failure_type="targeted_test", outcome="[ERROR] Tests run: 3, Failures: 1",
+        locate=lambda: ([RUN5_PARSER], []), is_workspace_artifact=lambda path: True, owners_of=lambda path: ["s3"] if path == RUN5_PARSER else ["s5"])
+
+
+def test_the_sealed_run5_report_names_the_one_failing_test_with_the_gates_own_detail():
+    derivation = derive_executed_verifiers(_run5_report("s5_tests_before_owner_repair.test_execution.json"), {RUN5_TEST: RUN5_BYTES})
+    (verifier,) = derivation.verifiers
+    assert verifier.failed_identities == ("com.example.ProtocolParserTest.testNullBody",)
+    assert verifier.failure_details == (("com.example.ProtocolParserTest.testNullBody", "org.opentest4j.AssertionFailedError: expected: <null> but was: <[]>"),)
+    assert sorted(verifier.identities) == ["com.example.ProtocolParserTest.testEmptyBody", "com.example.ProtocolParserTest.testNullBody",
+                                           "com.example.ProtocolParserTest.testRoundTrip"]
+
+
+@pytest.mark.asyncio
+async def test_run5_the_review_is_about_testNullBody_and_a_valid_answer_still_selects_the_one_production_owner():
+    asked = []
+    unit = _run5_unit(lambda s: VerifierSemanticDecision.decided_as(EXPECTATION_VALID, s.fingerprint), asked)
+    ruling = await _run5_failure(unit, "s5_tests_before_owner_repair.test_execution.json")
+    (subject,) = asked
+    assert subject.failing_expectations == (("com.example.ProtocolParserTest.testNullBody", "org.opentest4j.AssertionFailedError: expected: <null> but was: <[]>"),)
+    assert subject.failure_identity == failing_expectations_identity(["com.example.ProtocolParserTest.testNullBody"])
+    assert verifier_semantic_reviewable(subject)
+    # a genuinely valid failing expectation keeps its repair path: the one owner the locator and the plan name
+    assert ruling.owner is not None and ruling.owner.selected and (ruling.owner.owner_id, ruling.owner.files) == ("s3", (RUN5_PARSER,))
+
+
+@pytest.mark.asyncio
+async def test_run5_a_valid_answer_about_testNullBody_does_not_cover_testEmptyBody_failing_later_on_the_same_bytes():
+    """The measured chain: the same verifier bytes, first failing testNullBody, then (after the owner repair) testEmptyBody. The first decision
+    was shown testNullBody only; the second failing set is put to the person again, and its answer decides - nothing is carried silently."""
+    answers, asked = [EXPECTATION_VALID, EXPECTATION_INVALID], []
+
+    def answer(subject):
+        word = answers.pop(0)
+        return VerifierSemanticDecision.decided_as(word, subject.fingerprint, "testNullBody is outside the contract" if word == EXPECTATION_INVALID else None)
+
+    unit = _run5_unit(answer, asked)
+    first = await _run5_failure(unit, "s5_tests_before_owner_repair.test_execution.json")
+    second = await _run5_failure(unit, "s5_replay_after_owner_repair.test_execution.json")
+    assert [[identity for identity, _detail in subject.failing_expectations] for subject in asked] == [
+        ["com.example.ProtocolParserTest.testNullBody"], ["com.example.ProtocolParserTest.testEmptyBody"]]
+    assert asked[0].semantic_authority_fingerprint == asked[1].semantic_authority_fingerprint and asked[0].fingerprint != asked[1].fingerprint
+    assert first.owner is not None and second.owner is None and second.regenerate == RUN5_TEST      # no production owner from the unseen failure
+    # negative control: the SAME failing set again is not asked again
+    counted = []
+    unit_same = _run5_unit(lambda s: VerifierSemanticDecision.decided_as(EXPECTATION_VALID, s.fingerprint), counted)
+    await _run5_failure(unit_same, "s5_tests_before_owner_repair.test_execution.json")
+    again = await _run5_failure(unit_same, "s5_tests_before_owner_repair.test_execution.json")
+    assert len(counted) == 1 and again.owner is not None and again.owner.selected
+
+
+def test_run5_the_per_test_outcomes_are_exported_for_exactly_the_executed_bytes_and_nothing_when_provenance_is_unknown():
+    unit = _run5_unit(lambda s: pytest.fail("not asked"), [])
+    unit.observe({"type": "tests", "success": False, "test_execution": _run5_report("s5_tests_before_owner_repair.test_execution.json")})
+    assert unit.executed_outcomes([RUN5_TEST]) == [{
+        "path": RUN5_TEST, "sha256": _hex(RUN5_BYTES),
+        "identities": ["com.example.ProtocolParserTest.testEmptyBody", "com.example.ProtocolParserTest.testNullBody", "com.example.ProtocolParserTest.testRoundTrip"],
+        "failed_identities": ["com.example.ProtocolParserTest.testNullBody"]}]
+    unreadable = vs.UnitSemantics(ledger=VerifierSemanticLedger(), run_id="r", plan_hash="p", unit_id="s5", goal=RUN5_GOAL, read_bytes=lambda path: None)
+    unreadable.observe({"type": "tests", "success": False, "test_execution": _run5_report("s5_tests_before_owner_repair.test_execution.json")})
+    assert unreadable.executed_outcomes([RUN5_TEST]) == []            # what the file declares is unknown: no outcome is reported for it
+    assert unit.executed_outcomes([]) == []                           # nothing this run wrote executed
+
+
+def test_a_shown_failing_expectation_must_be_the_one_the_decision_is_bound_to():
+    assert verifier_semantic_reviewable(_failing("t.a", "t.b"))
+    assert not verifier_semantic_reviewable(_failing("t.a", failure_identity="f1" * 32))                      # shown and bound differ
+    assert not verifier_semantic_reviewable(_subject(review_phase=REVIEW_PHASE_PASSING, failure_identity=None,
+                                                     failing_expectations=(("t.a", ""),)))                    # a passing verifier fails nothing
+    assert not verifier_semantic_reviewable(dataclasses.replace(_failing("t.a"), failing_expectations=(("t.a", "line one\nline two"),)))   # not the gate's bounded one-line detail
+    assert verifier_semantic_reviewable(_subject())                    # no identity available: still reviewable, and disclosed by the prompt

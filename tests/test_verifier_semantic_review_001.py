@@ -516,6 +516,40 @@ def test_the_terminal_prompt_takes_only_the_three_exact_words(monkeypatch, capsy
         assert decision == VerifierSemanticDecision.decided_as(expected, subject.fingerprint)
 
 
+def test_the_terminal_prompt_puts_the_failing_expectation_first_and_says_what_a_valid_answer_starts(monkeypatch, capsys):
+    """VERIFIER-SEMANTIC-FAILING-EXPECTATION-001 (Stage C run 20261119T200403-218cbbf6): the review named neither the failing test nor the real
+    consequence of ``expectation_valid``. Shown first: the failing identity and the gate's own detail; asked: about THAT expectation."""
+    import kriya.cli as cli
+    asked = []
+    monkeypatch.setattr(cli.click, "prompt", lambda text, **kw: asked.append(text) or "cannot_decide")
+    shown = (("com.example.WidgetTest.counts", "AssertionFailedError: expected: <3> but was: <2>"),)
+    subject = _subject(failure_identity=policy.failing_expectations_identity(["com.example.WidgetTest.counts"]), failing_expectations=shown)
+    assert verifier_semantic_reviewable(subject)
+    decision = cli._verifier_semantic_decision(subject, False)
+    out = capsys.readouterr().out
+    assert decision == VerifierSemanticDecision.decided_as(CANNOT_DECIDE, subject.fingerprint)
+    assert out.index("FAILING expectation(s) this decision is about") < out.index("--- Canonical contract ---") < out.index("--- Verifier under review")
+    assert "com.example.WidgetTest.counts" in out and "AssertionFailedError: expected: <3> but was: <2>" in out
+    assert policy.VERIFIER_SEMANTIC_FAILING_QUESTION in asked[0] and policy.VERIFIER_SEMANTIC_QUESTION not in asked[0]
+    # the stale statement is gone and the real consequence is stated
+    assert "authorizes no change" not in policy.VERIFIER_SEMANTIC_NOTICE and "authorizes no change" not in out
+    assert "may then reopen the one production owner" in out and "a different failing set of the same verifier is asked again" in out
+
+
+def test_the_terminal_prompt_says_so_when_the_failing_test_is_not_identified_and_guesses_nothing(monkeypatch, capsys):
+    import kriya.cli as cli
+    asked = []
+    monkeypatch.setattr(cli.click, "prompt", lambda text, **kw: asked.append(text) or "cannot_decide")
+    cli._verifier_semantic_decision(_subject(), False)                                   # failing, no identity in the report
+    out = capsys.readouterr().out
+    assert policy.VERIFIER_SEMANTIC_FAILING_IDENTITY_UNAVAILABLE in out and policy.VERIFIER_SEMANTIC_QUESTION in asked[0]
+    assert policy.VERIFIER_SEMANTIC_FAILING_QUESTION not in asked[0]
+    cli._verifier_semantic_decision(_subject(review_phase=REVIEW_PHASE_PASSING, failure_identity=None, outcome=""), False)   # passing: no failing block
+    out = capsys.readouterr().out
+    assert "FAILING expectation(s)" not in out and policy.VERIFIER_SEMANTIC_FAILING_IDENTITY_UNAVAILABLE not in out
+    assert policy.VERIFIER_SEMANTIC_QUESTION in asked[1]
+
+
 @pytest.mark.parametrize("error", [EOFError, KeyboardInterrupt])
 def test_an_interrupted_prompt_is_no_decision(monkeypatch, error):
     import click

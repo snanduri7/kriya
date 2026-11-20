@@ -529,10 +529,41 @@ def verifier_repair_entry_verified(entry: Any) -> bool:
 VERIFIER_SEMANTIC_QUESTION = "Is what this verifier expects correct under the canonical contract?"
 VERIFIER_SEMANTIC_NOTICE = (
     "A generated verifier is candidate evidence: neither its pass nor its failure is the truth about the contract. Only your decision here gives its "
-    "expectation semantic authority, for exactly these verifier bytes in this run. 'Expectation is valid' accepts the expectation; it does not say which "
-    "code is wrong and authorizes no change. 'Expectation is invalid' permits ONE regeneration of this verifier, reviewed and gated as source. "
-    "'Cannot decide' changes nothing and sends the run to review."
+    "expectation semantic authority, for exactly these verifier bytes in this run. 'Expectation is valid' accepts the expectation. For a FAILING "
+    "verifier that makes its failure evidence against the production code: Kriya may then reopen the one production owner that failure "
+    "identifies and change that code, within its bounded recovery, until the accepted expectation holds. It covers the failing expectation(s) "
+    "shown in this review; a different failing set of the same verifier is asked again. 'Expectation is invalid' permits ONE regeneration of "
+    "this verifier, reviewed and gated as source. 'Cannot decide' changes nothing and sends the run to review."
 )
+# VERIFIER-SEMANTIC-FAILING-EXPECTATION-001 (Stage C run 20261119T200403-218cbbf6, owner ruling 2026-11-19). MEASURED: a three-test verifier failed
+# on ONE out-of-contract test; the review asked about the whole file, did not name the failing test, and said a valid answer "authorizes no change"
+# although a valid answer reopened the production owner (VERIFIER-FAILURE-OWNER-CORROBORATION-001). For a failing verifier whose failing test
+# identities are known the question is about THOSE expectations, and they are shown first with the gate's own detail.
+VERIFIER_SEMANTIC_FAILING_QUESTION = "Is each FAILING expectation shown above correct under the canonical contract?"
+VERIFIER_SEMANTIC_FAILING_IDENTITY_UNAVAILABLE = (
+    "The gate's structured report did not identify which test(s) of this verifier failed: the failing expectation cannot be shown individually. "
+    "Read the gate output below; if you cannot tell which expectation failed, answer cannot_decide."
+)
+VERIFIER_SEMANTIC_EXPECTATION_DETAIL_MAX_CHARS = 400
+VERIFIER_SEMANTIC_MAX_FAILING_EXPECTATIONS = 64
+
+
+def failing_expectations_identity(identities: Any) -> str:
+    """The failure identity of a failing verifier: the digest over its failing test identities, in order (what ``VerifierSemanticSubject.failure_identity``
+    binds). One definition, so what is SHOWN (``failing_expectations``) can be held to what is BOUND."""
+    return hashlib.sha256("\n".join(identities).encode("utf-8")).hexdigest()
+
+
+def verifier_semantic_failing_expectations(identities: Any, details: Any) -> Tuple[Tuple[str, str], ...]:
+    """(test identity, the gate's own failure detail) for each failing identity, in the given order. A detail is the structured report's own text
+    or "" - never guessed: a missing, over-long or multi-line detail, or one the redaction owner would change, is shown as absent."""
+    shown = []
+    for identity in identities:
+        detail = details.get(identity) if isinstance(details, dict) else None
+        usable = (isinstance(detail, str) and 0 < len(detail) <= VERIFIER_SEMANTIC_EXPECTATION_DETAIL_MAX_CHARS
+                  and not any(ord(char) < 32 or ord(char) == 127 for char in detail) and redact_value(detail) == detail)
+        shown.append((identity, detail if usable else ""))
+    return tuple(shown)
 REVIEW_PHASE_PASSING, REVIEW_PHASE_FAILING = "passing_verifier", "failing_verifier"
 VERIFIER_SEMANTIC_PHASES = (REVIEW_PHASE_PASSING, REVIEW_PHASE_FAILING)
 VERIFIER_SEMANTIC_MAX_ITEMS = 64          # criteria + invariants shown on one review
@@ -583,6 +614,9 @@ class VerifierSemanticSubject:
     contract_text: str = ""
     verifier_sources: Tuple[Tuple[str, str], ...] = ()       # (path, exact text)
     outcome: str = ""
+    # VERIFIER-SEMANTIC-FAILING-EXPECTATION-001: (failing test identity, the gate's own detail or ""), in the order ``failure_identity`` was taken
+    # over. Shown, and held to the bound identity by ``verifier_semantic_reviewable``. () = the structured report named no failing identity.
+    failing_expectations: Tuple[Tuple[str, str], ...] = ()
 
     @property
     def fingerprint(self) -> str:
@@ -599,7 +633,11 @@ class VerifierSemanticSubject:
         """WHAT an ``expectation_valid`` decision is authority FOR (WS3-C ruling 1): the exact verifier semantic content under the exact contract - run, plan,
         verifier unit, verifier source identity and bytes, goal and contract digests, criteria and invariants (id and text). The review phase and the failure
         identity are NOT in it: they identify the review EVENT (``fingerprint``, which binds the wire, staleness and audit), and a verifier's outcome changing
-        from fail to pass does not change what it expects. Any byte, goal, contract, criterion, invariant, plan, run or source-identity change is another value."""
+        from fail to pass does not change what it expects. Any byte, goal, contract, criterion, invariant, plan, run or source-identity change is another value.
+
+        Amended 2026-11-19 (VERIFIER-SEMANTIC-FAILING-EXPECTATION-001): this value is unchanged, but a decision made while the verifier was FAILING
+        no longer covers a different failing set of the same bytes - ``VerifierSemanticLedger`` keeps which failing expectations each such decision
+        was shown and asks again for others. A decision made while the verifier was passing covers what it covered before."""
         return _sha(json.dumps({
             "kind": KIND_VERIFIER_SEMANTIC, "purpose": "semantic_authority", "run_id": self.run_id, "plan_hash": self.plan_hash,
             "verifier_unit_id": self.verifier_unit_id, "verifier_files": [list(pair) for pair in self.verifier_files],
@@ -630,6 +668,14 @@ def verifier_semantic_reviewable(subject: VerifierSemanticSubject) -> bool:
     items = [*subject.acceptance_criteria, *subject.invariants]
     if len(items) > VERIFIER_SEMANTIC_MAX_ITEMS or any(not isinstance(i, str) or not i or not isinstance(t, str) for i, t in items):
         return False
+    shown_failing = subject.failing_expectations
+    if shown_failing:
+        # what is shown as "the failing expectations" must be exactly what the decision is bound to; anything else is never offered
+        if (subject.review_phase != REVIEW_PHASE_FAILING or len(shown_failing) > VERIFIER_SEMANTIC_MAX_FAILING_EXPECTATIONS
+                or any(not isinstance(i, str) or not i or not isinstance(d, str) for i, d in shown_failing)
+                or failing_expectations_identity([identity for identity, _detail in shown_failing]) != subject.failure_identity
+                or verifier_semantic_failing_expectations([i for i, _d in shown_failing], dict(shown_failing)) != tuple(shown_failing)):
+            return False
     texts = [*sources.values(), subject.contract_text]
     return (all(isinstance(text, str) and 0 < len(text) <= VERIFIER_REPAIR_MAX_SOURCE_CHARS and redact_value(text) == text for text in texts)
             and all(redact_value(text) == text for _id, text in items))

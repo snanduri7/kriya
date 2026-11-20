@@ -18,7 +18,9 @@ human-bound acceptance and the named-test oracle all judge operator-supplied or 
 ``verifier_semantic_review`` decision (``kriya/policy/approval.py``): unattended, or with no decision, the answer is needs-review.
 
 ``expectation_valid`` is authority for the exact verifier content under the exact contract (``semantic_authority_fingerprint``: no review phase, no failure
-identity), so it survives the verifier going from failing to passing and a later different failure of the same bytes. It never selects a production owner:
+identity), so it survives the verifier going from failing to passing. Amended 2026-11-19 (VERIFIER-SEMANTIC-FAILING-EXPECTATION-001, Stage C run
+20261119T200403-218cbbf6): a decision made while the verifier was FAILING covers the failing expectations it was shown; a later failure of the same bytes
+that includes an expectation no such decision was shown is asked again (a decision made while it was passing covers what it did before). It never selects a production owner:
 that needs typed failure + a deterministic locator to a non-verifier workspace artifact + ONE owner in the validated plan (``production_owner_authority``).
 ``expectation_invalid`` spends the subject's one regeneration (run + unit + path). ``cannot_decide`` and no decision establish nothing.
 """
@@ -39,6 +41,8 @@ from kriya.policy.approval import (
     VerifierSemanticDecision,
     VerifierSemanticSubject,
     ask_verifier_semantic,
+    failing_expectations_identity,
+    verifier_semantic_failing_expectations,
     verifier_semantic_matches,
 )
 
@@ -96,6 +100,7 @@ class ExecutedVerifier:
     source: str
     identities: Tuple[str, ...]                # executed identities this file declares
     failed_identities: Tuple[str, ...]         # those reported failed or errored
+    failure_details: Tuple[Tuple[str, str], ...] = ()   # (failed identity, the structured report's own detail) where the report carries one
 
 
 @dataclass(frozen=True)
@@ -158,6 +163,10 @@ def derive_executed_verifiers(report: Optional[Mapping[str, Any]], authored: Map
     cases = [case for case in report.get("test_cases") or () if isinstance(case, Mapping) and isinstance(case.get("identity"), str)]
     executed = {case["identity"] for case in cases}
     failed = {case["identity"] for case in cases if case.get("status") in _FAILING_STATUSES}
+    details: Dict[str, str] = {}               # the first reported detail of each failing identity (the report's own text, never derived)
+    for case in cases:
+        if case.get("status") in _FAILING_STATUSES and isinstance(case.get("detail"), str) and case["detail"]:
+            details.setdefault(case["identity"], case["detail"])
     declared: Dict[str, List[str]] = {}
     sources: Dict[str, Tuple[bytes, str]] = {}
     unreadable: List[str] = []
@@ -199,7 +208,8 @@ def derive_executed_verifiers(report: Optional[Mapping[str, Any]], authored: Map
             by_file.setdefault(paths[0], []).append(identity)
     verifiers = tuple(
         ExecutedVerifier(path=path, sha256=hashlib.sha256(sources[path][0]).hexdigest(), source=sources[path][1],
-                         identities=tuple(sorted(identities)), failed_identities=tuple(sorted(i for i in identities if i in failed)))
+                         identities=tuple(sorted(identities)), failed_identities=tuple(sorted(i for i in identities if i in failed)),
+                         failure_details=tuple((i, details[i]) for i in sorted(identities) if i in failed and i in details))
         for path, identities in sorted(by_file.items()))
     return VerifierDerivation(verifiers=verifiers, complete=True, ambiguous=tuple(ambiguous), unreadable=tuple(unreadable), unmapped=tuple(unmapped))
 
@@ -228,10 +238,26 @@ class VerifierSemanticLedger:
 
     def __init__(self) -> None:
         self._valid: Dict[str, str] = {}         # semantic_authority_fingerprint -> the review fingerprint whose decision established it
+        # VERIFIER-SEMANTIC-FAILING-EXPECTATION-001: what each valid decision was SHOWN. A decision on a passing verifier covers the content as
+        # before (``_valid_while_passing``); one on a failing verifier covers the failing set it was bound to (``_valid_failures``: the bound
+        # failure identity, and the shown identities when the report named them).
+        self._valid_while_passing: set = set()
+        self._valid_failures: Dict[str, List[Tuple[Optional[str], frozenset]]] = {}
         self.allowance = VerifierSemanticAllowance()
 
     def expectation_valid(self, subject: VerifierSemanticSubject) -> bool:
-        return subject.semantic_authority_fingerprint in self._valid
+        """Does an earlier ``expectation_valid`` decision cover ``subject`` as it is now? The exact content must have been accepted. A passing
+        subject needs nothing more (a verifier that went from failing to passing expects what it expected). A FAILING subject is covered only
+        when the content was accepted while passing, or every expectation failing now was shown to a decision made while it failed: the same
+        bound failure identity, or - when both reviews name their failing identities - a subset of an accepted set. Anything else is asked."""
+        key = subject.semantic_authority_fingerprint
+        if key not in self._valid:
+            return False
+        if subject.review_phase != REVIEW_PHASE_FAILING or key in self._valid_while_passing:
+            return True
+        now = frozenset(identity for identity, _detail in subject.failing_expectations)
+        return any(subject.failure_identity == accepted_identity or (now and shown and now <= shown)
+                   for accepted_identity, shown in self._valid_failures.get(key, ()))
 
     def before_asking(self, subject: VerifierSemanticSubject, *, attended: bool) -> SubjectDecision:
         path = _subject_path(subject)
@@ -251,7 +277,13 @@ class VerifierSemanticLedger:
         if not verifier_semantic_matches(decision, subject_now):
             return SubjectDecision(Action.NEEDS_REVIEW, path, REASON_DECISION_STALE, "a binding of the review changed while it was being decided")
         if decision.valid:
-            self._valid[subject_now.semantic_authority_fingerprint] = decision.fingerprint or ""
+            key = subject_now.semantic_authority_fingerprint
+            self._valid[key] = decision.fingerprint or ""
+            if subject_now.review_phase == REVIEW_PHASE_FAILING:
+                self._valid_failures.setdefault(key, []).append(
+                    (subject_now.failure_identity, frozenset(identity for identity, _detail in subject_now.failing_expectations)))
+            else:
+                self._valid_while_passing.add(key)
             return SubjectDecision(Action.PROCEED, path)
         if decision.invalid:
             # VERIFIER-REGENERATION-BLIND-001: a regeneration with nothing to correct is not performed. Decided BEFORE the allowance is taken, so an
@@ -532,7 +564,8 @@ class UnitSemantics:
                 merged[verifier.path] = verifier if known is None else ExecutedVerifier(
                     path=verifier.path, sha256=verifier.sha256, source=verifier.source,
                     identities=tuple(sorted(set(known.identities) | set(verifier.identities))),
-                    failed_identities=tuple(sorted(set(known.failed_identities) | set(verifier.failed_identities))))
+                    failed_identities=tuple(sorted(set(known.failed_identities) | set(verifier.failed_identities))),
+                    failure_details=tuple(sorted({**dict(verifier.failure_details), **dict(known.failure_details)}.items())))
         return [merged[path] for path in sorted(merged)], sorted(set(unknown))
 
     def _subject(self, verifier: ExecutedVerifier, outcome: str) -> VerifierSemanticSubject:
@@ -542,8 +575,19 @@ class UnitSemantics:
             goal_digest=hashlib.sha256((self.goal or "").encode("utf-8", errors="replace")).hexdigest(),
             verification_contract_digest=self.verification_contract_digest, acceptance_criteria=self.acceptance_criteria, invariants=self.invariants,
             review_phase=REVIEW_PHASE_FAILING if failing else REVIEW_PHASE_PASSING,
-            failure_identity=(hashlib.sha256("\n".join(verifier.failed_identities).encode("utf-8")).hexdigest() if failing else None),
-            contract_text=self.goal, verifier_sources=((verifier.path, verifier.source),), outcome=(outcome or "")[:_OUTCOME_MAX_CHARS])
+            failure_identity=(failing_expectations_identity(verifier.failed_identities) if failing else None),
+            contract_text=self.goal, verifier_sources=((verifier.path, verifier.source),), outcome=(outcome or "")[:_OUTCOME_MAX_CHARS],
+            failing_expectations=verifier_semantic_failing_expectations(verifier.failed_identities, dict(verifier.failure_details)))
+
+    def executed_outcomes(self, written: Iterable[str]) -> List[Dict[str, Any]]:
+        """OWNER-REPAIR-REGRESSION-001: the per-test outcome of every run-authored verifier this attempt's test gates executed, for the enforce
+        loop's comparison of one verifier before and after an owner repair - {path, sha256 of the exact bytes, executed identities, failed
+        identities}. [] when an executed case's provenance is unknown: an outcome that cannot be attributed exactly is not reported."""
+        verifiers, unknown = self._derive(list(written))
+        if unknown:
+            return []
+        return [{"path": verifier.path, "sha256": verifier.sha256, "identities": list(verifier.identities),
+                 "failed_identities": list(verifier.failed_identities)} for verifier in verifiers]
 
     def _stop(self, reason_code: str, path: str, detail: str) -> GateRuling:
         return GateRuling(stop=SubjectDecision(Action.NEEDS_REVIEW, path, reason_code, detail))

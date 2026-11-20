@@ -45,6 +45,18 @@ REPLAY_REFUSAL_CODES = (REPLAY_PLAN_CHANGED, REPLAY_GOAL_CHANGED, REPLAY_CONTRAC
 # The typed stop of a replay whose gates failed: the unit has no authority to rewrite the carried verifier, so no further attempt can change it.
 VERIFIER_REPLAY_FAILED = "VERIFIER_REPLAY_FAILED_OWNER_REPAIR_NOT_VERIFIED"
 
+# OWNER-REPAIR-REGRESSION-001 (Stage C run 20261119T200403-218cbbf6, owner ruling 2026-11-19). MEASURED: an owner repair made to satisfy one
+# failing test of an accepted verifier turned ANOTHER test of the same verifier bytes, which had passed before the repair, red. The loop kept
+# the repaired bytes in the candidate tree and every later step ran on them. A replay that fails is evidence against the repair; a replay in
+# which a previously PASSING test of the same bytes now fails is deterministic proof that the repair broke accepted behaviour: the repair is
+# refused, the owner's exact pre-repair bytes are put back through the owner unit's own candidate path, and the recovery episode stops.
+# A replay that fails differently WITHOUT such a regression keeps the routing above (the new evidence goes back to the owner).
+OWNER_REPAIR_REGRESSED = "OWNER_REPAIR_REGRESSED_ACCEPTED_VERIFIER"                    # refused; the pre-repair owner bytes were restored exactly
+OWNER_REPAIR_REGRESSED_RESTORE_UNAVAILABLE = "OWNER_REPAIR_REGRESSED_RESTORE_UNAVAILABLE"   # refused; the pre-repair bytes could NOT be restored
+OWNER_REPAIR_REGRESSION_CODES = (OWNER_REPAIR_REGRESSED, OWNER_REPAIR_REGRESSED_RESTORE_UNAVAILABLE)
+OWNER_REPAIR_REGRESSION_FAILURE_CATEGORY = "owner_repair_regressed"                    # the run's failure category for either code
+OWNER_REPAIR_RESTORE_ROLE = "owner_repair_restore"                                     # the execution role of the one restoring invocation
+
 # What the consumer is told when it runs after an owner repair. The owner is NOT verified at this point: only its own gates accepted it.
 DEPENDENT_VERIFICATION_PENDING_CONTEXT = (
     "--- upstream owner repair locally accepted; dependent verification pending ---\n"
@@ -74,10 +86,20 @@ class RefusedCandidate:
     binding_digest: Optional[str]
     failure_type: Optional[str]
     failure_digest: Optional[str]
+    # OWNER-REPAIR-REGRESSION-001: (path, executed test identities, failed test identities) for those of ``files`` the refusing gate's
+    # structured report attributed tests to, for exactly the carried bytes. () = no exact per-test outcome is known (nothing is inferred).
+    test_outcomes: Tuple[Tuple[str, Tuple[str, ...], Tuple[str, ...]], ...] = ()
 
     @property
     def paths(self) -> Tuple[str, ...]:
         return tuple(file.path for file in self.files)
+
+    def passed_tests(self) -> frozenset:
+        """(path, identity) of every test of these bytes that executed and did not fail."""
+        return frozenset((path, identity) for path, executed, failed in self.test_outcomes for identity in executed if identity not in failed)
+
+    def failed_tests(self) -> frozenset:
+        return frozenset((path, identity) for path, _executed, failed in self.test_outcomes for identity in failed)
 
 
 def failure_identity(failure_type: Optional[str], raw_output: Optional[str]) -> Optional[str]:
@@ -87,7 +109,19 @@ def failure_identity(failure_type: Optional[str], raw_output: Optional[str]) -> 
     return hashlib.sha256(f"{failure_type or ''}\n{raw_output or ''}".encode("utf-8", errors="replace")).hexdigest()
 
 
-def capture_refused_candidate(state: Any, worktree_path: str) -> Optional[RefusedCandidate]:
+def regressed_tests(before: Optional[RefusedCandidate], after: Optional[RefusedCandidate]) -> Tuple[str, ...]:
+    """OWNER-REPAIR-REGRESSION-001: the test identities that PASSED when ``before`` was refused and FAIL in ``after``, as ``path::identity``.
+    Only when both are the SAME verifier bytes (every path, every digest) and both carry per-test outcomes; otherwise () - an unknown or
+    inexact comparison establishes nothing and the existing routing stands."""
+    if before is None or after is None or not before.test_outcomes or not after.test_outcomes:
+        return ()
+    same = {file.path: file.raw_sha256 for file in before.files} == {file.path: file.raw_sha256 for file in after.files}
+    if not same or not before.files:
+        return ()
+    return tuple(sorted(f"{path}::{identity}" for path, identity in before.passed_tests() & after.failed_tests()))
+
+
+def capture_refused_candidate(state: Any, worktree_path: str, outcomes: Optional[Iterable[Mapping[str, Any]]] = None) -> Optional[RefusedCandidate]:
     """The refused candidate of a unit that is stopping, read from its sandbox before the sandbox is removed. None unless EVERY written file is
     captured exactly (strict UTF-8, no newline translation: the PRD-008 rule for a reusable candidate) and its bytes still have the raw digest
     candidate authority recorded when it staged them. A deletion, a file that is gone, or any difference yields None: nothing partial is carried."""
@@ -110,10 +144,17 @@ def capture_refused_candidate(state: Any, worktree_path: str) -> Optional[Refuse
         files.append(CarriedFile(relpath, content, staged_digest))
     last_failure = getattr(state, "last_failure", None)
     binding = getattr(state, "verified_candidate_binding", None)
+    # OWNER-REPAIR-REGRESSION-001: ``outcomes`` is the semantic policy owner's per-test report of this attempt (UnitSemantics.executed_outcomes).
+    # Only an outcome of exactly a captured file's bytes is kept.
+    captured = {file.path: file.raw_sha256 for file in files}
+    test_outcomes = tuple(sorted(
+        (str(item["path"]), tuple(sorted(item.get("identities") or ())), tuple(sorted(item.get("failed_identities") or ())))
+        for item in (outcomes or ()) if captured.get(item.get("path")) == item.get("sha256")))
     return RefusedCandidate(
         files=tuple(files), binding_digest=getattr(binding, "digest", None),
         failure_type=getattr(last_failure, "type", None),
         failure_digest=failure_identity(getattr(last_failure, "type", None), getattr(last_failure, "raw_output", None)),
+        test_outcomes=test_outcomes,
     )
 
 
@@ -158,9 +199,18 @@ class ReplayHandle:
             return REPLAY_BYTES_MISMATCH
         return None
 
-    def generated_files(self) -> List[Dict[str, str]]:
-        """The carried files in the shape the attempt's write path takes for model output."""
-        return [{"filepath": file.path, "content": file.content} for file in self.candidate.files]
+    def generated_files(self) -> List[Dict[str, Any]]:
+        """The carried files in the shape the attempt's write path takes for model output.
+
+        CARRIED-CANDIDATE-WHOLE-FILE-AUTHORITY-001 (owner ruling 2026-11-19; MEASURED in ~/kriya-stage-c/c6-prep/check.v1: the owner unit
+        refused its own pre-repair bytes with "a full-file replacement was returned, but this file's context ... was not authoritative").
+        The whole-file authority rule (VAL-001 G1 D1-A, candidate_transaction._validate_actual_mutation_authority) judges the shape a MODEL
+        returned for a file that exists. Carried bytes are not a model answer: they are this unit's own earlier exact bytes, bound by raw
+        digest, and held to that digest again after staging (attempt._require_the_staged_candidate_is_the_carried_one). Each entry
+        therefore carries the existing marker of Kriya-carried content (the key ``attempt.run_attempt`` sets on its own carried-forward
+        entries and ``candidate_transaction._check_operation_contracts`` reads - its one consumer). No model path can set it: every
+        Developer entry is rebuilt with a fixed key set (agents/agent.py). Write scope, review, approval and every gate are unchanged."""
+        return [{"filepath": file.path, "content": file.content, "_kriya_carried_forward_content": True} for file in self.candidate.files]
 
     def expected_digests(self) -> Dict[str, str]:
         return {file.path: file.raw_sha256 for file in self.candidate.files}

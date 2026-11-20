@@ -95,9 +95,16 @@ from kriya.workflow.verifier_repair import (
 )
 from kriya.workflow.verifier_replay import (
     DEPENDENT_VERIFICATION_PENDING_CONTEXT,
+    OWNER_REPAIR_REGRESSED,
+    OWNER_REPAIR_REGRESSED_RESTORE_UNAVAILABLE,
+    OWNER_REPAIR_REGRESSION_FAILURE_CATEGORY,
+    OWNER_REPAIR_RESTORE_ROLE,
     REPLAY_BYTES_MISMATCH,
+    CarriedFile,
+    RefusedCandidate,
     ReplayHandle,
     failure_identity,
+    regressed_tests,
     replay_facts_block,
 )
 from kriya.workflow.verifier_replay import goal_digest as replay_goal_digest
@@ -1868,6 +1875,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         verifier_repair_asked = False
         verifier_repair_record: Optional[Dict[str, Any]] = None
         verifier_repair_stop: Optional[Dict[str, Any]] = None
+        # OWNER-REPAIR-REGRESSION-001 (kriya/workflow/verifier_replay.py): per consumer unit, the refused verifier candidate of the recovery
+        # episode as it was BEFORE the first owner reopen (its per-test outcomes against the unrepaired owner); the record of a refused
+        # regressive repair for the run's result; and the typed stop that ends the run when one was refused.
+        pre_repair_verifiers: Dict[str, RefusedCandidate] = {}
+        owner_repair_regression_record: Optional[Dict[str, Any]] = None
+        owner_repair_regression_stop: Optional[Dict[str, Any]] = None
         # VERIFIER-SEMANTIC-AUTHORITY-001 (kriya/workflow/verifier_semantic.py): the run's ONE generated-verifier semantic ledger. Every unit
         # invocation of this run receives it; none builds its own.
         verifier_semantic_ledger = VerifierSemanticLedger()
@@ -2184,6 +2197,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         def _drop_pre_repair_owner(consumer_id: str) -> None:
             """The consumer's recovery episode is over (settled, refused or exhausted): its O0 goes with it."""
             pre_repair_owners.pop(consumer_id, None)
+            pre_repair_verifiers.pop(consumer_id, None)
             verifier_repair_ineligible.discard(consumer_id)
 
         def _capture_pre_repair_owner(
@@ -2194,6 +2208,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             the owner's implicated files, checked against the repository's file-revision authority, bound to the consumer's refused candidate
             (V0). A later reopen keeps that O0 (it is the state the verifier first refused); anything that makes it inexact - no refused
             candidate to bind, an unreadable file, a second owner, a wider path set - ends the episode's eligibility instead of guessing."""
+            first_refused = replay_handles.get(consumer.id)
+            if first_refused is not None:
+                # OWNER-REPAIR-REGRESSION-001: V0's outcome against the UNREPAIRED owner, kept from the episode's first reopen on
+                pre_repair_verifiers.setdefault(consumer.id, first_refused.candidate)
             if consumer.id in verifier_repair_ineligible:
                 return
             existing = pre_repair_owners.get(consumer.id)
@@ -2215,6 +2233,94 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 verifier_repair_ineligible.add(consumer.id)
                 return
             pre_repair_owners[consumer.id] = captured
+
+        async def _refuse_regressive_owner_repair(
+            consumer: Subtask, regressed: Sequence[str], group_records: Sequence[Dict[str, Any]],
+            fold_forward: Callable[[str, int, Dict[str, Any]], None],
+        ) -> None:
+            """OWNER-REPAIR-REGRESSION-001. The replayed verifier - the same bytes - now FAILS tests that passed before the owner was repaired
+            (``regressed``). The repair is refused whatever else is true. When the episode holds the exact pre-repair bytes (O0) of the ONE
+            owner that reran, they are put back through that owner unit's own candidate path (the carried-candidate seam a resume replay
+            uses: staged by the candidate writer, the unit's own review, approval and gates, no Developer call; this loop writes nothing).
+            Only bytes that then have exactly O0's digests count as restored: the dependents the reopen invalidated get their states and
+            results back (their evidence describes these bytes again) and the restored source is folded forward. The episode then ENDS with
+            a typed stop. When nothing exact can be restored the stop says so, and the refused bytes are never reported as accepted."""
+            nonlocal control_state, owner_repair_regression_record, owner_repair_regression_stop
+            pre_repair = pre_repair_owners.get(consumer.id)
+            reran = [record for record in group_records if record.get("owner_reran")]
+            record: Dict[str, Any] = {
+                "subtask_id": consumer.id, "regressed_tests": list(regressed), "restored": False,
+                "owner_subtask_id": pre_repair.owner_id if pre_repair is not None else None,
+                "pre_repair_owner_files": dict(pre_repair.digests()) if pre_repair is not None else {},
+            }
+            owner_repair_regression_record = record
+            unavailable: Optional[str] = None
+            if pre_repair is None:
+                unavailable = "no exact pre-repair owner bytes were captured for this recovery episode"
+            elif len(reran) != 1 or reran[0]["owner_id"] != pre_repair.owner_id:
+                unavailable = "the repair cycle did not rerun exactly the one owner whose pre-repair bytes were captured"
+            elif not all(file.intact() for file in pre_repair.files):
+                unavailable = "the captured pre-repair owner bytes no longer have their recorded digests"
+            else:
+                owner_record, owner_id = reran[0], pre_repair.owner_id
+                owner = next((stage for stage in plan.subtasks if stage.id == owner_id), None)
+                try:
+                    carried = tuple(CarriedFile(file.path, file.data.decode("utf-8"), file.raw_sha256) for file in pre_repair.files)
+                except UnicodeDecodeError:
+                    carried = ()
+                restore_handle = ReplayHandle(
+                    run_id=run_id, plan_hash=current_plan_hash, unit_id=owner_id, goal_digest=replay_goal_digest(goal),
+                    verification_contract_digest=verification_contract.digest,
+                    candidate=RefusedCandidate(files=carried, binding_digest=None, failure_type=None, failure_digest=None),
+                )
+                refusal = None if owner is None else restore_handle.refusal(
+                    run_id=run_id, plan_hash=current_plan_hash, unit_id=owner_id, goal_digest=replay_goal_digest(goal),
+                    verification_contract_digest=verification_contract.digest, planned_paths=[pf.path for pf in owner.planned_files],
+                )
+                if owner is None or owner_id not in order:
+                    unavailable = "the captured owner is not a unit of the current plan"
+                elif refusal is not None:
+                    unavailable = f"the pre-repair owner bytes cannot be carried through the owner unit ({refusal})"
+                else:
+                    owner_position = order.index(owner_id) + 1
+                    deps.logger.warning(
+                        "OWNER_REPAIR_RESTORE_STARTED subtask=%s owner=%s paths=%s regressed=%s - the repair made a previously passing "
+                        "test of the same verifier fail; the owner's exact pre-repair bytes are staged through its own unit.",
+                        consumer.id, owner_id, sorted(pre_repair.paths), list(regressed),
+                    )
+                    restore_result = await _invoke_bounded_subtask(
+                        owner, owner_position, execution_role=OWNER_REPAIR_RESTORE_ROLE, carried_candidate=restore_handle,
+                    )
+                    replay_handles.pop(owner_id, None)       # the owner's carried bytes are never a verifier to replay
+                    now = {path: deps.read_file_revision(os.path.join(plan_workspace_path, path)) for path in pre_repair.paths}
+                    record["owner_files_after"] = dict(now)
+                    if enforce_unit_gates_accepted(restore_result) and now == dict(pre_repair.digests()):
+                        record["restored"] = True
+                        control_state = record_committed_effects(control_state, owner_id, restore_result)
+                        invalidation = owner_record.get("invalidation")
+                        if invalidation is not None:
+                            # the bytes the dependents' earlier evidence describes are back, exactly: the one existing undo
+                            _restore_invalidation(invalidation)
+                            owner_record["invalidated"] = []
+                        fold_forward(owner_id, owner_position, restore_result)
+                    else:
+                        unavailable = ("the owner unit did not accept its own pre-repair bytes, or the candidate tree does not hold "
+                                       "exactly those bytes afterwards")
+            code = OWNER_REPAIR_REGRESSED if record["restored"] else OWNER_REPAIR_REGRESSED_RESTORE_UNAVAILABLE
+            record["reason_code"] = code
+            reason = (
+                f"{code}: the owner repair made {len(regressed)} previously passing test(s) of the same verifier fail "
+                f"({', '.join(list(regressed)[:5])}). The repair is refused"
+                + (f"; the exact pre-repair bytes of {sorted(pre_repair.paths)} were restored" if record["restored"] and pre_repair is not None
+                   else f"; the pre-repair bytes could NOT be restored ({unavailable}) and the refused bytes are still in the candidate tree")
+                + ". The recovery episode stops for review: the failing expectation that reopened the owner and the expectation the "
+                  "repair broke cannot both be satisfied by this repair."
+            )
+            record["reason"] = reason
+            owner_repair_regression_stop = {"subtask_id": consumer.id, "call_result": {
+                "failure_category": OWNER_REPAIR_REGRESSION_FAILURE_CATEGORY, "environment_failure": reason,
+            }}
+            deps.logger.error("OWNER_REPAIR_REFUSED subtask=%s - %s", consumer.id, reason)
 
         async def _maybe_repair_verifier(
             consumer: Subtask, consumer_position: int, handle: ReplayHandle, replay_result: Mapping[str, Any], recovery_plan_id: str,
@@ -3873,6 +3979,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "cross_owner_obligation": cross_owner_obligation,
                         "owner_result": owner_result,
                         "owner_reran": True,
+                        "invalidation": invalidation,       # OWNER-REPAIR-REGRESSION-001: what an exact restore of this owner undoes
                     })
                     if not owner_local_accepted:
                         if not owner_undeclared and _stage_revisions(owner) == owner_bytes_before:
@@ -4008,12 +4115,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             else:
                                 call_result = replay_result
                                 verifier_replayed = True
-                                repaired_result = await _maybe_repair_verifier(
-                                    subtask, position, replay_handle, replay_result, exec_plan.id,
-                                    recovery_plan_generation_by_subtask.get(subtask.id, 0),
-                                )
-                                if repaired_result is not None:
-                                    call_result = repaired_result
+                                # OWNER-REPAIR-REGRESSION-001: decided BEFORE anything else reads this failure. A test of the same
+                                # verifier bytes that passed before the repair and fails now refuses the repair; no verifier repair
+                                # is offered for it and the failure is not sent back to the owner.
+                                replayed_now = replay_handles.get(subtask.id)
+                                regressed = () if enforce_unit_gates_accepted(replay_result) else regressed_tests(
+                                    pre_repair_verifiers.get(subtask.id), replayed_now.candidate if replayed_now is not None else None)
+                                if regressed:
+                                    await _refuse_regressive_owner_repair(
+                                        subtask, regressed, invoked_group_records, _fold_recovered_owner_forward)
+                                else:
+                                    repaired_result = await _maybe_repair_verifier(
+                                        subtask, position, replay_handle, replay_result, exec_plan.id,
+                                        recovery_plan_generation_by_subtask.get(subtask.id, 0),
+                                    )
+                                    if repaired_result is not None:
+                                        call_result = repaired_result
                         if not verifier_replayed:
                             call_result = await _invoke_bounded_subtask(
                                 subtask, position, recovery_context=pending_context,
@@ -4260,6 +4377,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 if verifier_repair_stop is not None:
                     # An authorized verifier repair was refused: the verifier is invalid by the operator's decision and there is no
                     # accepted replacement. Its failure is NOT new evidence against the owner; the episode ends here.
+                    break
+                if owner_repair_regression_stop is not None:
+                    # OWNER-REPAIR-REGRESSION-001: the repair was refused for breaking a previously passing test of the same verifier.
+                    # Reopening the owner again on this failure would ask it to satisfy both expectations at once; the episode ends.
                     break
                 next_scope_conflict = call_result.get("plan_scope_conflict") or {}
                 last_dependent_failure = call_result.get("last_failure") or {}
@@ -5107,7 +5228,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # short) and the consumer's own earlier result. The recovery itself stays on record in plan_recovery_events.
         # A refused authorized verifier repair is likewise what ended the run (kriya/workflow/verifier_repair.py); it is set once and no later
         # invocation follows it.
-        nested_stop = (verifier_repair_stop or recovery_invocation_stop) if knowledge_gap_break is None else None
+        nested_stop = ((verifier_repair_stop or owner_repair_regression_stop or recovery_invocation_stop)
+                       if knowledge_gap_break is None else None)
         stopping = nested_stop or (
             terminal_unit_stop if scope_conflict_result is None and knowledge_gap_break is None else None
         )
@@ -5130,6 +5252,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["advisory_reviews_not_performed"] = advisory_reviews_not_performed
         if plan_recovery_events:
             aggregated["plan_recovery_events"] = plan_recovery_events
+        if owner_repair_regression_record is not None:
+            # OWNER-REPAIR-REGRESSION-001: the refused regressive owner repair of this run and whether the pre-repair bytes were restored
+            aggregated["owner_repair_regression"] = owner_repair_regression_record
         if verifier_repair_record is not None:
             # the one authorization request of this run and what came of it (asked at most once; absent when nobody was asked)
             aggregated["verifier_repair"] = verifier_repair_record
