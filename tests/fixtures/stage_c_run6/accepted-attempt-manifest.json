@@ -1,0 +1,84 @@
+{
+ "run_id": "20261120T070741-bcce2d0b",
+ "kriya_commit": "09ede337219c42c8c4249bec73eb46b6c7126459",
+ "seal_head_digest": "sha256:e77efb373712ac6bb5f48a7e3f93af3716dc32085e369019a7e1ce701673bb05",
+ "records_sha256": "2291a4a1a4e74219a2364769356e568acb53c949cc414910326a20d1a30d82bf",
+ "rule": "last STAGED candidate.change 'after' blob per path within each PASSED unit's invocation; sha256(blob) == after_digest",
+ "entries": [
+  {
+   "unit": "s1",
+   "accepted": true,
+   "path": "pom.xml",
+   "sha256": "16e080e271cf11c46fb0df9c7201405d152511d2e242762a1ef524f7ca38cb41",
+   "bytes": 3182,
+   "record_seq": 34,
+   "attempt": 1,
+   "invocation_seq": 1
+  },
+  {
+   "unit": "s2",
+   "accepted": true,
+   "path": "src/main/resources/qpid-initial-config.json",
+   "sha256": "be8bd3208e6c64e604a24ff448495e8ae7d2d3d5ff31f8ef6d0ff720e12656bf",
+   "bytes": 837,
+   "record_seq": 168,
+   "attempt": 4,
+   "invocation_seq": 1
+  },
+  {
+   "unit": "s2",
+   "accepted": true,
+   "path": "src/main/resources/system.properties",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "bytes": 0,
+   "record_seq": 169,
+   "attempt": 4,
+   "invocation_seq": 1
+  },
+  {
+   "unit": "s3",
+   "accepted": true,
+   "path": "src/main/java/com/example/Protocol.java",
+   "sha256": "b7d88b71bb33294b7a9788155b3ed5de28dab6183d9f9ad19085e416243821bc",
+   "bytes": 948,
+   "record_seq": 229,
+   "attempt": 1,
+   "invocation_seq": 1
+  },
+  {
+   "unit": "s3",
+   "accepted": true,
+   "path": "src/main/java/com/example/ProtocolParser.java",
+   "sha256": "f6049d5001a4462157e8a22c2ac6245f95bc2757ab8c31b9a47310573da8ab13",
+   "bytes": 2459,
+   "record_seq": 230,
+   "attempt": 1,
+   "invocation_seq": 1
+  },
+  {
+   "unit": "s4",
+   "accepted": true,
+   "path": "src/main/java/com/example/ProtocolApplication.java",
+   "sha256": "7c59fc0f58788d3ea3f6e93207b840be7f7dc168b223a2507c97f1ea0b4960d7",
+   "bytes": 4889,
+   "record_seq": 285,
+   "attempt": 1,
+   "invocation_seq": 1
+  },
+  {
+   "unit": "s5",
+   "accepted": true,
+   "path": "src/test/java/com/example/ProtocolParserTest.java",
+   "sha256": "f5b3266c18cd70ffc00a7288b3a2a720046e09b07a94c1b2b94f7db23aef0b1c",
+   "bytes": 1177,
+   "record_seq": 340,
+   "attempt": 1,
+   "invocation_seq": 1
+  },
+  {
+   "unit": "s6",
+   "accepted": false,
+   "note": "unit did not pass: contributes nothing"
+  }
+ ]
+}

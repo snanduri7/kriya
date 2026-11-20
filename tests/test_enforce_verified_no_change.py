@@ -23,6 +23,7 @@ import asyncio
 import subprocess
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from _protocol_responses import sentinel, wants_structured
 
 from kriya.config import AppConfig
@@ -287,11 +288,11 @@ def _outcome(gate, success, output, attempt=2):
     return {"type": gate, "success": success, "output": output, "attempt": attempt}
 
 
-def _verify(plan, outcomes, attempt=2):
+def _verify(plan, outcomes, attempt=2, unit="s2"):
     from kriya.workflow.workflow import deterministic_gate_evidence
     result = {"deterministic_gate_evidence": deterministic_gate_evidence(outcomes, attempt),
-              "acceptance_coverage": unit_coverage_items(plan, "s2", outcomes, attempt)}
-    return verify_no_change_unit(plan, "s2", result)
+              "acceptance_coverage": unit_coverage_items(plan, unit, outcomes, attempt)}
+    return verify_no_change_unit(plan, unit, result)
 
 
 PYTEST_5 = "=================== 5 passed in 0.10s ==================="
@@ -332,6 +333,81 @@ def test_every_criterion_of_the_unit_counts_even_one_a_later_unit_also_claims():
     assert refusal["code"] == "ACCEPTANCE_COVERAGE_INCOMPLETE"
 
 
+
+
+# ------------------------------------------------------------ NO-CHANGE-RUNTIME-PROOF-OWNER-001: the one exception, at the predicate
+#
+# The rule above stands with one exception (Stage C runs 1 and 6): a criterion no tool can prove, that the plan's ownership rule places with
+# a later claimant, when a later claimant is a verification unit depending on this one that declares application-runtime verification.
+# Then the binding is NO_CHANGE_DEFERRED_TO_RUNTIME_VERIFIER - never VERIFIED_NO_CHANGE - and proves nothing.
+
+RUNTIME_VERIFICATION = {"type": "judgment", "description": "run it", "verifier_kind": "application_runtime", "requires_runtime_execution": True}
+TEST_VERIFICATION = {"type": "tool", "tool_name": "test", "description": "run the tests"}
+
+
+def _plan_with_verifier(*, criteria=(JUDGMENT_CRITERION,), unit_claims=("ac1",), verifier_claims=("ac1",), verifier_role="verification",
+                        verification=RUNTIME_VERIFICATION, verifier_depends=("s2",)):
+    """s1 changes the service, s2 (the unit under the predicate) is planned against the controller, s3 is the later unit."""
+    base = _plan(None).model_dump(mode="json")
+    base["acceptance_criteria"] = [dict(criterion) for criterion in criteria]
+    base["subtasks"][0]["acceptance_criteria_ids"] = []
+    base["subtasks"][1]["acceptance_criteria_ids"] = list(unit_claims)
+    base["subtasks"][1]["provides"] = ["controller_done"]
+    later = {"id": "s3", "description": "check it", "execution_method": "model", "depends_on": list(verifier_depends),
+             "requires": ["controller_done"] if "s2" in verifier_depends else ["cached"], "relevant_global_invariant_ids": ["gi1"],
+             "acceptance_criteria_ids": list(verifier_claims), "verification": [dict(verification)]}
+    if verifier_role == "verification":
+        later.update(execution_role="verification", planned_files=[])
+    else:
+        later.update(planned_files=[{"path": "shop/other.py", "action": "create"}], provides=["other"])
+    base["subtasks"].append(later)
+    return EngineeringPlan.model_validate(base)
+
+
+def test_a_runtime_criterion_owned_by_a_later_runtime_verifier_is_deferred_and_nothing_is_marked_proven():
+    binding, refusal = _verify(_plan_with_verifier(), [_outcome("compile", True, "ok"), _outcome("regression_test", True, PYTEST_5)])
+    assert refusal is None
+    assert binding == {"kind": "NO_CHANGE_DEFERRED_TO_RUNTIME_VERIFIER", "acceptance_coverage": [], "criteria": {"ac1": "UNCOVERED"},
+                       "deferred_to": {"ac1": "s3"}}
+
+
+@pytest.mark.parametrize("plan_kwargs", [
+    {"verifier_claims": ()},                                                    # no later claimant at all
+    {"verifier_claims": ("ac2",), "criteria": (JUDGMENT_CRITERION, {"id": "ac2", "description": "other", "method": "judgment"})},   # an unrelated criterion
+    {"verification": TEST_VERIFICATION},                                        # a later verification unit without application-runtime execution
+    {"verifier_role": "implementation", "verification": TEST_VERIFICATION},     # a later implementation unit (the rule this file already pins)
+    {"verifier_role": "implementation"},                                        # an implementation unit, even one declaring a runtime check
+    {"verifier_depends": ("s1",)},                                              # a runtime verifier that does not depend on this unit
+])
+def test_every_other_later_claimant_leaves_the_refusal_as_it_was(plan_kwargs):
+    binding, refusal = _verify(_plan_with_verifier(**plan_kwargs), [_outcome("compile", True, "ok"), _outcome("regression_test", True, PYTEST_5)])
+    assert binding is None and refusal["code"] == "ACCEPTANCE_COVERAGE_INCOMPLETE" and refusal["criteria"] == {"ac1": "UNCOVERED"}
+
+
+MIXED = (JUDGMENT_CRITERION, {"id": "ac2", "description": "the tests pass", "method": "tool", "tool_name": "test"})
+
+
+def test_mixed_criteria_keep_real_evidence_for_the_proven_one_and_leave_the_deferred_one_uncovered():
+    plan = _plan_with_verifier(criteria=MIXED, unit_claims=("ac1", "ac2"))
+    binding, refusal = _verify(plan, [_outcome("compile", True, "ok"), _outcome("regression_test", True, PYTEST_5)])
+    assert refusal is None and binding["kind"] == "NO_CHANGE_DEFERRED_TO_RUNTIME_VERIFIER"
+    assert binding["criteria"] == {"ac1": "UNCOVERED", "ac2": "PASS_WITH_TESTS"} and binding["deferred_to"] == {"ac1": "s3"}
+    assert [item["criterion_id"] for item in binding["acceptance_coverage"]] == ["ac2"]          # only what a gate really proved
+
+
+@pytest.mark.parametrize("outcomes,status", [
+    ([_outcome("regression_test", False, "=== 1 failed, 4 passed in 0.1s ===")], "FAILED"),     # a failed tool criterion is never deferred
+    ([_outcome("compile", True, "ok")], "UNCOVERED"),                                             # a tool criterion with no evidence is this unit's to prove
+])
+def test_a_tool_criterion_that_is_not_proven_refuses_the_unit_even_when_the_runtime_criterion_is_deferrable(outcomes, status):
+    plan = _plan_with_verifier(criteria=MIXED, unit_claims=("ac1", "ac2"), verifier_claims=("ac1", "ac2"))
+    binding, refusal = _verify(plan, outcomes)
+    assert binding is None and refusal["code"] == "ACCEPTANCE_COVERAGE_INCOMPLETE" and refusal["criteria"]["ac2"] == status
+
+
+def test_a_unit_with_no_criteria_is_still_refused_whatever_follows_it():
+    binding, refusal = _verify(_plan_with_verifier(unit_claims=()), [_outcome("compile", True, "ok")])
+    assert binding is None and refusal["code"] == "ACCEPTANCE_COVERAGE_UNAVAILABLE"
 
 
 UNCACHED_SERVICE = "def find_pet_types():\n    return ('cat', 'dog')\n"

@@ -4719,8 +4719,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # ENFORCE-VERIFIED-NO-CHANGE-001: the unit completed with
                     # no mutation, on deterministic evidence - recorded, never
                     # implied by an empty file list.
-                    else tuple(verification_reason_codes) + ("VERIFIED_NO_CHANGE",)
-                    if passed and call_result.get("completion_kind") == "VERIFIED_NO_CHANGE"
+                    else tuple(verification_reason_codes) + (str(call_result["completion_kind"]),)
+                    if passed and call_result.get("completion_kind") in ("VERIFIED_NO_CHANGE", "NO_CHANGE_DEFERRED_TO_RUNTIME_VERIFIER")
                     else verification_reason_codes
                 ),
             )

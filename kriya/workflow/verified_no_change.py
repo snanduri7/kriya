@@ -23,13 +23,17 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from kriya.workflow import milestone_completion as mc
-from kriya.workflow.plan_schema import EngineeringPlan
+from kriya.workflow.plan_schema import EngineeringPlan, ExecutionRole, RequirementOwnershipRelation
 
 VERIFIED_NO_CHANGE = mc.VERIFIED_NO_CHANGE
 VERIFIED_NO_CHANGE_REFUSED = "VERIFIED_NO_CHANGE_REFUSED"
 # ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (review F1): a direct goal whose every
 # file came back byte-identical, with no decider for "already satisfied".
 NO_CHANGE_UNVERIFIED = "NO_CHANGE_UNVERIFIED"
+# NO-CHANGE-RUNTIME-PROOF-OWNER-001 (Stage C runs 1 and 6): the unit changed
+# nothing and PROVED nothing; the plan's own later runtime-verification unit
+# is the one that must prove the criterion. Never VERIFIED_NO_CHANGE.
+NO_CHANGE_DEFERRED = "NO_CHANGE_DEFERRED_TO_RUNTIME_VERIFIER"
 
 # A criterion's tool -> the coverage kind milestone_completion's rule knows.
 _TOOL_COVERAGE_KIND = {
@@ -108,6 +112,32 @@ def unit_coverage_items(
     return items
 
 
+def runtime_proof_owner(plan: EngineeringPlan, subtask_id: str, criterion_id: str) -> Optional[str]:
+    """The later unit that must prove ``criterion_id`` by executing the
+    application, or None. Only for a criterion no tool can prove (a tool
+    criterion is this unit's own gates' to decide), that the plan's own
+    ownership rule (``classify_requirement_ownership``, the rule the stage
+    projection of the compliance gate already uses) places with a later
+    claimant, and only when such a claimant is a verification unit that
+    depends on this one and declares application-runtime verification - the
+    one verification the unit loop refuses to skip
+    (``runtime_verification_required``). No second ownership rule."""
+    criterion = next((item for item in plan.acceptance_criteria if item.id == criterion_id), None)
+    if criterion is None or criterion.tool_name:
+        return None
+    claimants = [st.id for st in plan.subtasks if criterion_id in st.acceptance_criteria_ids]
+    if plan.classify_requirement_ownership(subtask_id, claimants) != RequirementOwnershipRelation.FUTURE_ORDERED:
+        return None
+    for claimant in plan.subtasks:
+        if (claimant.id != subtask_id and criterion_id in claimant.acceptance_criteria_ids
+                and claimant.execution_role == ExecutionRole.VERIFICATION
+                and any(method.requires_application_runtime for method in claimant.verification)
+                and plan.classify_requirement_ownership(subtask_id, [claimant.id])
+                == RequirementOwnershipRelation.FUTURE_ORDERED):
+            return claimant.id
+    return None
+
+
 def verify_no_change_unit(
     plan: EngineeringPlan, subtask_id: str, result: Dict[str, Any],
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -116,11 +146,25 @@ def verify_no_change_unit(
     ``acceptance_coverage`` of the final attempt, the milestone result shape),
     else (None, typed refusal). Every criterion of the unit counts - a
     criterion a later unit also claims is still this unit's to prove when it
-    changes nothing."""
+    changes nothing, with ONE exception (NO-CHANGE-RUNTIME-PROOF-OWNER-001):
+    a criterion that only executing the application can prove and that the
+    plan gives to a later runtime-verification unit depending on this one
+    (``runtime_proof_owner``). When every criterion this unit did not prove
+    is of that kind, the binding is NO_CHANGE_DEFERRED: nothing is marked
+    proven, the named units must still run. A failed, unavailable or
+    test-less criterion, a criterion with no such owner and a unit with no
+    criteria are refused as before."""
     subtask = plan.subtask_by_id(subtask_id)
     criteria = list(subtask.acceptance_criteria_ids) if subtask is not None else []
     covered, statuses = mc.criterion_coverage(criteria, result)
     refusal = mc.coverage_refusal(statuses, unit="work unit")
     if refusal is not None:
-        return None, refusal
+        owners = {criterion: runtime_proof_owner(plan, subtask_id, criterion)
+                  for criterion, status in statuses.items() if status == mc.UNCOVERED}
+        unproven = [criterion for criterion, status in statuses.items()
+                    if status not in (mc.PASS_WITH_TESTS, mc.PASSED) and not owners.get(criterion)]
+        if not statuses or unproven:
+            return None, refusal
+        return {"kind": NO_CHANGE_DEFERRED, "acceptance_coverage": covered, "criteria": dict(statuses),
+                "deferred_to": {criterion: owner for criterion, owner in owners.items() if owner}}, None
     return {"kind": VERIFIED_NO_CHANGE, "acceptance_coverage": covered, "criteria": dict(statuses)}, None

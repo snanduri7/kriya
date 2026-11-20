@@ -1,0 +1,393 @@
+{
+ "acceptance_criteria": [
+  {
+   "description": "Maven project builds successfully with all required dependencies for Qpid Broker-J and JMS client",
+   "id": "ac1",
+   "method": "judgment",
+   "tool_name": null
+  },
+  {
+   "description": "ProtocolParser correctly encodes/decodes Protocol objects in the specified wire format, including proper handling of dataLength field",
+   "id": "ac2",
+   "method": "judgment",
+   "tool_name": null
+  },
+  {
+   "description": "Application successfully starts embedded broker, sends/receives message over AMQP 1.0, performs round-trip test and prints expected result line with field-by-field comparison",
+   "id": "ac3",
+   "method": "judgment",
+   "tool_name": null
+  }
+ ],
+ "extension_points": [],
+ "global_invariants": [
+  {
+   "id": "gi1",
+   "statement": "The application must use Java 17 and Maven for building and execution"
+  },
+  {
+   "id": "gi2",
+   "statement": "The embedded Apache Qpid Broker-J 9.2.1 must start on localhost port 5672 with AMQP 1.0 protocol support"
+  },
+  {
+   "id": "gi3",
+   "statement": "The JMS client must use Qpid JMS client 2.10.0 with Jakarta Messaging 3.1 API"
+  },
+  {
+   "id": "gi4",
+   "statement": "Protocol class must have protocolVersion, softwareVersion, dataLength, time and body fields with proper wire format encoding/decoding"
+  },
+  {
+   "id": "gi5",
+   "statement": "The application must be runnable via Maven with proper resource handling and lifecycle management"
+  }
+ ],
+ "integration_relationships": [],
+ "kind": "milestone",
+ "plan_id": "20261120T070741-bcce2d0b",
+ "refactor_baseline": null,
+ "subtasks": [
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Create Maven project structure with Java 17 target and required dependencies including Qpid Broker-J 9.2.1 and JMS client 2.10.0",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s1",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "create",
+     "environment_requirements": [
+      "java",
+      "maven"
+     ],
+     "path": "pom.xml",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "qpid-broker-j-dependencies",
+    "jms-client-dependencies",
+    "maven-build-configuration"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1",
+    "gi2",
+    "gi3"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify Maven project compiles successfully with all dependencies",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [
+    "s1"
+   ],
+   "description": "Create Qpid broker configuration file with proper JSON structure including virtual host nodes, ports, authentication providers and virtual host aliases for AMQP 1.0 protocol",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s2",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "create",
+     "environment_requirements": [],
+     "path": "src/main/resources/qpid-initial-config.json",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    },
+    {
+     "action": "create",
+     "environment_requirements": [],
+     "path": "src/main/resources/system.properties",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "broker-configuration-file"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi2"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "qpid-broker-j-dependencies"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify configuration file is valid JSON and contains required fields",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac2"
+   ],
+   "depends_on": [
+    "s1"
+   ],
+   "description": "Implement Protocol class with fields protocolVersion, softwareVersion, dataLength, time and body byte array, and ProtocolParser with encode/decode methods using the specified wire format",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s3",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "create",
+     "environment_requirements": [],
+     "path": "src/main/java/com/example/Protocol.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    },
+    {
+     "action": "create",
+     "environment_requirements": [],
+     "path": "src/main/java/com/example/ProtocolParser.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "protocol-class",
+    "protocol-parser"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi4"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "jms-client-dependencies"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify Protocol and ProtocolParser compile without errors",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac3"
+   ],
+   "depends_on": [
+    "s2",
+    "s3"
+   ],
+   "description": "Create main application class that starts embedded broker, creates sample protocol message, sends and receives via JMS over AMQP 1.0, performs round-trip test and prints results",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s4",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "create",
+     "environment_requirements": [],
+     "path": "src/main/java/com/example/ProtocolApplication.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": [
+      "broker-configuration-file",
+      "protocol-class",
+      "protocol-parser"
+     ]
+    }
+   ],
+   "provides": [
+    "main-application-class"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1",
+    "gi2",
+    "gi3",
+    "gi5"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "broker-configuration-file",
+    "protocol-class",
+    "protocol-parser"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify main application compiles successfully",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac2"
+   ],
+   "depends_on": [
+    "s3"
+   ],
+   "description": "Write JUnit test to verify ProtocolParser round-trip functionality with the sample protocol data",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s5",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "create",
+     "environment_requirements": [],
+     "path": "src/test/java/com/example/ProtocolParserTest.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": [
+      "protocol-parser"
+     ]
+    }
+   ],
+   "provides": [
+    "protocol-parser-test"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi4"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "protocol-parser"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify JUnit test compiles and runs successfully",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac3"
+   ],
+   "depends_on": [
+    "s1",
+    "s4"
+   ],
+   "description": "Configure Maven exec plugin to run the application with required JVM flags for embedded broker startup on JDK 17",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s6",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "create",
+     "environment_requirements": [
+      "maven"
+     ],
+     "path": "pom.xml",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": [
+      "maven-build-configuration"
+     ]
+    }
+   ],
+   "provides": [
+    "application-execution-configuration"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1",
+    "gi5"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "maven-build-configuration",
+    "main-application-class"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify Maven configuration allows successful application execution",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac3"
+   ],
+   "depends_on": [
+    "s4",
+    "s6"
+   ],
+   "description": "Run application to verify round-trip encoding/decoding works correctly, message is sent/received over AMQP 1.0, and proper result is printed",
+   "execution_method": "model",
+   "execution_role": "verification",
+   "id": "s7",
+   "ownership_justification": {},
+   "planned_files": [],
+   "provides": [],
+   "relevant_global_invariant_ids": [
+    "gi1",
+    "gi2",
+    "gi3",
+    "gi4",
+    "gi5"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "application-execution-configuration",
+    "main-application-class"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify application runs successfully and prints expected result line with correct protocol field values",
+     "requires_runtime_execution": true,
+     "tool_name": null,
+     "type": "judgment",
+     "verifier_kind": "application_runtime"
+    }
+   ]
+  }
+ ]
+}

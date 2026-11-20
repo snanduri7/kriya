@@ -737,10 +737,12 @@ def _settle_no_change_proposal(
         ))
         raise QualityGateFailure(failure)
     written = sorted(state.all_files_written)
+    # NO-CHANGE-RUNTIME-PROOF-OWNER-001: a deferred binding proves nothing - its own kind and event, never "verified".
+    deferred = binding["kind"] != VERIFIED_NO_CHANGE
     if not written:
-        state.completion_kind = VERIFIED_NO_CHANGE
+        state.completion_kind = binding["kind"]
     state.record_event(RunEvent(
-        kind="unit.verified_no_change", attempt=attempt, source="workflow",
+        kind="unit.no_change_deferred" if deferred else "unit.verified_no_change", attempt=attempt, source="workflow",
         authority=EventAuthority.AUTHORITATIVE,
         details={**binding, "subtask": subtask_id, "paths": list(state.no_change_proposal),
                  "partial": bool(written), "written_paths": written,

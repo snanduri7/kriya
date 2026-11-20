@@ -67,10 +67,11 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
                 run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None, init_git: bool = True,
                 on_tests: Optional[Callable[[Any], Dict[str, Any]]] = None, existing_workspace: Any = None,
                 execute_kwargs: Optional[Dict[str, Any]] = None, configure: Optional[Callable[[Any], None]] = None,
-                protocol_faithful: bool = False) -> Run:
+                protocol_faithful: bool = False, on_run: Optional[Callable[[Any, Any], Optional[Dict[str, Any]]]] = None) -> Run:
     """``units``: a source may be a callable (called once per Developer request of that unit). ``on_tests(validator)``: the tests gate's answer for that
     validator's tree (default: PASSING). ``existing_workspace``: run again in the workspace an earlier call created (a later run of the same work: nothing is
-    created or committed), with ``execute_kwargs`` passed to the controller (``resume=True``). ``configure(cfg)``: adjust the run's configuration."""
+    created or committed), with ``execute_kwargs`` passed to the controller (``resume=True``). ``configure(cfg)``: adjust the run's configuration.
+    ``on_run(validator, commands)``: the runtime executor's result for that validator's tree (a failing or hung application); None = the default success."""
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -166,6 +167,9 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
         if on_execute is not None:
             on_execute(commands)
         result = {"success": True, "returncode": 0, "output": app_output, "timed_out": False}
+        scripted = on_run(_self, commands) if on_run is not None else None      # the application's own outcome for this candidate tree (None = it ran and printed app_output)
+        if scripted is not None:
+            return scripted
         if record_steps:  # the executor's own per-command record (what ApplicationOutcome reads): argv, exit code, stdout, stderr
             result["steps"] = [{"command": list(c), "exit_code": 0, "stdout": app_output, "stderr": "", "timed_out": False} for c in commands]
         return result
